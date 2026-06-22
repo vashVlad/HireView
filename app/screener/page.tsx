@@ -1,54 +1,46 @@
 "use client";
 
 import { useState } from "react";
-import { Chip } from "@/components/Chip";
-import { CopyField } from "@/components/CopyField";
+import { ResumeUploader } from "@/components/ResumeUploader";
+import { ResultCard } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
-import type { JDAnalysis } from "@/lib/types";
+import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
 type ViewState = "form" | "loading" | "results";
 
-function FilterSection({ title, items }: { title: string; items: string[] }) {
-  if (items.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{title}</span>
-      <div className="flex flex-wrap gap-1.5">
-        {items.map((item) => (
-          <Chip key={item}>{item}</Chip>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export default function Home() {
+export default function ScreenerPage() {
   const [jobDescription, setJobDescription] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const [view, setView] = useState<ViewState>("form");
-  const [analysis, setAnalysis] = useState<JDAnalysis | null>(null);
+  const [results, setResults] = useState<CandidateResult[]>([]);
+  const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const canSubmit = jobDescription.trim().length > 0;
+  const canSubmit = jobDescription.trim().length > 0 && files.length > 0;
 
   async function handleSubmit() {
     if (!canSubmit) return;
     setFormError(null);
     setView("loading");
 
+    const formData = new FormData();
+    formData.set("jobDescription", jobDescription);
+    files.forEach((file) => formData.append("resumes", file));
+
     try {
-      const response = await fetch("/api/analyze-jd", {
+      const response = await fetch("/api/screen-resumes", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobDescription }),
+        body: formData,
       });
 
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.error ?? "Something went wrong while analyzing the job description.");
+        throw new Error(body?.error ?? "Something went wrong while screening resumes.");
       }
 
       const data = await response.json();
-      setAnalysis(data.analysis);
+      setResults(data.results ?? []);
+      setFileErrors(data.errors ?? []);
       setView("results");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Unknown error");
@@ -58,22 +50,24 @@ export default function Home() {
 
   function handleReset() {
     setView("form");
-    setAnalysis(null);
+    setResults([]);
+    setFileErrors([]);
+    setFiles([]);
   }
 
   return (
     <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
-      <SiteHeader active="/" />
+      <SiteHeader active="/screener" />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
         {view !== "results" && (
           <div className="flex flex-col gap-6">
             <div>
               <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-                Decode the role
+                Screen your candidates
               </h2>
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Paste a job description and get LinkedIn Recruiter filters and Boolean search strings, ready to paste.
+                Paste the job description, upload resumes, and let Claude rank your candidates.
               </p>
             </div>
 
@@ -86,10 +80,15 @@ export default function Home() {
                 value={jobDescription}
                 onChange={(e) => setJobDescription(e.target.value)}
                 placeholder="Paste the full job description here..."
-                rows={10}
+                rows={8}
                 disabled={view === "loading"}
                 className="w-full resize-none rounded-2xl border border-zinc-200 bg-white p-4 text-sm leading-relaxed text-zinc-800 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-violet-500/20"
               />
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Resumes</span>
+              <ResumeUploader files={files} onFilesChange={setFiles} />
             </section>
 
             {formError && (
@@ -107,24 +106,24 @@ export default function Home() {
               {view === "loading" ? (
                 <>
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  Analyzing job description...
+                  Screening {files.length} resume{files.length === 1 ? "" : "s"}...
                 </>
               ) : (
-                "Analyze job description"
+                <>Screen {files.length > 0 ? `${files.length} ` : ""}resume{files.length === 1 ? "" : "s"}</>
               )}
             </button>
           </div>
         )}
 
-        {view === "results" && analysis && (
+        {view === "results" && (
           <div className="flex flex-col gap-5">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-                  Sourcing brief
+                  Ranked candidates
                 </h2>
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                  Copy these straight into LinkedIn Recruiter&apos;s filters
+                  {results.length} candidate{results.length === 1 ? "" : "s"} scored against your job description
                 </p>
               </div>
               <button
@@ -132,55 +131,34 @@ export default function Home() {
                 onClick={handleReset}
                 className="shrink-0 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
               >
-                New analysis
+                New screening
               </button>
             </div>
 
-            <div className="flex flex-col gap-5 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-              <FilterSection title="Must-have skills" items={analysis.mustHaveSkills} />
-              <FilterSection title="Nice-to-have skills" items={analysis.niceToHaveSkills} />
-              <FilterSection title="Job titles" items={analysis.jobTitles} />
-              <CopyField label="Job titles (Boolean)" value={analysis.jobTitlesBoolean} />
-              <FilterSection title="Seniority (Corporate filter)" items={analysis.seniorityLevels} />
-              <FilterSection title="Job functions" items={analysis.jobFunctions} />
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                    Years of experience
+            {fileErrors.length > 0 && (
+              <div className="flex flex-col gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+                <span className="font-medium">
+                  Couldn&apos;t process {fileErrors.length} file{fileErrors.length === 1 ? "" : "s"}:
+                </span>
+                {fileErrors.map((e) => (
+                  <span key={e.fileName}>
+                    <span className="font-medium">{e.fileName}</span> — {e.error}
                   </span>
-                  <span className="text-sm text-zinc-600 dark:text-zinc-300">{analysis.yearsExperience}</span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                    Years in current position
-                  </span>
-                  <span className="text-sm text-zinc-600 dark:text-zinc-300">
-                    {analysis.yearsInCurrentPosition}
-                  </span>
-                </div>
+                ))}
               </div>
+            )}
 
-              <FilterSection title="Target / competitor companies" items={analysis.targetCompanies} />
-              <FilterSection title="Company size" items={analysis.companySize} />
-              <FilterSection title="Industries" items={analysis.industries} />
-
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Spotlights</span>
-                <div className="flex flex-wrap gap-1.5">
-                  <Chip variant="positive">✓ Open to work</Chip>
-                  <Chip variant="positive">✓ Past applicants</Chip>
-                </div>
-              </div>
-
-              <CopyField label="Keywords (Boolean — broad)" value={analysis.keywordsBooleanBroad} />
-              <CopyField label="Keywords (Boolean — tight)" value={analysis.keywordsBooleanTight} />
-
-              <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Why these terms</span>
-                <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{analysis.rationale}</p>
-              </div>
-            </div>
+            {results.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-zinc-200 px-6 py-10 text-center text-sm text-zinc-400 dark:border-zinc-800">
+                No candidates could be scored. Try uploading different files.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {results.map((result, index) => (
+                  <ResultCard key={result.fileName} result={result} rank={index + 1} />
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </main>

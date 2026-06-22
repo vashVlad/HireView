@@ -1,4 +1,5 @@
 import type { CandidateResult } from "@/lib/types";
+import { Chip } from "./Chip";
 import { ScoreBadge } from "./ScoreBadge";
 
 export function ResultCard({ result, rank }: { result: CandidateResult; rank: number }) {
@@ -21,20 +22,14 @@ export function ResultCard({ result, rank }: { result: CandidateResult; rank: nu
           {(result.strengths.length > 0 || result.concerns.length > 0) && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {result.strengths.map((strength) => (
-                <span
-                  key={strength}
-                  className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-                >
+                <Chip key={strength} variant="positive">
                   {strength}
-                </span>
+                </Chip>
               ))}
               {result.concerns.map((concern) => (
-                <span
-                  key={concern}
-                  className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
-                >
+                <Chip key={concern} variant="warning">
                   {concern}
-                </span>
+                </Chip>
               ))}
             </div>
           )}

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "HireView — Resume Screener",
-  description: "AI-powered resume screening against your job description.",
+  title: "HireView",
+  description: "AI-powered JD analysis and resume screening for recruiters.",
 };
 
 export default function RootLayout({
