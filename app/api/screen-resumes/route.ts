@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
+import { saveScreening } from "@/lib/screenings";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
+
+const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
+
+function resolveMimeType(file: File): string {
+  if (file.type) return file.type;
+  const extension = file.name.toLowerCase().split(".").pop() ?? "";
+  return MIME_TYPES_BY_EXTENSION[extension] ?? "application/octet-stream";
+}
 
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
@@ -28,7 +40,7 @@ export async function POST(request: NextRequest) {
 
   // Extract text for every resume first — this is local parsing, no API
   // calls, so it's free to fully parallelize.
-  const parsed: { fileName: string; text: string }[] = [];
+  const parsed: { fileName: string; text: string; buffer: Buffer; mimeType: string }[] = [];
   await Promise.all(
     files.map(async (file) => {
       if (!(file instanceof File)) return;
@@ -36,7 +48,12 @@ export async function POST(request: NextRequest) {
       try {
         const buffer = Buffer.from(await file.arrayBuffer());
         const resumeText = await extractResumeText(file.name, buffer);
-        parsed.push({ fileName: file.name, text: resumeText });
+        parsed.push({
+          fileName: file.name,
+          text: resumeText,
+          buffer,
+          mimeType: resolveMimeType(file),
+        });
       } catch (error) {
         errors.push({
           fileName: file.name,
@@ -46,12 +63,27 @@ export async function POST(request: NextRequest) {
     })
   );
 
-  async function score(fileName: string, text: string) {
+  async function score(resume: (typeof parsed)[number]) {
     try {
-      results.push(await scoreCandidate(jobDescription, fileName, text));
+      const result = await scoreCandidate(jobDescription, resume.fileName, resume.text);
+      results.push(result);
+
+      // Awaited (not fire-and-forget): Vercel can freeze the function as
+      // soon as the response is sent, which would silently drop an
+      // un-awaited write.
+      try {
+        await saveScreening({
+          result,
+          jobDescription,
+          resumeFile: resume.buffer,
+          resumeMimeType: resume.mimeType,
+        });
+      } catch (error) {
+        console.error("Failed to save screening history:", error);
+      }
     } catch (error) {
       errors.push({
-        fileName,
+        fileName: resume.fileName,
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
@@ -63,8 +95,8 @@ export async function POST(request: NextRequest) {
   // discounted cached rate. The rest can then run in parallel against a
   // warm cache.
   const [first, ...rest] = parsed;
-  if (first) await score(first.fileName, first.text);
-  await Promise.all(rest.map((resume) => score(resume.fileName, resume.text)));
+  if (first) await score(first);
+  await Promise.all(rest.map((resume) => score(resume)));
 
   results.sort((a, b) => b.score - a.score);
 

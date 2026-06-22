@@ -3,9 +3,10 @@ import Link from "next/link";
 const NAV_ITEMS = [
   { href: "/", label: "JD Analyzer" },
   { href: "/screener", label: "Resume Screener" },
-];
+  { href: "/history", label: "History" },
+] as const;
 
-export function SiteHeader({ active }: { active: "/" | "/screener" }) {
+export function SiteHeader({ active }: { active: (typeof NAV_ITEMS)[number]["href"] }) {
   return (
     <header className="border-b border-zinc-200/70 dark:border-zinc-800/70">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-5">

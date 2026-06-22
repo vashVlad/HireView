@@ -16,6 +16,19 @@ export interface ScreenResumesError {
   error: string;
 }
 
+export interface ScreeningRecord {
+  id: number;
+  candidateName: string;
+  fileName: string;
+  score: number;
+  summary: string;
+  strengths: string[];
+  concerns: string[];
+  jobDescription: string;
+  resumeMimeType: string;
+  createdAt: string;
+}
+
 export interface JDAnalysis {
   mustHaveSkills: string[];
   niceToHaveSkills: string[];
