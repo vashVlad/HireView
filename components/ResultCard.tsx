@@ -1,5 +1,6 @@
 import type { CandidateResult } from "@/lib/types";
-import { Chip } from "./Chip";
+import { InsightList } from "./InsightList";
+import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 
 export function ResultCard({ result, rank }: { result: CandidateResult; rank: number }) {
@@ -13,26 +14,17 @@ export function ResultCard({ result, rank }: { result: CandidateResult; rank: nu
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
               {result.candidateName}
             </h3>
+            <RecommendationBadge recommendation={result.recommendation} />
           </div>
           <p className="text-xs text-zinc-400 dark:text-zinc-500">{result.fileName}</p>
           <p className="mt-1.5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
             {result.summary}
           </p>
 
-          {(result.strengths.length > 0 || result.concerns.length > 0) && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {result.strengths.map((strength) => (
-                <Chip key={strength} variant="positive">
-                  {strength}
-                </Chip>
-              ))}
-              {result.concerns.map((concern) => (
-                <Chip key={concern} variant="warning">
-                  {concern}
-                </Chip>
-              ))}
-            </div>
-          )}
+          <div className="mt-3 flex flex-col gap-3">
+            <InsightList label="Strengths" items={result.strengths} variant="positive" />
+            <InsightList label="Concerns" items={result.concerns} variant="warning" />
+          </div>
         </div>
       </div>
     </li>

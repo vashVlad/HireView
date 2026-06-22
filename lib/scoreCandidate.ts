@@ -33,8 +33,14 @@ const SCORE_TOOL = {
         description:
           "The 2-4 most decision-relevant concerns only — not an exhaustive list. Missing market-standard keywords/skills for this type of role, weak company background, or experience that doesn't transfer well.",
       },
+      recommendation: {
+        type: "string",
+        enum: ["proceed", "decline"],
+        description:
+          "A clear final call: \"proceed\" if this candidate is worth moving forward with (e.g. an interview), \"decline\" if not. Make a real decision — don't hedge.",
+      },
     },
-    required: ["candidateName", "score", "summary", "strengths", "concerns"],
+    required: ["candidateName", "score", "summary", "strengths", "concerns", "recommendation"],
   },
 };
 
@@ -65,7 +71,7 @@ Consider:
 
 Use the job description as your starting point for what this specific role needs, but weigh it against the broader picture: the candidate's overall trajectory and what the market actually expects for this kind of position.
 
-Keep the summary, strengths, and concerns focused on only the points that would actually matter to a hiring decision — not a full inventory of everything on the resume.
+Keep the summary, strengths, and concerns focused on only the points that would actually matter to a hiring decision — not a full inventory of everything on the resume. Finish with a clear proceed-or-decline recommendation — the recruiter is relying on this call, so commit to one.
 
 JOB DESCRIPTION:
 ${jobDescription}`,

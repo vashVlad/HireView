@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
-import type { CandidateResult, ScreeningRecord } from "./types";
+import type { CandidateResult, Recommendation, ScreeningRecord } from "./types";
 
 interface ScreeningRow {
   id: number;
@@ -10,6 +10,7 @@ interface ScreeningRow {
   summary: string;
   strengths: string[];
   concerns: string[];
+  recommendation: Recommendation | null;
   job_description: string;
   resume_path: string;
   resume_mime_type: string;
@@ -25,6 +26,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     summary: row.summary,
     strengths: row.strengths,
     concerns: row.concerns,
+    recommendation: row.recommendation,
     jobDescription: row.job_description,
     resumeMimeType: row.resume_mime_type,
     createdAt: row.created_at,
@@ -53,6 +55,7 @@ export async function saveScreening(params: {
     summary: result.summary,
     strengths: result.strengths,
     concerns: result.concerns,
+    recommendation: result.recommendation,
     job_description: jobDescription,
     resume_path: resumePath,
     resume_mime_type: resumeMimeType,
@@ -66,7 +69,7 @@ export async function listScreenings(query?: string): Promise<ScreeningRecord[]>
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, summary, strengths, concerns, job_description, resume_mime_type, created_at"
+      "id, candidate_name, file_name, score, summary, strengths, concerns, recommendation, job_description, resume_mime_type, created_at"
     )
     .order("created_at", { ascending: false })
     .limit(200);

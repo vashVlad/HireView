@@ -1,3 +1,5 @@
+export type Recommendation = "proceed" | "decline";
+
 export interface CandidateResult {
   fileName: string;
   candidateName: string;
@@ -5,6 +7,7 @@ export interface CandidateResult {
   summary: string;
   strengths: string[];
   concerns: string[];
+  recommendation: Recommendation;
 }
 
 export interface ScreenResumesResponse {
@@ -24,6 +27,7 @@ export interface ScreeningRecord {
   summary: string;
   strengths: string[];
   concerns: string[];
+  recommendation: Recommendation | null;
   jobDescription: string;
   resumeMimeType: string;
   createdAt: string;

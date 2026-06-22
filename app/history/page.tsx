@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Chip } from "@/components/Chip";
+import { InsightList } from "@/components/InsightList";
+import { RecommendationBadge } from "@/components/RecommendationBadge";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
 import type { ScreeningRecord } from "@/lib/types";
@@ -97,9 +98,12 @@ export default function HistoryPage() {
                   >
                     <ScoreBadge score={screening.score} />
                     <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
-                      <span className="font-semibold text-zinc-900 dark:text-zinc-50">
-                        {screening.candidateName}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                          {screening.candidateName}
+                        </span>
+                        <RecommendationBadge recommendation={screening.recommendation} />
+                      </div>
                       <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">
                         {screening.fileName} · {formatDate(screening.createdAt)}
                       </span>
@@ -123,20 +127,10 @@ export default function HistoryPage() {
                         {screening.summary}
                       </p>
 
-                      {(screening.strengths.length > 0 || screening.concerns.length > 0) && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {screening.strengths.map((strength) => (
-                            <Chip key={strength} variant="positive">
-                              {strength}
-                            </Chip>
-                          ))}
-                          {screening.concerns.map((concern) => (
-                            <Chip key={concern} variant="warning">
-                              {concern}
-                            </Chip>
-                          ))}
-                        </div>
-                      )}
+                      <div className="flex flex-col gap-3">
+                        <InsightList label="Strengths" items={screening.strengths} variant="positive" />
+                        <InsightList label="Concerns" items={screening.concerns} variant="warning" />
+                      </div>
 
                       <details className="text-sm text-zinc-600 dark:text-zinc-300">
                         <summary className="cursor-pointer font-medium text-zinc-700 dark:text-zinc-200">
