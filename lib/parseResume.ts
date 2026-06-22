@@ -8,6 +8,20 @@ async function ensureDOMMatrixPolyfill() {
   (globalThis as unknown as { DOMMatrix: unknown }).DOMMatrix = DOMMatrixPolyfill;
 }
 
+// In Node, pdfjs-dist normally spins up its "fake worker" by dynamically
+// importing a relative "./pdf.worker.mjs" path next to its own module. That
+// relative import breaks once the file is bundled/traced (e.g. on Vercel),
+// throwing "Setting up fake worker failed". Pre-loading the worker module
+// onto globalThis.pdfjsWorker short-circuits that lookup entirely, since
+// pdfjs-dist checks for it before ever attempting the dynamic import.
+async function ensurePdfWorker() {
+  if (typeof (globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker !== "undefined") {
+    return;
+  }
+  const worker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  (globalThis as unknown as { pdfjsWorker: unknown }).pdfjsWorker = worker;
+}
+
 export async function extractResumeText(
   fileName: string,
   buffer: Buffer
@@ -16,6 +30,7 @@ export async function extractResumeText(
 
   if (extension === "pdf") {
     await ensureDOMMatrixPolyfill();
+    await ensurePdfWorker();
     const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
