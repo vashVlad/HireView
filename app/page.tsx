@@ -1,64 +1,171 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { ResumeUploader } from "@/components/ResumeUploader";
+import { ResultCard } from "@/components/ResultCard";
+import type { CandidateResult, ScreenResumesError } from "@/lib/types";
+
+type ViewState = "form" | "loading" | "results";
 
 export default function Home() {
+  const [jobDescription, setJobDescription] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [view, setView] = useState<ViewState>("form");
+  const [results, setResults] = useState<CandidateResult[]>([]);
+  const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const canSubmit = jobDescription.trim().length > 0 && files.length > 0;
+
+  async function handleSubmit() {
+    if (!canSubmit) return;
+    setFormError(null);
+    setView("loading");
+
+    const formData = new FormData();
+    formData.set("jobDescription", jobDescription);
+    files.forEach((file) => formData.append("resumes", file));
+
+    try {
+      const response = await fetch("/api/screen-resumes", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error ?? "Something went wrong while screening resumes.");
+      }
+
+      const data = await response.json();
+      setResults(data.results ?? []);
+      setFileErrors(data.errors ?? []);
+      setView("results");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Unknown error");
+      setView("form");
+    }
+  }
+
+  function handleReset() {
+    setView("form");
+    setResults([]);
+    setFileErrors([]);
+    setFiles([]);
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
+      <header className="border-b border-zinc-200/70 dark:border-zinc-800/70">
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-6 py-5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white shadow-md shadow-violet-500/30">
+            H
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+              HireView
+            </h1>
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">Resume screener</p>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+      </header>
+
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
+        {view !== "results" && (
+          <div className="flex flex-col gap-6">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                Screen your candidates
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Paste the job description, upload resumes, and let Claude rank your candidates.
+              </p>
+            </div>
+
+            <section className="flex flex-col gap-2">
+              <label htmlFor="jd" className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                Job description
+              </label>
+              <textarea
+                id="jd"
+                value={jobDescription}
+                onChange={(e) => setJobDescription(e.target.value)}
+                placeholder="Paste the full job description here..."
+                rows={8}
+                disabled={view === "loading"}
+                className="w-full resize-none rounded-2xl border border-zinc-200 bg-white p-4 text-sm leading-relaxed text-zinc-800 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-violet-500/20"
+              />
+            </section>
+
+            <section className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Resumes</span>
+              <ResumeUploader files={files} onFilesChange={setFiles} />
+            </section>
+
+            {formError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
+                {formError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit || view === "loading"}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-xl hover:shadow-violet-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+            >
+              {view === "loading" ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Screening {files.length} resume{files.length === 1 ? "" : "s"}...
+                </>
+              ) : (
+                <>Screen {files.length > 0 ? `${files.length} ` : ""}resume{files.length === 1 ? "" : "s"}</>
+              )}
+            </button>
+          </div>
+        )}
+
+        {view === "results" && (
+          <div className="flex flex-col gap-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                  Ranked candidates
+                </h2>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  {results.length} candidate{results.length === 1 ? "" : "s"} scored against your job description
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="shrink-0 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                New screening
+              </button>
+            </div>
+
+            {fileErrors.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+                Couldn&apos;t process {fileErrors.length} file{fileErrors.length === 1 ? "" : "s"}:{" "}
+                {fileErrors.map((e) => e.fileName).join(", ")}
+              </div>
+            )}
+
+            {results.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-zinc-200 px-6 py-10 text-center text-sm text-zinc-400 dark:border-zinc-800">
+                No candidates could be scored. Try uploading different files.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {results.map((result, index) => (
+                  <ResultCard key={result.fileName} result={result} rank={index + 1} />
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
