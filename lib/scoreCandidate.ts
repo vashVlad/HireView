@@ -42,18 +42,25 @@ export async function scoreCandidate(
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 1024,
-    tools: [SCORE_TOOL],
+    tools: [{ ...SCORE_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "submit_score" },
     messages: [
       {
         role: "user",
-        content: `You are screening resumes for a recruiter. Score this candidate against the job description below.
+        content: [
+          {
+            type: "text",
+            text: `You are screening resumes for a recruiter. Score each candidate against the job description below.
 
 JOB DESCRIPTION:
-${jobDescription}
-
-RESUME:
-${resumeText}`,
+${jobDescription}`,
+            cache_control: { type: "ephemeral" },
+          },
+          {
+            type: "text",
+            text: `RESUME:\n${resumeText}`,
+          },
+        ],
       },
     ],
   });
