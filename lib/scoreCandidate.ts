@@ -1,5 +1,5 @@
 import { getAnthropicClient, CLAUDE_MODEL } from "./anthropic";
-import type { CandidateResult } from "./types";
+import type { CalibrationExample, CandidateResult } from "./types";
 
 const SCORE_TOOL = {
   name: "submit_score",
@@ -44,23 +44,40 @@ const SCORE_TOOL = {
   },
 };
 
+function buildCalibrationBlock(calibrationExamples: CalibrationExample[]): string {
+  const examples = calibrationExamples
+    .map((example) => {
+      const verdict = example.label === "good" ? "ACCEPTABLE" : "NOT ACCEPTABLE";
+      const note = example.note ? `Recruiter's note: ${example.note}\n` : "";
+      return `EXAMPLE — marked ${verdict} by the recruiter\n${note}${example.extractedText}`;
+    })
+    .join("\n\n---\n\n");
+
+  return `The recruiter has provided example resumes to calibrate their bar for this kind of role. Use them only as a general signal for the recruiter's judgment and standards — not as literal templates the current candidate must match. A candidate doesn't need to resemble an "acceptable" example point-for-point, and differing from a "not acceptable" example isn't automatically a strength.
+
+${examples}`;
+}
+
 export async function scoreCandidate(
   jobDescription: string,
   fileName: string,
-  resumeText: string
+  resumeText: string,
+  calibrationExamples: CalibrationExample[] = []
 ): Promise<CandidateResult> {
-  const message = await getAnthropicClient().messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 1024,
-    tools: [{ ...SCORE_TOOL, cache_control: { type: "ephemeral" } }],
-    tool_choice: { type: "tool", name: "submit_score" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `You are screening resumes for a recruiter at a large company. This screening directly informs hiring decisions, so accuracy matters — be rigorous and evidence-based, and don't inflate or guess at qualifications the resume doesn't actually support.
+  const content: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [];
+
+  if (calibrationExamples.length > 0) {
+    content.push({
+      type: "text",
+      text: buildCalibrationBlock(calibrationExamples),
+      cache_control: { type: "ephemeral" },
+    });
+  }
+
+  content.push(
+    {
+      type: "text",
+      text: `You are screening resumes for a recruiter at a large company. This screening directly informs hiring decisions, so accuracy matters — be rigorous and evidence-based, and don't inflate or guess at qualifications the resume doesn't actually support.
 
 Evaluate each candidate's overall fit for the role — don't just check the resume against the job description line by line.
 
@@ -75,15 +92,20 @@ Keep the summary, strengths, and concerns focused on only the points that would 
 
 JOB DESCRIPTION:
 ${jobDescription}`,
-            cache_control: { type: "ephemeral" },
-          },
-          {
-            type: "text",
-            text: `RESUME:\n${resumeText}`,
-          },
-        ],
-      },
-    ],
+      cache_control: { type: "ephemeral" },
+    },
+    {
+      type: "text",
+      text: `RESUME:\n${resumeText}`,
+    }
+  );
+
+  const message = await getAnthropicClient().messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 1024,
+    tools: [{ ...SCORE_TOOL, cache_control: { type: "ephemeral" } }],
+    tool_choice: { type: "tool", name: "submit_score" },
+    messages: [{ role: "user", content }],
   });
 
   const toolUse = message.content.find((block) => block.type === "tool_use");

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { saveScreening } from "@/lib/screenings";
@@ -38,6 +39,9 @@ export async function POST(request: NextRequest) {
   const results: CandidateResult[] = [];
   const errors: ScreenResumesError[] = [];
 
+  // Best-effort: a calibration library issue shouldn't block screening.
+  const calibrationExamples = await listCalibrationExamples().catch(() => []);
+
   // Extract text for every resume first — this is local parsing, no API
   // calls, so it's free to fully parallelize.
   const parsed: { fileName: string; text: string; buffer: Buffer; mimeType: string }[] = [];
@@ -65,7 +69,12 @@ export async function POST(request: NextRequest) {
 
   async function score(resume: (typeof parsed)[number]) {
     try {
-      const result = await scoreCandidate(jobDescription, resume.fileName, resume.text);
+      const result = await scoreCandidate(
+        jobDescription,
+        resume.fileName,
+        resume.text,
+        calibrationExamples
+      );
       results.push(result);
 
       // Awaited (not fire-and-forget): Vercel can freeze the function as

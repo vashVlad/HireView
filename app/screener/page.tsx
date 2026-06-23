@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ResultCard } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -90,6 +91,8 @@ export default function ScreenerPage() {
               <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Resumes</span>
               <ResumeUploader files={files} onFilesChange={setFiles} />
             </section>
+
+            <CalibrationPanel />
 
             {formError && (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">

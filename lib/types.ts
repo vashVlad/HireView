@@ -33,6 +33,18 @@ export interface ScreeningRecord {
   createdAt: string;
 }
 
+export type CalibrationLabel = "good" | "bad";
+
+export interface CalibrationExample {
+  id: number;
+  label: CalibrationLabel;
+  note: string | null;
+  fileName: string;
+  resumeMimeType: string;
+  extractedText: string;
+  createdAt: string;
+}
+
 export interface JDAnalysis {
   mustHaveSkills: string[];
   niceToHaveSkills: string[];
