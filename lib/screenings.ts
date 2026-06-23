@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
-import type { CandidateResult, Recommendation, ScreeningRecord } from "./types";
+import type { CandidateResult, CandidateStatus, Recommendation, ScreeningRecord } from "./types";
 
 interface ScreeningRow {
   id: number;
@@ -11,6 +11,7 @@ interface ScreeningRow {
   strengths: string[];
   concerns: string[];
   recommendation: Recommendation | null;
+  status: CandidateStatus;
   job_description: string;
   resume_path: string;
   resume_mime_type: string;
@@ -27,6 +28,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     strengths: row.strengths,
     concerns: row.concerns,
     recommendation: row.recommendation,
+    status: row.status,
     jobDescription: row.job_description,
     resumeMimeType: row.resume_mime_type,
     createdAt: row.created_at,
@@ -63,13 +65,16 @@ export async function saveScreening(params: {
   if (insert.error) throw insert.error;
 }
 
-export async function listScreenings(query?: string): Promise<ScreeningRecord[]> {
+export async function listScreenings(
+  query?: string,
+  statuses?: CandidateStatus[]
+): Promise<ScreeningRecord[]> {
   const supabase = getSupabaseClient();
 
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, summary, strengths, concerns, recommendation, job_description, resume_mime_type, created_at"
+      "id, candidate_name, file_name, score, summary, strengths, concerns, recommendation, status, job_description, resume_mime_type, created_at"
     )
     .order("created_at", { ascending: false })
     .limit(200);
@@ -78,10 +83,24 @@ export async function listScreenings(query?: string): Promise<ScreeningRecord[]>
     request = request.ilike("candidate_name", `%${query.trim()}%`);
   }
 
+  if (statuses && statuses.length > 0) {
+    request = request.in("status", statuses);
+  }
+
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
 
   return (data ?? []).map(rowToRecord);
+}
+
+export async function updateScreeningStatus(
+  id: number,
+  status: CandidateStatus
+): Promise<void> {
+  const supabase = getSupabaseClient();
+
+  const { error } = await supabase.from("screenings").update({ status }).eq("id", id);
+  if (error) throw error;
 }
 
 export async function getScreeningResume(

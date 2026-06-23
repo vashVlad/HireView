@@ -1,5 +1,21 @@
 export type Recommendation = "proceed" | "decline";
 
+export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening";
+
+export const CANDIDATE_STATUSES: CandidateStatus[] = [
+  "new_applicant",
+  "recruiter_screen",
+  "contacted",
+  "screening",
+];
+
+export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
+  new_applicant: "New Applicant",
+  recruiter_screen: "Recruiter Screen",
+  contacted: "Contacted",
+  screening: "Screening",
+};
+
 export interface CandidateResult {
   fileName: string;
   candidateName: string;
@@ -28,6 +44,7 @@ export interface ScreeningRecord {
   strengths: string[];
   concerns: string[];
   recommendation: Recommendation | null;
+  status: CandidateStatus;
   jobDescription: string;
   resumeMimeType: string;
   createdAt: string;

@@ -5,7 +5,8 @@ import { InsightList } from "@/components/InsightList";
 import { RecommendationBadge } from "@/components/RecommendationBadge";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
-import type { ScreeningRecord } from "@/lib/types";
+import { StatusSelect } from "@/components/StatusSelect";
+import { CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS, type CandidateStatus, type ScreeningRecord } from "@/lib/types";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -16,12 +17,35 @@ function formatDate(iso: string) {
 
 export default function HistoryPage() {
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<CandidateStatus[]>([]);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  function toggleStatusFilter(status: CandidateStatus) {
+    setStatusFilter((prev) =>
+      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
+    );
+  }
+
+  async function handleStatusChange(id: number, status: CandidateStatus) {
+    const previous = screenings;
+    setScreenings((prev) => prev.map((s) => (s.id === id ? { ...s, status } : s)));
+    try {
+      const response = await fetch(`/api/history/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error("Failed to update status");
+    } catch {
+      setScreenings(previous);
+      setError("Couldn't update that candidate's status — try again.");
+    }
+  }
 
   async function handleDelete(id: number) {
     setDeletingId(id);
@@ -45,8 +69,13 @@ export default function HistoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const params = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
-        const response = await fetch(`/api/history${params}`, { signal: controller.signal });
+        const params = new URLSearchParams();
+        if (query.trim()) params.set("q", query.trim());
+        if (statusFilter.length > 0) params.set("status", statusFilter.join(","));
+        const search = params.toString();
+        const response = await fetch(`/api/history${search ? `?${search}` : ""}`, {
+          signal: controller.signal,
+        });
         if (!response.ok) throw new Error("Failed to load history");
         const data = await response.json();
         setScreenings(data.screenings ?? []);
@@ -63,7 +92,7 @@ export default function HistoryPage() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [query]);
+  }, [query, statusFilter]);
 
   return (
     <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
@@ -88,6 +117,26 @@ export default function HistoryPage() {
             className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-800 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-violet-500/20"
           />
 
+          <div className="flex flex-wrap items-center gap-2">
+            {CANDIDATE_STATUSES.map((status) => {
+              const active = statusFilter.includes(status);
+              return (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => toggleStatusFilter(status)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    active
+                      ? "border-violet-400 bg-violet-50 text-violet-700 dark:border-violet-500 dark:bg-violet-500/10 dark:text-violet-400"
+                      : "border-zinc-200 text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+                  }`}
+                >
+                  {CANDIDATE_STATUS_LABELS[status]}
+                </button>
+              );
+            })}
+          </div>
+
           {error && (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
               {error}
@@ -108,10 +157,16 @@ export default function HistoryPage() {
                   key={screening.id}
                   className="rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
                 >
-                  <button
-                    type="button"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setExpandedId(expanded ? null : screening.id)}
-                    className="flex w-full items-center gap-4 p-5 text-left"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        setExpandedId(expanded ? null : screening.id);
+                      }
+                    }}
+                    className="flex w-full cursor-pointer items-center gap-4 p-5 text-left"
                   >
                     <ScoreBadge score={screening.score} />
                     <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
@@ -125,6 +180,12 @@ export default function HistoryPage() {
                         {screening.fileName} · {formatDate(screening.createdAt)}
                       </span>
                     </div>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <StatusSelect
+                        status={screening.status}
+                        onChange={(status) => handleStatusChange(screening.id, status)}
+                      />
+                    </div>
                     <svg
                       width="18"
                       height="18"
@@ -136,7 +197,7 @@ export default function HistoryPage() {
                     >
                       <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                  </button>
+                  </div>
 
                   {expanded && (
                     <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
