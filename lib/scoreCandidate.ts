@@ -14,33 +14,27 @@ const SCORE_TOOL = {
       score: {
         type: "number",
         description:
-          "Overall fit score from 0-100, based on holistic experience and market fit for the role — not a literal JD checklist match.",
+          "0-100 score for how directly the resume's stated skills, experience, and qualifications match what the job description (and any calibration examples) ask for. This is a literal match score, not a judgment call about the candidate's overall career or potential.",
       },
       summary: {
         type: "string",
         description:
-          "A 2-3 sentence summary of the candidate's overall fit for the role — their trajectory and experience as a whole, not a line-by-line match against the JD.",
+          "1-2 sentences stating which requirements from the job description are and aren't matched by the resume. No commentary on career trajectory, company prestige, or market trends.",
       },
       strengths: {
         type: "array",
         items: { type: "string" },
         description:
-          "The 2-4 most decision-relevant strengths only — not an exhaustive list. Relevant experience and transferable skills, notable companies worked at, and market-standard keywords/skills for this type of role found in the resume.",
+          "2-4 specific skills, qualifications, or requirements from the job description that the resume directly matches.",
       },
       concerns: {
         type: "array",
         items: { type: "string" },
         description:
-          "The 2-4 most decision-relevant concerns only — not an exhaustive list. Missing market-standard keywords/skills for this type of role, weak company background, or experience that doesn't transfer well.",
-      },
-      recommendation: {
-        type: "string",
-        enum: ["proceed", "decline"],
-        description:
-          "A clear final call: \"proceed\" if this candidate is worth moving forward with (e.g. an interview), \"decline\" if not. Make a real decision — don't hedge.",
+          "2-4 specific skills, qualifications, or requirements from the job description that the resume is missing or only weakly shows.",
       },
     },
-    required: ["candidateName", "score", "summary", "strengths", "concerns", "recommendation"],
+    required: ["candidateName", "score", "summary", "strengths", "concerns"],
   },
 };
 
@@ -53,7 +47,7 @@ function buildCalibrationBlock(calibrationExamples: CalibrationExample[]): strin
     })
     .join("\n\n---\n\n");
 
-  return `The recruiter has provided example resumes to calibrate their bar for this kind of role. Use them only as a general signal for the recruiter's judgment and standards — not as literal templates the current candidate must match. A candidate doesn't need to resemble an "acceptable" example point-for-point, and differing from a "not acceptable" example isn't automatically a strength.
+  return `The recruiter has marked the following example resumes as an acceptable or not acceptable match for this kind of role. Treat them as a literal reference, alongside the job description, for which specific skills and qualifications should count as a match.
 
 ${examples}`;
 }
@@ -77,18 +71,9 @@ export async function scoreCandidate(
   content.push(
     {
       type: "text",
-      text: `You are screening resumes for a recruiter at a large company. This screening directly informs hiring decisions, so accuracy matters — be rigorous and evidence-based, and don't inflate or guess at qualifications the resume doesn't actually support.
+      text: `You are matching a resume against a job description for a recruiter. This is a literal match, not a holistic evaluation — score how well the resume's stated skills, experience, and qualifications match what the job description asks for.
 
-Evaluate each candidate's overall fit for the role — don't just check the resume against the job description line by line.
-
-Consider:
-- Their overall experience and career trajectory, and how well it would transfer to this role, even if past titles or industries don't match the JD exactly.
-- The companies they've worked for — their relevance, reputation, and what that signals about the caliber of work the candidate has been exposed to.
-- Market-standard skills and keywords for this type of role — based on what's generally expected for this position in the current job market, not only what's explicitly written in the JD below. A strong candidate may be missing something the JD asks for but cover other skills the market considers equally important for this role, or vice versa.
-
-Use the job description as your starting point for what this specific role needs, but weigh it against the broader picture: the candidate's overall trajectory and what the market actually expects for this kind of position.
-
-Keep the summary, strengths, and concerns focused on only the points that would actually matter to a hiring decision — not a full inventory of everything on the resume. Finish with a clear proceed-or-decline recommendation — the recruiter is relying on this call, so commit to one.
+Do not comment on the candidate's career trajectory, the companies they've worked for, or how their profile compares to broader market trends or other candidates. Only assess what's actually written in the resume against what's actually asked for in the job description${calibrationExamples.length > 0 ? " and the calibration examples above" : ""}. Don't inflate or guess at qualifications the resume doesn't explicitly support.
 
 JOB DESCRIPTION:
 ${jobDescription}`,
@@ -113,10 +98,11 @@ ${jobDescription}`,
     throw new Error("Claude did not return a score");
   }
 
-  const input = toolUse.input as Omit<CandidateResult, "fileName">;
+  const input = toolUse.input as Omit<CandidateResult, "fileName" | "recommendation">;
 
   return {
     fileName,
     ...input,
+    recommendation: input.score > 50 ? "proceed" : "decline",
   };
 }
