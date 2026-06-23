@@ -103,3 +103,21 @@ export async function getScreeningResume(
   const data = Buffer.from(await download.data.arrayBuffer());
   return { data, mimeType: row.resume_mime_type, fileName: row.file_name };
 }
+
+export async function deleteScreening(id: number): Promise<void> {
+  const supabase = getSupabaseClient();
+
+  const { data: row } = await supabase
+    .from("screenings")
+    .select("resume_path")
+    .eq("id", id)
+    .maybeSingle<Pick<ScreeningRow, "resume_path">>();
+
+  if (row) {
+    // Best-effort: a missing/already-gone file shouldn't block deleting the record.
+    await supabase.storage.from(RESUME_BUCKET).remove([row.resume_path]);
+  }
+
+  const { error } = await supabase.from("screenings").delete().eq("id", id);
+  if (error) throw error;
+}
