@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listScreenings } from "@/lib/screenings";
+import { getStatusCounts, listScreenings } from "@/lib/screenings";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
@@ -10,8 +10,11 @@ export async function GET(request: NextRequest) {
     .filter((s): s is CandidateStatus => CANDIDATE_STATUSES.includes(s as CandidateStatus));
 
   try {
-    const screenings = await listScreenings(query, statuses);
-    return NextResponse.json({ screenings });
+    const [screenings, statusCounts] = await Promise.all([
+      listScreenings(query, statuses),
+      getStatusCounts(),
+    ]);
+    return NextResponse.json({ screenings, statusCounts });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

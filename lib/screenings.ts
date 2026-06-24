@@ -84,7 +84,7 @@ export async function listScreenings(
     .select(
       "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, recommendation, status, job_description, resume_mime_type, created_at"
     )
-    .order("created_at", { ascending: false })
+    .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
 
   if (query?.trim()) {
@@ -99,6 +99,22 @@ export async function listScreenings(
   if (error) throw error;
 
   return (data ?? []).map(rowToRecord);
+}
+
+export async function getStatusCounts(): Promise<Record<CandidateStatus, number>> {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("status")
+    .returns<{ status: CandidateStatus }[]>();
+  if (error) throw error;
+
+  const counts: Record<string, number> = {};
+  for (const row of data ?? []) {
+    counts[row.status] = (counts[row.status] ?? 0) + 1;
+  }
+  return counts as Record<CandidateStatus, number>;
 }
 
 export async function updateScreeningStatus(

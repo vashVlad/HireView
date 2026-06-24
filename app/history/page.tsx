@@ -19,6 +19,7 @@ export default function HistoryPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus[]>([]);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
+  const [statusCounts, setStatusCounts] = useState<Partial<Record<CandidateStatus, number>>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -79,6 +80,7 @@ export default function HistoryPage() {
         if (!response.ok) throw new Error("Failed to load history");
         const data = await response.json();
         setScreenings(data.screenings ?? []);
+        setStatusCounts(data.statusCounts ?? {});
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
           setError(err.message);
@@ -120,18 +122,28 @@ export default function HistoryPage() {
           <div className="flex flex-wrap items-center gap-2">
             {CANDIDATE_STATUSES.map((status) => {
               const active = statusFilter.includes(status);
+              const count = statusCounts[status];
               return (
                 <button
                   key={status}
                   type="button"
                   onClick={() => toggleStatusFilter(status)}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                     active
                       ? "border-violet-400 bg-violet-50 text-violet-700 dark:border-violet-500 dark:bg-violet-500/10 dark:text-violet-400"
                       : "border-zinc-200 text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
                   }`}
                 >
                   {CANDIDATE_STATUS_LABELS[status]}
+                  {count !== undefined && count > 0 && (
+                    <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums ${
+                      active
+                        ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                        : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                    }`}>
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
