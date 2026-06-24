@@ -29,19 +29,19 @@ const SCORE_TOOL = {
       summary: {
         type: "string",
         description:
-          "1-2 sentences on how well the candidate covers the role's core requirements and where the meaningful gaps are, if any.",
+          "Poor match: 1 sentence naming the key missing must-haves. Partial match: 1–2 sentences on core coverage and gaps. Strong match: 2 precise sentences on fit and any notable gaps.",
       },
       strengths: {
         type: "array",
         items: { type: "string" },
         description:
-          "2-4 specific must-have or nice-to-have requirements from the job description that the candidate clearly meets or closely approximates.",
+          "Poor match: 0–1 items. Partial match: 2 items. Strong match: 2–4 items. Only list must-have or nice-to-have requirements the candidate clearly meets.",
       },
       concerns: {
         type: "array",
         items: { type: "string" },
         description:
-          "2-4 gaps in must-have requirements first, then nice-to-haves only if must-have coverage is already strong. Skip minor or learnable gaps that would not meaningfully affect job performance.",
+          "Poor match: 1–2 items covering only the most critical missing must-haves. Partial match: 2–3 items. Strong match: 2–4 items. Must-have gaps first; skip minor or learnable gaps.",
       },
     },
     required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns"],
@@ -81,7 +81,9 @@ export async function scoreCandidate(
   content.push(
     {
       type: "text",
-      text: `You are evaluating a resume for a recruiter who needs to decide whether to advance this candidate.
+      text: `Today's date is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}. Use this when interpreting employment dates on resumes — do not flag past dates as future or current.
+
+You are evaluating a resume for a recruiter who needs to decide whether to advance this candidate.
 
 SCORING APPROACH:
 - Must-have requirements (non-negotiable skills, qualifications, or experience) drive ~65% of the score.
@@ -95,9 +97,18 @@ HOW TO IDENTIFY MUST-HAVES vs. NICE-TO-HAVES:
 - Phrases like "preferred", "nice to have", "a plus", or skills under a "Preferred" / "Bonus" section = nice-to-haves.
 - When the JD is ambiguous, treat the 3–5 skills or qualifications most central to the role as must-haves.
 
+EXPERIENCE FORMATTING:
+- Express experience gaps as compact ratios, not sentences. Format: "Insurance experience: 5/8 yrs" or "Sales engineering: 2/5 yrs". Use this format whenever a candidate has some experience but falls short of the requirement.
+- If a candidate has zero experience in a required area, just name it: "No enterprise sales experience".
+
 PRACTICAL EQUIVALENCE:
 - "Close enough" counts. If the JD asks for 8+ years but the candidate has 4–5 years with clear depth in the domain, treat that as a strong partial match — not a zero.
 - A candidate who meets all must-haves but misses some nice-to-haves should still score in the 65–75 range.
+
+RESPONSE VERBOSITY — scale your output to match how strong the match is:
+- Poor match (score will be under 30): 1-sentence summary naming the key missing must-haves. 1–2 concerns only. Skip strengths entirely or list one at most.
+- Partial match (score 30–50): 1–2 sentence summary. 2 strengths, 2–3 concerns focused on must-have gaps.
+- Strong match (score 50+): Full 2-sentence summary. 2–4 strengths, 2–4 concerns, precise and specific.
 
 Only assess what is written in the resume against what the job description asks for${calibrationExamples.length > 0 ? " and the calibration anchors above" : ""}. Do not factor in company prestige, career trajectory, or market comparisons.
 
