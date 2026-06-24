@@ -38,7 +38,7 @@ export function InsightList({
   items: string[];
   variant: keyof typeof ICON_STYLES;
 }) {
-  if (items.length === 0) return null;
+  if (!Array.isArray(items) || items.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-1.5">

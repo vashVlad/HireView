@@ -21,7 +21,7 @@ export function CalibrationPanel() {
       const response = await fetch("/api/calibration-examples");
       if (!response.ok) throw new Error("Failed to load calibration examples");
       const data = await response.json();
-      setExamples(data.examples ?? []);
+      setExamples(Array.isArray(data.examples) ? data.examples : []);
     } catch {
       setError("Couldn't load calibration examples.");
     } finally {
