@@ -20,6 +20,8 @@ export interface CandidateResult {
   fileName: string;
   candidateName: string;
   score: number;
+  mustHaveScore?: number;
+  niceToHaveScore?: number;
   summary: string;
   strengths: string[];
   concerns: string[];
@@ -40,6 +42,8 @@ export interface ScreeningRecord {
   candidateName: string;
   fileName: string;
   score: number;
+  mustHaveScore?: number;
+  niceToHaveScore?: number;
   summary: string;
   strengths: string[];
   concerns: string[];

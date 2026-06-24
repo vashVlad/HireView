@@ -205,6 +205,21 @@ export default function HistoryPage() {
                         {screening.summary}
                       </p>
 
+                      {(screening.mustHaveScore !== undefined || screening.niceToHaveScore !== undefined) && (
+                        <div className="flex items-center gap-1.5">
+                          {screening.mustHaveScore !== undefined && (
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                              Must-have {screening.mustHaveScore}
+                            </span>
+                          )}
+                          {screening.niceToHaveScore !== undefined && (
+                            <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400">
+                              Nice-to-have {screening.niceToHaveScore}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
                       <div className="flex flex-col gap-3">
                         <InsightList label="Strengths" items={screening.strengths} variant="positive" />
                         <InsightList label="Concerns" items={screening.concerns} variant="warning" />

@@ -7,6 +7,8 @@ interface ScreeningRow {
   candidate_name: string;
   file_name: string;
   score: number;
+  must_have_score: number | null;
+  nice_to_have_score: number | null;
   summary: string;
   strengths: string[];
   concerns: string[];
@@ -24,6 +26,8 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     candidateName: row.candidate_name,
     fileName: row.file_name,
     score: row.score,
+    ...(row.must_have_score != null && { mustHaveScore: row.must_have_score }),
+    ...(row.nice_to_have_score != null && { niceToHaveScore: row.nice_to_have_score }),
     summary: row.summary,
     strengths: row.strengths,
     concerns: row.concerns,
@@ -54,6 +58,8 @@ export async function saveScreening(params: {
     candidate_name: result.candidateName,
     file_name: result.fileName,
     score: result.score,
+    must_have_score: result.mustHaveScore ?? null,
+    nice_to_have_score: result.niceToHaveScore ?? null,
     summary: result.summary,
     strengths: result.strengths,
     concerns: result.concerns,
@@ -74,7 +80,7 @@ export async function listScreenings(
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, summary, strengths, concerns, recommendation, status, job_description, resume_mime_type, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, recommendation, status, job_description, resume_mime_type, created_at"
     )
     .order("created_at", { ascending: false })
     .limit(200);

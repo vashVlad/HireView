@@ -16,6 +16,20 @@ export function ResultCard({ result, rank }: { result: CandidateResult; rank: nu
             </h3>
             <RecommendationBadge recommendation={result.recommendation} />
           </div>
+          {(result.mustHaveScore !== undefined || result.niceToHaveScore !== undefined) && (
+            <div className="flex items-center gap-1.5">
+              {result.mustHaveScore !== undefined && (
+                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                  Must-have {result.mustHaveScore}
+                </span>
+              )}
+              {result.niceToHaveScore !== undefined && (
+                <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400">
+                  Nice-to-have {result.niceToHaveScore}
+                </span>
+              )}
+            </div>
+          )}
           <p className="text-xs text-zinc-400 dark:text-zinc-500">{result.fileName}</p>
           <p className="mt-1.5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
             {result.summary}

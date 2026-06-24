@@ -14,7 +14,17 @@ const SCORE_TOOL = {
       score: {
         type: "number",
         description:
-          "0-100 score reflecting how well the candidate covers the role's requirements, weighted by importance. Must-have requirements drive ~65% of the score; nice-to-haves drive ~35%. A score of 65-80 means the candidate covers the core requirements well and is worth advancing. 80-90 is a near-exceptional match. 90+ should be rare. Do not penalize for gaps on learnable or secondary requirements. Most hireable candidates should score 60-80.",
+          "Overall 0-100 score: (mustHaveScore × 0.65) + (niceToHaveScore × 0.35), rounded to the nearest integer.",
+      },
+      mustHaveScore: {
+        type: "number",
+        description:
+          "0-100 score for must-have requirements only. 100 means every must-have is clearly met; 0 means none are. A candidate who meets all must-haves should score 80+. Partial or practical-equivalent matches (e.g. 4 years depth vs. 8 years required) score 60-79. Missing a must-have entirely scores below 40 for that dimension.",
+      },
+      niceToHaveScore: {
+        type: "number",
+        description:
+          "0-100 score for nice-to-have requirements only. Missing all nice-to-haves is normal and should not score below 20. A candidate who hits most of them scores 70-90.",
       },
       summary: {
         type: "string",
@@ -34,7 +44,7 @@ const SCORE_TOOL = {
           "2-4 gaps in must-have requirements first, then nice-to-haves only if must-have coverage is already strong. Skip minor or learnable gaps that would not meaningfully affect job performance.",
       },
     },
-    required: ["candidateName", "score", "summary", "strengths", "concerns"],
+    required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns"],
   },
 };
 
