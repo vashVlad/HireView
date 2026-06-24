@@ -5,6 +5,8 @@ import { scoreCandidate } from "@/lib/scoreCandidate";
 import { saveScreening } from "@/lib/screenings";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
+export const maxDuration = 60;
+
 const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
