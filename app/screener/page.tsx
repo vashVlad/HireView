@@ -23,14 +23,17 @@ export default function ScreenerPage() {
       const cached = localStorage.getItem("hireview:last-screening");
       if (cached) {
         const { results: r, fileErrors: e } = JSON.parse(cached);
-        if (r?.length > 0) {
+        if (Array.isArray(r) && r.length > 0) {
           setResults(r);
-          setFileErrors(e ?? []);
+          setFileErrors(Array.isArray(e) ? e : []);
           setView("results");
+        } else {
+          localStorage.removeItem("hireview:last-screening");
         }
       }
     } catch {
-      // Ignore parse errors — stale or corrupted cache
+      // Stale or corrupted cache — drop it so it doesn't keep breaking the page
+      localStorage.removeItem("hireview:last-screening");
     }
   }, []);
 
