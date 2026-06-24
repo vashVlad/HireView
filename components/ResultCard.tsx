@@ -1,9 +1,18 @@
-import type { CandidateResult } from "@/lib/types";
+import type { CandidateResult, CandidateStatus } from "@/lib/types";
 import { InsightList } from "./InsightList";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
+import { StatusSelect } from "./StatusSelect";
 
-export function ResultCard({ result, rank }: { result: CandidateResult; rank: number }) {
+export function ResultCard({
+  result,
+  rank,
+  onStatusChange,
+}: {
+  result: CandidateResult;
+  rank: number;
+  onStatusChange?: (id: number, status: CandidateStatus) => void;
+}) {
   return (
     <li className="animate-fade-in-up rounded-2xl border border-zinc-200 bg-white p-5 transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex items-start gap-4">
@@ -15,6 +24,14 @@ export function ResultCard({ result, rank }: { result: CandidateResult; rank: nu
               {result.candidateName}
             </h3>
             <RecommendationBadge recommendation={result.recommendation} />
+            {result.id !== undefined && result.status !== undefined && onStatusChange && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <StatusSelect
+                  status={result.status}
+                  onChange={(status) => onStatusChange(result.id!, status)}
+                />
+              </div>
+            )}
           </div>
           {(result.mustHaveScore !== undefined || result.niceToHaveScore !== undefined) && (
             <div className="flex items-center gap-1.5">

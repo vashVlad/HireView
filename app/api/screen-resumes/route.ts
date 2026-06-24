@@ -84,12 +84,14 @@ export async function POST(request: NextRequest) {
         // soon as the response is sent, which would silently drop an
         // un-awaited write.
         try {
-          await saveScreening({
+          const { id } = await saveScreening({
             result,
             jobDescription,
             resumeFile: resume.buffer,
             resumeMimeType: resume.mimeType,
           });
+          result.id = id;
+          result.status = "new_applicant";
         } catch (error) {
           console.error("Failed to save screening history:", error);
         }

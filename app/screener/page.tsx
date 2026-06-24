@@ -5,7 +5,7 @@ import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ResultCard } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
-import type { CandidateResult, ScreenResumesError } from "@/lib/types";
+import type { CandidateResult, CandidateStatus, ScreenResumesError } from "@/lib/types";
 
 type ViewState = "form" | "loading" | "results";
 
@@ -16,6 +16,21 @@ export default function ScreenerPage() {
   const [results, setResults] = useState<CandidateResult[]>([]);
   const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+
+  async function handleStatusChange(id: number, status: CandidateStatus) {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    try {
+      const response = await fetch(`/api/history/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error("Failed to update status");
+    } catch {
+      // Revert optimistic update on failure
+      setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status: r.status } : r)));
+    }
+  }
 
   const canSubmit = jobDescription.trim().length > 0 && files.length > 0;
 
@@ -158,7 +173,12 @@ export default function ScreenerPage() {
             ) : (
               <ul className="flex flex-col gap-3">
                 {results.map((result, index) => (
-                  <ResultCard key={result.fileName} result={result} rank={index + 1} />
+                  <ResultCard
+                    key={result.fileName}
+                    result={result}
+                    rank={index + 1}
+                    onStatusChange={handleStatusChange}
+                  />
                 ))}
               </ul>
             )}

@@ -44,7 +44,7 @@ export async function saveScreening(params: {
   jobDescription: string;
   resumeFile: Buffer;
   resumeMimeType: string;
-}) {
+}): Promise<{ id: number }> {
   const { result, jobDescription, resumeFile, resumeMimeType } = params;
   const supabase = getSupabaseClient();
 
@@ -67,8 +67,10 @@ export async function saveScreening(params: {
     job_description: jobDescription,
     resume_path: resumePath,
     resume_mime_type: resumeMimeType,
-  });
+  }).select("id").single<{ id: number }>();
   if (insert.error) throw insert.error;
+
+  return { id: insert.data.id };
 }
 
 export async function listScreenings(

@@ -17,6 +17,7 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
 };
 
 export interface CandidateResult {
+  id?: number;
   fileName: string;
   candidateName: string;
   score: number;
@@ -26,6 +27,7 @@ export interface CandidateResult {
   strengths: string[];
   concerns: string[];
   recommendation: Recommendation;
+  status?: CandidateStatus;
 }
 
 export interface ScreenResumesResponse {
