@@ -53,6 +53,7 @@ export interface ScreeningRecord {
   concerns: string[];
   recommendation: Recommendation | null;
   status: CandidateStatus;
+  statusUpdatedAt?: string;
   jobDescription: string;
   resumeMimeType: string;
   createdAt: string;
@@ -70,19 +71,29 @@ export interface CalibrationExample {
   createdAt: string;
 }
 
+export interface FilterConfig {
+  jobTitlesBoolean: string;
+  jobTitleToggle: "Current only" | "Current or past";
+  location: string;
+  workplaceType: string[];
+  keywords: string;
+  seniority: string[];
+  yearsExperience: string;
+  yearsInCurrentPosition: string;
+  yearsInCurrentCompany: string;
+  industries: string[];
+  companySize: string[];
+  targetCompanies: string[];
+  spotlights: string[];
+  mustHaveFilters: string[];
+}
+
 export interface JDAnalysis {
   mustHaveSkills: string[];
   niceToHaveSkills: string[];
   jobTitles: string[];
-  jobTitlesBoolean: string;
-  seniorityLevels: string[];
   jobFunctions: string[];
-  yearsExperience: string;
-  yearsInCurrentPosition: string;
-  targetCompanies: string[];
-  companySize: string[];
-  industries: string[];
-  keywordsBooleanBroad: string;
-  keywordsBooleanTight: string;
   rationale: string;
+  wide: FilterConfig;
+  narrow: FilterConfig;
 }

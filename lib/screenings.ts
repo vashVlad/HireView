@@ -14,6 +14,7 @@ interface ScreeningRow {
   concerns: string[];
   recommendation: Recommendation | null;
   status: CandidateStatus;
+  status_updated_at: string | null;
   job_description: string;
   resume_path: string;
   resume_mime_type: string;
@@ -33,6 +34,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     concerns: row.concerns,
     recommendation: row.recommendation,
     status: row.status,
+    ...(row.status_updated_at != null && { statusUpdatedAt: row.status_updated_at }),
     jobDescription: row.job_description,
     resumeMimeType: row.resume_mime_type,
     createdAt: row.created_at,
@@ -82,7 +84,7 @@ export async function listScreenings(
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, recommendation, status, job_description, resume_mime_type, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, recommendation, status, status_updated_at, job_description, resume_mime_type, created_at"
     )
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
@@ -123,7 +125,10 @@ export async function updateScreeningStatus(
 ): Promise<void> {
   const supabase = getSupabaseClient();
 
-  const { error } = await supabase.from("screenings").update({ status }).eq("id", id);
+  const { error } = await supabase
+    .from("screenings")
+    .update({ status, status_updated_at: new Date().toISOString() })
+    .eq("id", id);
   if (error) throw error;
 }
 

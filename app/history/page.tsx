@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { InsightList } from "@/components/InsightList";
-import { RecommendationBadge } from "@/components/RecommendationBadge";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusSelect } from "@/components/StatusSelect";
@@ -15,9 +14,23 @@ function formatDate(iso: string) {
   });
 }
 
+function formatStatusDate(iso: string) {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export default function HistoryPage() {
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<CandidateStatus[]>([]);
+  const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [statusCounts, setStatusCounts] = useState<Partial<Record<CandidateStatus, number>>>({});
   const [loading, setLoading] = useState(true);
@@ -27,14 +40,17 @@ export default function HistoryPage() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   function toggleStatusFilter(status: CandidateStatus) {
-    setStatusFilter((prev) =>
-      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
-    );
+    setStatusFilter((prev) => (prev === status ? null : status));
   }
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     const previous = screenings;
-    setScreenings((prev) => prev.map((s) => (s.id === id ? { ...s, status } : s)));
+    const now = new Date().toISOString();
+    setScreenings((prev) =>
+      prev
+        .map((s) => (s.id === id ? { ...s, status, statusUpdatedAt: now } : s))
+        .filter((s) => statusFilter === null || s.status === statusFilter)
+    );
     try {
       const response = await fetch(`/api/history/${id}`, {
         method: "PATCH",
@@ -72,7 +88,7 @@ export default function HistoryPage() {
       try {
         const params = new URLSearchParams();
         if (query.trim()) params.set("q", query.trim());
-        if (statusFilter.length > 0) params.set("status", statusFilter.join(","));
+        if (statusFilter) params.set("status", statusFilter);
         const search = params.toString();
         const response = await fetch(`/api/history${search ? `?${search}` : ""}`, {
           signal: controller.signal,
@@ -121,7 +137,7 @@ export default function HistoryPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             {CANDIDATE_STATUSES.map((status) => {
-              const active = statusFilter.includes(status);
+              const active = statusFilter === status;
               const count = statusCounts[status];
               return (
                 <button
@@ -182,14 +198,14 @@ export default function HistoryPage() {
                   >
                     <ScoreBadge score={screening.score} />
                     <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-zinc-900 dark:text-zinc-50">
-                          {screening.candidateName}
-                        </span>
-                        <RecommendationBadge recommendation={screening.recommendation} size="sm" />
-                      </div>
+                      <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                        {screening.candidateName}
+                      </span>
                       <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">
                         {screening.fileName} · {formatDate(screening.createdAt)}
+                        {screening.statusUpdatedAt && (
+                          <> · <span className="text-zinc-400 dark:text-zinc-500">status {formatStatusDate(screening.statusUpdatedAt)}</span></>
+                        )}
                       </span>
                     </div>
                     <div onClick={(e) => e.stopPropagation()}>

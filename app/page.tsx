@@ -4,14 +4,50 @@ import { useState } from "react";
 import { Chip } from "@/components/Chip";
 import { CopyField } from "@/components/CopyField";
 import { SiteHeader } from "@/components/SiteHeader";
-import type { JDAnalysis } from "@/lib/types";
+import type { FilterConfig, JDAnalysis } from "@/lib/types";
 
 type ViewState = "form" | "loading" | "results";
+type SearchMode = "wide" | "narrow";
+
+function OperatorBadge({ isMustHave }: { isMustHave: boolean }) {
+  if (isMustHave) {
+    return (
+      <span className="shrink-0 rounded-full bg-violet-100 px-2 py-px text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">
+        Must have
+      </span>
+    );
+  }
+  return (
+    <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-px text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+      Can have
+    </span>
+  );
+}
+
+function FilterRow({
+  label,
+  isMustHave,
+  children,
+}: {
+  label: string;
+  isMustHave: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{label}</span>
+        <OperatorBadge isMustHave={isMustHave} />
+      </div>
+      {children}
+    </div>
+  );
+}
 
 function FilterSection({ title, items }: { title: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-1.5">
       <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{title}</span>
       <div className="flex flex-wrap gap-1.5">
         {items.map((item) => (
@@ -22,9 +58,119 @@ function FilterSection({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function FilterSetView({ config }: { config: FilterConfig }) {
+  const must = new Set(config.mustHaveFilters);
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Job Titles */}
+      <FilterRow label="Job Titles" isMustHave={must.has("Job Titles")}>
+        <CopyField label="" value={config.jobTitlesBoolean} />
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+          Toggle: <span className="font-medium text-zinc-600 dark:text-zinc-300">{config.jobTitleToggle}</span>
+        </p>
+      </FilterRow>
+
+      {/* Location */}
+      {config.location ? (
+        <FilterRow label="Location" isMustHave={must.has("Location")}>
+          <Chip>{config.location}</Chip>
+        </FilterRow>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Location</span>
+            <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-px text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">
+              Set manually
+            </span>
+          </div>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">Not determinable from JD — set your target metro area in LinkedIn Recruiter</p>
+        </div>
+      )}
+
+      {/* Workplace Type */}
+      {config.workplaceType.length > 0 && (
+        <FilterRow label="Workplace Type" isMustHave={must.has("Workplace Type")}>
+          <div className="flex flex-wrap gap-1.5">
+            {config.workplaceType.map((t) => <Chip key={t}>{t}</Chip>)}
+          </div>
+        </FilterRow>
+      )}
+
+      {/* Keywords */}
+      <FilterRow label="Keywords (Boolean)" isMustHave={must.has("Keywords")}>
+        <CopyField label="" value={config.keywords} />
+      </FilterRow>
+
+      {/* Seniority + Experience row */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Seniority</span>
+            <OperatorBadge isMustHave={must.has("Seniority")} />
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {config.seniority.map((s) => <Chip key={s}>{s}</Chip>)}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Yrs experience</span>
+          <span className="text-sm text-zinc-600 dark:text-zinc-300">{config.yearsExperience}</span>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Yrs in position</span>
+          <span className="text-sm text-zinc-600 dark:text-zinc-300">{config.yearsInCurrentPosition}</span>
+        </div>
+      </div>
+
+      {/* Yrs in company */}
+      {config.yearsInCurrentCompany && config.yearsInCurrentCompany !== "any" && (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Yrs at current company <span className="text-xs font-normal text-zinc-400">(Corporate)</span></span>
+          <span className="text-sm text-zinc-600 dark:text-zinc-300">{config.yearsInCurrentCompany}</span>
+        </div>
+      )}
+
+      {/* Target Companies */}
+      {config.targetCompanies.length > 0 && (
+        <FilterRow label="Target / competitor companies" isMustHave={must.has("Companies")}>
+          <div className="flex flex-wrap gap-1.5">
+            {config.targetCompanies.map((c) => <Chip key={c}>{c}</Chip>)}
+          </div>
+        </FilterRow>
+      )}
+
+      {/* Company Size + Industries row */}
+      <div className="grid grid-cols-2 gap-4">
+        {config.companySize.length > 0 && (
+          <FilterSection title="Company Size" items={config.companySize} />
+        )}
+        {config.industries.length > 0 && (
+          <FilterSection title="Industries" items={config.industries} />
+        )}
+      </div>
+
+      {/* Spotlights */}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Spotlights</span>
+        {config.spotlights.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {config.spotlights.map((s) => (
+              <Chip key={s} variant="positive">✓ {s}</Chip>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-400 dark:text-zinc-500">None — don&apos;t restrict by engagement signal</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [jobDescription, setJobDescription] = useState("");
   const [view, setView] = useState<ViewState>("form");
+  const [mode, setMode] = useState<SearchMode>("wide");
   const [analysis, setAnalysis] = useState<JDAnalysis | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -49,6 +195,7 @@ export default function Home() {
 
       const data = await response.json();
       setAnalysis(data.analysis);
+      setMode("wide");
       setView("results");
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Unknown error");
@@ -118,6 +265,7 @@ export default function Home() {
 
         {view === "results" && analysis && (
           <div className="flex flex-col gap-5">
+            {/* Header */}
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
@@ -136,50 +284,53 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex flex-col gap-5 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+            {/* Skills summary */}
+            <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
               <FilterSection title="Must-have skills" items={analysis.mustHaveSkills} />
               <FilterSection title="Nice-to-have skills" items={analysis.niceToHaveSkills} />
-              <FilterSection title="Job titles" items={analysis.jobTitles} />
-              <CopyField label="Job titles (Boolean)" value={analysis.jobTitlesBoolean} />
-              <FilterSection title="Seniority (Corporate filter)" items={analysis.seniorityLevels} />
+              <FilterSection title="All equivalent titles" items={analysis.jobTitles} />
               <FilterSection title="Job functions" items={analysis.jobFunctions} />
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                    Years of experience
-                  </span>
-                  <span className="text-sm text-zinc-600 dark:text-zinc-300">{analysis.yearsExperience}</span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                    Years in current position
-                  </span>
-                  <span className="text-sm text-zinc-600 dark:text-zinc-300">
-                    {analysis.yearsInCurrentPosition}
-                  </span>
-                </div>
-              </div>
-
-              <FilterSection title="Target / competitor companies" items={analysis.targetCompanies} />
-              <FilterSection title="Company size" items={analysis.companySize} />
-              <FilterSection title="Industries" items={analysis.industries} />
-
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Spotlights</span>
-                <div className="flex flex-wrap gap-1.5">
-                  <Chip variant="positive">✓ Open to work</Chip>
-                  <Chip variant="positive">✓ Past applicants</Chip>
-                </div>
-              </div>
-
-              <CopyField label="Keywords (Boolean — broad)" value={analysis.keywordsBooleanBroad} />
-              <CopyField label="Keywords (Boolean — tight)" value={analysis.keywordsBooleanTight} />
-
               <div className="flex flex-col gap-1.5">
                 <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Why these terms</span>
                 <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{analysis.rationale}</p>
               </div>
+            </div>
+
+            {/* Wide / Narrow tab toggle */}
+            <div className="flex items-center gap-1 rounded-2xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900">
+              <button
+                type="button"
+                onClick={() => setMode("wide")}
+                className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-4 py-2.5 transition-colors ${
+                  mode === "wide"
+                    ? "bg-zinc-100 dark:bg-zinc-800"
+                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                }`}
+              >
+                <span className={`text-sm font-semibold ${mode === "wide" ? "text-zinc-900 dark:text-zinc-50" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  Wide search
+                </span>
+                <span className="text-xs text-zinc-400 dark:text-zinc-500">Discover the talent pool · 5k–15k+ results</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("narrow")}
+                className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-4 py-2.5 transition-colors ${
+                  mode === "narrow"
+                    ? "bg-violet-50 dark:bg-violet-500/10"
+                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                }`}
+              >
+                <span className={`text-sm font-semibold ${mode === "narrow" ? "text-violet-700 dark:text-violet-300" : "text-zinc-500 dark:text-zinc-400"}`}>
+                  Narrow search
+                </span>
+                <span className="text-xs text-zinc-400 dark:text-zinc-500">Active outreach · 500–1k results</span>
+              </button>
+            </div>
+
+            {/* Filter set */}
+            <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+              <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} />
             </div>
           </div>
         )}
