@@ -174,7 +174,7 @@ export default function HistoryPage() {
                         <span className="font-semibold text-zinc-900 dark:text-zinc-50">
                           {screening.candidateName}
                         </span>
-                        <RecommendationBadge recommendation={screening.recommendation} />
+                        <RecommendationBadge recommendation={screening.recommendation} size="sm" />
                       </div>
                       <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">
                         {screening.fileName} · {formatDate(screening.createdAt)}

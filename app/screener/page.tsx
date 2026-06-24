@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ResultCard } from "@/components/ResultCard";
@@ -17,8 +17,29 @@ export default function ScreenerPage() {
   const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Restore last screening results when navigating back to this page
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem("hireview:last-screening");
+      if (cached) {
+        const { results: r, fileErrors: e } = JSON.parse(cached);
+        if (r?.length > 0) {
+          setResults(r);
+          setFileErrors(e ?? []);
+          setView("results");
+        }
+      }
+    } catch {
+      // Ignore parse errors — stale or corrupted cache
+    }
+  }, []);
+
   async function handleStatusChange(id: number, status: CandidateStatus) {
-    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    setResults((prev) => {
+      const updated = prev.map((r) => (r.id === id ? { ...r, status } : r));
+      try { localStorage.setItem("hireview:last-screening", JSON.stringify({ results: updated, fileErrors })); } catch { /* ignore */ }
+      return updated;
+    });
     try {
       const response = await fetch(`/api/history/${id}`, {
         method: "PATCH",
@@ -55,9 +76,14 @@ export default function ScreenerPage() {
       }
 
       const data = await response.json();
-      setResults(data.results ?? []);
-      setFileErrors(data.errors ?? []);
+      const newResults = data.results ?? [];
+      const newErrors = data.errors ?? [];
+      setResults(newResults);
+      setFileErrors(newErrors);
       setView("results");
+      try {
+        localStorage.setItem("hireview:last-screening", JSON.stringify({ results: newResults, fileErrors: newErrors }));
+      } catch { /* storage full or unavailable */ }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Unknown error");
       setView("form");
@@ -69,6 +95,7 @@ export default function ScreenerPage() {
     setResults([]);
     setFileErrors([]);
     setFiles([]);
+    try { localStorage.removeItem("hireview:last-screening"); } catch { /* ignore */ }
   }
 
   return (
