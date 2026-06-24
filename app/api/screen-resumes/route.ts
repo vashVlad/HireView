@@ -77,18 +77,22 @@ export async function POST(request: NextRequest) {
       );
       results.push(result);
 
-      // Awaited (not fire-and-forget): Vercel can freeze the function as
-      // soon as the response is sent, which would silently drop an
-      // un-awaited write.
-      try {
-        await saveScreening({
-          result,
-          jobDescription,
-          resumeFile: resume.buffer,
-          resumeMimeType: resume.mimeType,
-        });
-      } catch (error) {
-        console.error("Failed to save screening history:", error);
+      // Only persist candidates worth revisiting. Scores under 30 are
+      // clear mismatches — saving them would pollute history without value.
+      if (result.score >= 30) {
+        // Awaited (not fire-and-forget): Vercel can freeze the function as
+        // soon as the response is sent, which would silently drop an
+        // un-awaited write.
+        try {
+          await saveScreening({
+            result,
+            jobDescription,
+            resumeFile: resume.buffer,
+            resumeMimeType: resume.mimeType,
+          });
+        } catch (error) {
+          console.error("Failed to save screening history:", error);
+        }
       }
     } catch (error) {
       errors.push({
