@@ -212,7 +212,7 @@ export default function Home() {
     <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
       <SiteHeader active="/" />
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
+      <main className={`mx-auto flex w-full flex-1 flex-col px-6 py-10 ${view === "results" ? "max-w-6xl" : "max-w-3xl"}`}>
         {view !== "results" && (
           <div className="flex flex-col gap-6">
             <div>
@@ -284,53 +284,63 @@ export default function Home() {
               </button>
             </div>
 
-            {/* Skills summary */}
-            <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-              <FilterSection title="Must-have skills" items={analysis.mustHaveSkills} />
-              <FilterSection title="Nice-to-have skills" items={analysis.niceToHaveSkills} />
-              <FilterSection title="All equivalent titles" items={analysis.jobTitles} />
-              <FilterSection title="Job functions" items={analysis.jobFunctions} />
-              <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Why these terms</span>
-                <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{analysis.rationale}</p>
+            {/* Side-by-side on wide screens */}
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_340px]">
+
+              {/* Left: Wide/Narrow toggle + Filters */}
+              <div className="flex flex-col gap-5">
+                {/* Wide / Narrow tab toggle */}
+                <div className="flex items-center gap-1 rounded-2xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900">
+                  <button
+                    type="button"
+                    onClick={() => setMode("wide")}
+                    className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-4 py-2.5 transition-colors ${
+                      mode === "wide"
+                        ? "bg-zinc-100 dark:bg-zinc-800"
+                        : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                    }`}
+                  >
+                    <span className={`text-sm font-semibold ${mode === "wide" ? "text-zinc-900 dark:text-zinc-50" : "text-zinc-500 dark:text-zinc-400"}`}>
+                      Wide search
+                    </span>
+                    <span className="text-xs text-zinc-400 dark:text-zinc-500">Discover the talent pool · 5k–15k+ results</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("narrow")}
+                    className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-4 py-2.5 transition-colors ${
+                      mode === "narrow"
+                        ? "bg-violet-50 dark:bg-violet-500/10"
+                        : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                    }`}
+                  >
+                    <span className={`text-sm font-semibold ${mode === "narrow" ? "text-violet-700 dark:text-violet-300" : "text-zinc-500 dark:text-zinc-400"}`}>
+                      Narrow search
+                    </span>
+                    <span className="text-xs text-zinc-400 dark:text-zinc-500">Active outreach · 500–1k results</span>
+                  </button>
+                </div>
+
+                {/* Filter set */}
+                <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+                  <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} />
+                </div>
+
+                {/* Why these terms */}
+                <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+                  <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Why these terms</span>
+                  <p className="mt-1.5 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{analysis.rationale}</p>
+                </div>
               </div>
-            </div>
 
-            {/* Wide / Narrow tab toggle */}
-            <div className="flex items-center gap-1 rounded-2xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900">
-              <button
-                type="button"
-                onClick={() => setMode("wide")}
-                className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-4 py-2.5 transition-colors ${
-                  mode === "wide"
-                    ? "bg-zinc-100 dark:bg-zinc-800"
-                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                }`}
-              >
-                <span className={`text-sm font-semibold ${mode === "wide" ? "text-zinc-900 dark:text-zinc-50" : "text-zinc-500 dark:text-zinc-400"}`}>
-                  Wide search
-                </span>
-                <span className="text-xs text-zinc-400 dark:text-zinc-500">Discover the talent pool · 5k–15k+ results</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("narrow")}
-                className={`flex flex-1 flex-col items-center gap-0.5 rounded-xl px-4 py-2.5 transition-colors ${
-                  mode === "narrow"
-                    ? "bg-violet-50 dark:bg-violet-500/10"
-                    : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                }`}
-              >
-                <span className={`text-sm font-semibold ${mode === "narrow" ? "text-violet-700 dark:text-violet-300" : "text-zinc-500 dark:text-zinc-400"}`}>
-                  Narrow search
-                </span>
-                <span className="text-xs text-zinc-400 dark:text-zinc-500">Active outreach · 500–1k results</span>
-              </button>
-            </div>
+              {/* Right: Skills summary */}
+              <div className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 xl:self-start xl:sticky xl:top-6">
+                <FilterSection title="Must-have skills" items={analysis.mustHaveSkills} />
+                <FilterSection title="Nice-to-have skills" items={analysis.niceToHaveSkills} />
+                <FilterSection title="All equivalent titles" items={analysis.jobTitles} />
+                <FilterSection title="Job functions" items={analysis.jobFunctions} />
+              </div>
 
-            {/* Filter set */}
-            <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-              <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} />
             </div>
           </div>
         )}

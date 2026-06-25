@@ -13,35 +13,29 @@ const SCORE_TOOL = {
       },
       score: {
         type: "number",
-        description:
-          "Overall 0-100 score: (mustHaveScore × 0.65) + (niceToHaveScore × 0.35), rounded to the nearest integer.",
+        description: "Overall 0-100: (mustHaveScore × 0.65) + (niceToHaveScore × 0.35), rounded.",
       },
       mustHaveScore: {
         type: "number",
-        description:
-          "0-100 score for must-have requirements only. 100 means every must-have is clearly met; 0 means none are. A candidate who meets all must-haves should score 80+. Partial or practical-equivalent matches (e.g. 4 years depth vs. 8 years required) score 60-79. Missing a must-have entirely scores below 40 for that dimension.",
+        description: "0-100 for must-haves only. All met = 80+. Practical-equivalent match = 60-79. Missing entirely = below 40.",
       },
       niceToHaveScore: {
         type: "number",
-        description:
-          "0-100 score for nice-to-have requirements only. Missing all nice-to-haves is normal and should not score below 20. A candidate who hits most of them scores 70-90.",
+        description: "0-100 for nice-to-haves only. Missing all = floor at 20. Hitting most = 70-90.",
       },
       summary: {
         type: "string",
-        description:
-          "Poor match: 1 sentence naming the key missing must-haves. Partial match: 1–2 sentences on core coverage and gaps. Strong match: 2 precise sentences on fit and any notable gaps.",
+        description: "Score <30: 1 sentence on key gaps. 30-50: 1-2 sentences on coverage and gaps. 50+: 2 sentences on fit and gaps.",
       },
       strengths: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Poor match: 0–1 items. Partial match: 2 items. Strong match: 2–4 items. Only list must-have or nice-to-have requirements the candidate clearly meets.",
+        description: "Score <30: 0-1 items. 30-50: 2. 50+: 2-4. Only requirements the candidate clearly meets.",
       },
       concerns: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Poor match: 1–2 items covering only the most critical missing must-haves. Partial match: 2–3 items. Strong match: 2–4 items. Must-have gaps first; skip minor or learnable gaps.",
+        description: "Score <30: 1-2 critical must-have gaps. 30-50: 2-3. 50+: 2-4. Must-haves first; skip learnable gaps.",
       },
     },
     required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns"],
@@ -81,40 +75,23 @@ export async function scoreCandidate(
   content.push(
     {
       type: "text",
-      text: `Today's date is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}. Use this when interpreting employment dates on resumes — do not flag past dates as future or current.
+      text: `Today is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}. Do not flag past dates as future.
 
-You are evaluating a resume for a recruiter who needs to decide whether to advance this candidate.
+Score this resume against the job description. Must-haves drive 65%, nice-to-haves 35%.
 
-SCORING APPROACH:
-- Must-have requirements (non-negotiable skills, qualifications, or experience) drive ~65% of the score.
-- Nice-to-have requirements (preferred but not required) drive ~35%.
-- A score of 65–80 means the candidate covers the core requirements well and is worth advancing — even if they don't hit every bullet point.
-- Reserve 80–90 for near-exceptional matches. Scores above 90 should be rare.
-- No real candidate will match 100% of a job description. Do not penalize for gaps on learnable or secondary requirements.
+SCORING: 65-80 = covers core requirements, worth advancing. 80-90 = near-exceptional. Above 90 = rare. Don't penalize learnable or secondary gaps.
 
-HOW TO IDENTIFY MUST-HAVES vs. NICE-TO-HAVES:
-- Phrases like "required", "must have", or skills listed under a "Requirements" section = must-haves.
-- Phrases like "preferred", "nice to have", "a plus", or skills under a "Preferred" / "Bonus" section = nice-to-haves.
-- When the JD is ambiguous, treat the 3–5 skills or qualifications most central to the role as must-haves.
+MUST-HAVES: "required", "must have", or items in a Requirements section. NICE-TO-HAVES: "preferred", "a plus", or Preferred/Bonus sections. If ambiguous, treat the 3-5 most central skills as must-haves.
 
-POSITION FIT:
-- Review the candidate's job titles and seniority progression. If their background suggests they cannot realistically hold this position (e.g. the role is Director-level but they have only been an individual contributor), flag it as a concern.
-- Do not penalize for title mismatches where the responsibilities clearly overlap.
+POSITION FIT: flag if seniority progression makes this role unrealistic. Don't penalize title mismatches where responsibilities overlap.
 
-EXPERIENCE FORMATTING:
-- Keep every concern to 8 words or fewer.
-- Express experience gaps as compact ratios: "Insurance experience: 5/8 yrs" or "No enterprise sales experience". Never list multiple missing skills in a single concern — one gap per bullet.
+CONCERNS FORMAT: 8 words max each. Experience gaps as ratios: "Insurance: 5/8 yrs". One gap per bullet.
 
-PRACTICAL EQUIVALENCE:
-- "Close enough" counts. If the JD asks for 8+ years but the candidate has 4-5 years with clear depth in the domain, treat that as a strong partial match, not a zero.
-- A candidate who meets all must-haves but misses some nice-to-haves should still score in the 65-75 range.
+PRACTICAL EQUIVALENCE: 4-5 years with depth vs 8+ required = strong partial match. All must-haves met + missing nice-to-haves = 65-75.
 
-RESPONSE VERBOSITY:
-- Poor match (score under 30): 1-sentence summary, 1-2 concerns only, skip strengths.
-- Partial match (score 30-50): 1-2 sentence summary, 2 strengths, 2-3 concerns.
-- Strong match (score 50+): 2-sentence summary, 2-4 strengths, 2-4 concerns.
+VERBOSITY: <30 = 1-sentence summary, 1-2 concerns, no strengths. 30-50 = 1-2 sentences, 2 strengths, 2-3 concerns. 50+ = 2 sentences, 2-4 strengths, 2-4 concerns.
 
-Only assess what is written in the resume against what the job description asks for${calibrationExamples.length > 0 ? " and the calibration anchors above" : ""}. Do not factor in company prestige or market comparisons.
+Only assess resume vs JD${calibrationExamples.length > 0 ? " and calibration anchors above" : ""}. Ignore company prestige.
 
 JOB DESCRIPTION:
 ${jobDescription}`,

@@ -4,200 +4,106 @@ import type { JDAnalysis } from "./types";
 const FILTER_CONFIG_SCHEMA = {
   type: "object" as const,
   properties: {
-    jobTitlesBoolean: {
-      type: "string",
-      description: "Boolean OR string of job titles for the LinkedIn Recruiter Job Titles filter.",
-    },
+    jobTitlesBoolean: { type: "string", description: "Boolean OR string for the Job Titles filter." },
     jobTitleToggle: {
       type: "string",
       enum: ["Current only", "Current or past"],
-      description:
-        "Whether to match current titles only or include past titles. Wide: 'Current or past'. Narrow: 'Current only'.",
+      description: "Wide: 'Current or past'. Narrow: 'Current only'.",
     },
     location: {
       type: "string",
-      description:
-        "Target metro area as it appears in LinkedIn Recruiter (e.g. 'Greater Chicago Area'). Wide: empty string if not stated in JD. Narrow: set if JD implies on-site or hybrid; if fully remote leave empty.",
+      description: "LinkedIn metro area (e.g. 'Greater Chicago Area'). Empty string if remote or not determinable from JD.",
     },
     workplaceType: {
       type: "array",
       items: { type: "string" },
-      description: "Array of applicable workplace types: 'On-site', 'Hybrid', 'Remote'.",
+      description: "Applicable values: 'On-site', 'Hybrid', 'Remote'.",
     },
     keywords: {
       type: "string",
-      description:
-        "Boolean keyword string for the Keywords filter. Wide: broader, more OR terms. Narrow: tighter AND logic focused on must-have skills.",
+      description: "Boolean string for the Keywords filter. Wide: OR-heavy. Narrow: AND-focused on must-haves.",
     },
     seniority: {
       type: "array",
       items: { type: "string" },
-      description: "LinkedIn seniority levels (e.g. 'Entry', 'Senior', 'Manager', 'Director', 'VP').",
+      description: "LinkedIn seniority levels, e.g. 'Senior', 'Manager', 'Director'.",
     },
-    yearsExperience: {
-      type: "string",
-      description: "Total years of experience range, e.g. '3-10'. Wide: broader range. Narrow: tighter range.",
-    },
-    yearsInCurrentPosition: {
-      type: "string",
-      description:
-        "Years in current position range signaling readiness to move (e.g. '2+'). Use 'any' if not a useful signal for this role.",
-    },
-    yearsInCurrentCompany: {
-      type: "string",
-      description:
-        "Years at current company (e.g. '2+'). Use 'any' if not relevant. Corporate filter only.",
-    },
-    industries: {
-      type: "array",
-      items: { type: "string" },
-      description: "LinkedIn industry classifications relevant to this role.",
-    },
-    companySize: {
-      type: "array",
-      items: { type: "string" },
-      description: "LinkedIn company size ranges, e.g. '201-500', '1,001-5,000'.",
-    },
+    yearsExperience: { type: "string", description: "Range, e.g. '3-10'." },
+    yearsInCurrentPosition: { type: "string", description: "e.g. '2+'. Use 'any' if not relevant." },
+    yearsInCurrentCompany: { type: "string", description: "e.g. '2+'. Use 'any' if not relevant. Corporate only." },
+    industries: { type: "array", items: { type: "string" }, description: "LinkedIn industry classifications." },
+    companySize: { type: "array", items: { type: "string" }, description: "e.g. '201-500', '1,001-5,000'." },
     targetCompanies: {
       type: "array",
       items: { type: "string" },
-      description:
-        "Specific companies that are strong talent pools. Wide: broader list. Narrow: only the highest-signal companies.",
+      description: "Talent-pool companies. Wide: 8-12. Narrow: 4-6 highest-signal.",
     },
     spotlights: {
       type: "array",
       items: { type: "string" },
-      description:
-        "Active spotlight filters. Wide: empty array (don't restrict). Narrow: ['Open to work', 'Past applicants'].",
+      description: "Wide: []. Narrow: ['Open to work', 'Past applicants'].",
     },
     mustHaveFilters: {
       type: "array",
       items: { type: "string" },
-      description:
-        "Which filter names to set to the 'Must have' operator — everything else is 'Can have'. Wide: ['Job Titles'] only. Narrow: ['Job Titles', 'Location'] at most. Avoid more than 2-3 Must haves or results collapse.",
+      description: "Filter names set to 'Must have' (rest = 'Can have'). Wide: ['Job Titles']. Narrow: ['Job Titles', 'Location']. Never more than 3.",
     },
   },
   required: [
-    "jobTitlesBoolean",
-    "jobTitleToggle",
-    "location",
-    "workplaceType",
-    "keywords",
-    "seniority",
-    "yearsExperience",
-    "yearsInCurrentPosition",
-    "yearsInCurrentCompany",
-    "industries",
-    "companySize",
-    "targetCompanies",
-    "spotlights",
-    "mustHaveFilters",
+    "jobTitlesBoolean", "jobTitleToggle", "location", "workplaceType", "keywords",
+    "seniority", "yearsExperience", "yearsInCurrentPosition", "yearsInCurrentCompany",
+    "industries", "companySize", "targetCompanies", "spotlights", "mustHaveFilters",
   ],
 };
 
 const ANALYZE_TOOL = {
   name: "submit_jd_analysis",
-  description:
-    "Submit the structured analysis of a job description as two LinkedIn Recruiter filter sets: wide (discovery) and narrow (execution).",
+  description: "Submit the JD analysis as two LinkedIn Recruiter filter sets: wide (discovery) and narrow (execution).",
   input_schema: {
     type: "object" as const,
     properties: {
-      mustHaveSkills: {
-        type: "array",
-        items: { type: "string" },
-        description: "Skills the candidate must have to be considered.",
-      },
-      niceToHaveSkills: {
-        type: "array",
-        items: { type: "string" },
-        description: "Skills that are a bonus but not required.",
-      },
-      jobTitles: {
-        type: "array",
-        items: { type: "string" },
-        description: "All equivalent or related titles a qualified candidate might hold.",
-      },
-      jobFunctions: {
-        type: "array",
-        items: { type: "string" },
-        description: "Broad LinkedIn functional categories relevant to this role.",
-      },
-      rationale: {
-        type: "string",
-        description:
-          "2-3 sentences explaining why the key titles and filters were chosen, so the recruiter can tweak them.",
-      },
-      wide: {
-        ...FILTER_CONFIG_SCHEMA,
-        description:
-          "Wide (discovery) filter set — casts a broad net to understand the talent pool. Expect 5,000-15,000+ results. Used for calibration, not outreach.",
-      },
-      narrow: {
-        ...FILTER_CONFIG_SCHEMA,
-        description:
-          "Narrow (execution) filter set — targeted for active outreach. Goal is 500-1,000 results of high-quality, ready-to-engage candidates.",
-      },
+      mustHaveSkills: { type: "array", items: { type: "string" }, description: "Non-negotiable skills." },
+      niceToHaveSkills: { type: "array", items: { type: "string" }, description: "Preferred but not required." },
+      jobTitles: { type: "array", items: { type: "string" }, description: "All equivalent titles a qualified candidate might hold." },
+      jobFunctions: { type: "array", items: { type: "string" }, description: "LinkedIn functional categories." },
+      rationale: { type: "string", description: "2-3 sentences on why key titles/filters were chosen." },
+      wide: { ...FILTER_CONFIG_SCHEMA, description: "Discovery filter set. Goal: 5k–15k results." },
+      narrow: { ...FILTER_CONFIG_SCHEMA, description: "Execution filter set. Goal: 500–1k results." },
     },
-    required: [
-      "mustHaveSkills",
-      "niceToHaveSkills",
-      "jobTitles",
-      "jobFunctions",
-      "rationale",
-      "wide",
-      "narrow",
-    ],
+    required: ["mustHaveSkills", "niceToHaveSkills", "jobTitles", "jobFunctions", "rationale", "wide", "narrow"],
   },
 };
+
+const INSTRUCTIONS = `You are helping a recruiter source candidates on LinkedIn Recruiter. Analyze the job description and output two complete filter sets.
+
+WIDE (discovery, 5k–15k results): broad title boolean, toggle "Current or past", location empty unless on-site JD, all applicable workplace types, OR-heavy keywords with synonyms, wide experience range (+2-3 yrs buffer), yearsInCurrentPosition/Company = "any", spotlights = [], mustHaveFilters = ["Job Titles"] only, 8–12 target companies.
+
+NARROW (execution, 500–1k results): tight title boolean (3-5 core titles), toggle "Current only", location set if on-site/hybrid, workplace type per JD, AND-focused keywords on must-haves only, tight experience range, yearsInCurrentPosition = "2+", yearsInCurrentCompany = "2+", spotlights = ["Open to work", "Past applicants"], mustHaveFilters = ["Job Titles", "Location"], 4–6 companies.
+
+BOOLEAN SYNTAX: operators UPPERCASE (AND, OR, NOT), quote multi-word phrases, avoid stop words.
+
+JOB DESCRIPTION:`;
 
 export async function analyzeJobDescription(jobDescription: string): Promise<JDAnalysis> {
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 3000,
-    tools: [ANALYZE_TOOL],
+    max_tokens: 2000,
+    tools: [{ ...ANALYZE_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "submit_jd_analysis" },
     messages: [
       {
         role: "user",
-        content: `You are helping a recruiter prepare to source candidates on LinkedIn Recruiter. Analyze the job description and output TWO complete filter configurations: wide and narrow.
-
-WIDE SEARCH — discovery mode:
-- Purpose: understand the talent pool size and composition before committing to a strategy
-- Expected results: 5,000–15,000+ profiles
-- Job Titles: broad Boolean with many OR variations and related titles
-- Job Title toggle: "Current or past" to maximize reach
-- Location: leave empty unless the JD explicitly requires on-site
-- Workplace type: all types that apply
-- Keywords: broad — favor OR logic, include synonyms and adjacent skills
-- Years of experience: wider range (add 2-3 years buffer on each end)
-- Years in current position / company: "any" — don't restrict
-- Spotlights: empty — don't restrict to active candidates
-- Must have filters: Job Titles only (1 at most)
-- Companies: broad list of 8-12 relevant employers and competitors
-
-NARROW SEARCH — execution mode:
-- Purpose: the list the recruiter actually works — InMails, outreach, shortlisting
-- Expected results: 500–1,000 profiles
-- Job Titles: tighter Boolean, core titles only (3-5 most relevant)
-- Job Title toggle: "Current only"
-- Location: set the metro area if role is on-site or hybrid (e.g. "Greater New York City Area")
-- Workplace type: match JD requirements
-- Keywords: tight — AND logic on must-have skills, remove nice-to-haves
-- Years of experience: tighter range matching JD requirements
-- Years in current position: "2+" to surface candidates ready to move
-- Years in current company: "2+" as additional readiness signal
-- Spotlights: ["Open to work", "Past applicants"]
-- Must have filters: ["Job Titles", "Location"] — never more than 2-3 or results collapse
-- Companies: focused list of 4-6 highest-signal employers only
-
-LINKEDIN BOOLEAN SYNTAX RULES (apply to both keyword strings and title strings):
-- Operators must be UPPERCASE: AND, OR, NOT
-- Quote multi-word phrases: "product manager"
-- Avoid stop words inside phrases (and, or, the, of, at, by, for, with, in)
-- LinkedIn caps results at 1,000 per search — the narrow string must stay tight enough to be useful within that cap
-
-JOB DESCRIPTION:
-${jobDescription}`,
+        content: [
+          {
+            type: "text",
+            text: INSTRUCTIONS,
+            cache_control: { type: "ephemeral" },
+          },
+          {
+            type: "text",
+            text: jobDescription,
+          },
+        ],
       },
     ],
   });

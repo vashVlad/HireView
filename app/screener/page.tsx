@@ -77,7 +77,7 @@ export default function ScreenerPage() {
     <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
       <SiteHeader active="/screener" />
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
+      <main className={`mx-auto flex w-full flex-1 flex-col px-6 py-10 ${view === "results" ? "max-w-6xl" : "max-w-3xl"}`}>
         {view !== "results" && (
           <div className="flex flex-col gap-6">
             <div>
@@ -173,7 +173,7 @@ export default function ScreenerPage() {
                 No candidates could be scored. Try uploading different files.
               </p>
             ) : (
-              <ul className="flex flex-col gap-3">
+              <ul className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 {results.map((result, index) => (
                   <ResultCard
                     key={result.fileName}
