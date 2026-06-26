@@ -43,5 +43,9 @@ export async function extractResumeText(
     return result.value;
   }
 
+  if (extension === "txt") {
+    return buffer.toString("utf-8");
+  }
+
   throw new Error(`Unsupported file type: ${fileName}`);
 }

@@ -21,15 +21,29 @@ function resolveMimeType(file: File): string {
 export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const jobDescriptionField = formData.get("jobDescription");
+  const jdFileField = formData.get("jdFile");
   const files = formData.getAll("resumes");
 
-  if (typeof jobDescriptionField !== "string" || !jobDescriptionField.trim()) {
+  let jobDescription: string;
+
+  if (jdFileField instanceof File) {
+    try {
+      const buffer = Buffer.from(await jdFileField.arrayBuffer());
+      jobDescription = await extractResumeText(jdFileField.name, buffer);
+    } catch {
+      return NextResponse.json(
+        { error: `Could not read job description file: ${jdFileField.name}` },
+        { status: 400 }
+      );
+    }
+  } else if (typeof jobDescriptionField === "string" && jobDescriptionField.trim()) {
+    jobDescription = jobDescriptionField;
+  } else {
     return NextResponse.json(
-      { error: "jobDescription is required" },
+      { error: "Provide a job description — either paste text or upload a file." },
       { status: 400 }
     );
   }
-  const jobDescription: string = jobDescriptionField;
 
   if (files.length === 0) {
     return NextResponse.json(
