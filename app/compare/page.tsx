@@ -1,8 +1,6 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useRef, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -68,7 +66,7 @@ function SeverityDot({ severity }: { severity: "minor" | "notable" | "red_flag" 
   return <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${colors[severity]}`} />;
 }
 
-export default function ComparePage() {
+function ComparePageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -377,5 +375,17 @@ export default function ComparePage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function ComparePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-1 items-center justify-center py-20">
+        <span className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
+      </div>
+    }>
+      <ComparePageInner />
+    </Suspense>
   );
 }
