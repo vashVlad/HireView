@@ -296,16 +296,23 @@ export default function HistoryPage() {
                   >
                     <ScoreBadge score={screening.score} />
                     <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
-                      <span className="font-semibold text-zinc-900 dark:text-zinc-50">
-                        {screening.candidateName}
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 font-semibold text-zinc-900 dark:text-zinc-50">
+                          {screening.candidateName}
+                        </span>
+                        {screening.flagged && screening.flagNote && (
+                          <span className="truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+                            {screening.flagNote}
+                          </span>
+                        )}
+                      </div>
+                      <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">
+                        {screening.fileName}
                       </span>
                       <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">
-                        {screening.fileName} · {formatDate(screening.createdAt)}
+                        {formatDate(screening.createdAt)}
                         {screening.statusUpdatedAt && (
-                          <> · <span className="text-zinc-400 dark:text-zinc-500">status {formatStatusDate(screening.statusUpdatedAt)}</span></>
-                        )}
-                        {screening.flagged && screening.flagNote && (
-                          <> · <span className="text-amber-500 dark:text-amber-400">{screening.flagNote}</span></>
+                          <> · status {formatStatusDate(screening.statusUpdatedAt)}</>
                         )}
                         {getNotesText(screening) && (
                           <> · <span className="text-violet-500 dark:text-violet-400">has notes</span></>
