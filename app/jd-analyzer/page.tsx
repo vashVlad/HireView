@@ -289,7 +289,7 @@ export default function Home() {
                   <span className="text-xs font-semibold uppercase tracking-wide text-violet-500 dark:text-violet-400">Must-have</span>
                   <div className="flex flex-wrap gap-1.5">
                     {analysis.mustHaveSkills.map((s) => (
-                      <Chip key={s} variant="highlight">{s}</Chip>
+                      <Chip key={s} variant="positive">{s}</Chip>
                     ))}
                   </div>
                 </div>
