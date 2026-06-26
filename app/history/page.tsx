@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { InsightList } from "@/components/InsightList";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -29,6 +30,7 @@ function formatStatusDate(iso: string) {
 }
 
 export default function HistoryPage() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
@@ -251,6 +253,12 @@ export default function HistoryPage() {
                       <div className="flex flex-col gap-3">
                         <InsightList label="Strengths" items={screening.strengths} variant="positive" />
                         <InsightList label="Concerns" items={screening.concerns} variant="warning" />
+                        {screening.careerTrajectory && (
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</span>
+                            <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{screening.careerTrajectory}</p>
+                          </div>
+                        )}
                       </div>
 
                       <details className="text-sm text-zinc-600 dark:text-zinc-300">
@@ -263,18 +271,38 @@ export default function HistoryPage() {
                       </details>
 
                       <div className="flex items-center justify-between">
-                        <a
-                          href={`/api/history/${screening.id}/resume`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20"
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M12 4v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                          View resume
-                        </a>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={`/api/history/${screening.id}/resume`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M12 4v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                              <path d="M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            View resume
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const params = new URLSearchParams({
+                                id: String(screening.id),
+                                name: screening.candidateName,
+                                file: screening.fileName,
+                                score: String(screening.score),
+                              });
+                              router.push(`/compare?${params.toString()}`);
+                            }}
+                            className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Compare
+                          </button>
+                        </div>
 
                         {confirmDeleteId === screening.id ? (
                           <div className="flex items-center gap-2">

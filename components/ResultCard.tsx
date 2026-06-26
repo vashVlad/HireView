@@ -55,6 +55,16 @@ export function ResultCard({
           <div className="mt-3 flex flex-col gap-3">
             <InsightList label="Strengths" items={result.strengths} variant="positive" />
             <InsightList label="Concerns" items={result.concerns} variant="warning" />
+            {result.careerTrajectory && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                  Career trajectory
+                </span>
+                <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+                  {result.careerTrajectory}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

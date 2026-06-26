@@ -12,6 +12,7 @@ interface ScreeningRow {
   summary: string;
   strengths: string[];
   concerns: string[];
+  career_trajectory: string | null;
   recommendation: Recommendation | null;
   status: CandidateStatus;
   status_updated_at: string | null;
@@ -32,6 +33,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     summary: row.summary,
     strengths: row.strengths,
     concerns: row.concerns,
+    ...(row.career_trajectory != null && { careerTrajectory: row.career_trajectory }),
     recommendation: row.recommendation,
     status: row.status,
     ...(row.status_updated_at != null && { statusUpdatedAt: row.status_updated_at }),
@@ -65,6 +67,7 @@ export async function saveScreening(params: {
     summary: result.summary,
     strengths: result.strengths,
     concerns: result.concerns,
+    career_trajectory: result.careerTrajectory ?? null,
     recommendation: result.recommendation,
     job_description: jobDescription,
     resume_path: resumePath,
@@ -84,7 +87,7 @@ export async function listScreenings(
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, recommendation, status, status_updated_at, job_description, resume_mime_type, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, created_at"
     )
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
@@ -150,6 +153,21 @@ export async function getScreeningResume(
 
   const data = Buffer.from(await download.data.arrayBuffer());
   return { data, mimeType: row.resume_mime_type, fileName: row.file_name };
+}
+
+export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord[]> {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("screenings")
+    .select(
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, created_at"
+    )
+    .in("id", ids)
+    .returns<ScreeningRow[]>();
+  if (error) throw error;
+
+  return (data ?? []).map(rowToRecord);
 }
 
 export async function deleteScreening(id: number): Promise<void> {

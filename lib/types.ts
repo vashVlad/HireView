@@ -28,6 +28,7 @@ export interface CandidateResult {
   summary: string;
   strengths: string[];
   concerns: string[];
+  careerTrajectory?: string;
   recommendation: Recommendation;
   status?: CandidateStatus;
 }
@@ -51,12 +52,37 @@ export interface ScreeningRecord {
   summary: string;
   strengths: string[];
   concerns: string[];
+  careerTrajectory?: string;
   recommendation: Recommendation | null;
   status: CandidateStatus;
   statusUpdatedAt?: string;
   jobDescription: string;
   resumeMimeType: string;
   createdAt: string;
+}
+
+// ── Resume comparison ────────────────────────────────────────────────────────
+
+export type ComparisonVerdict = "consistent" | "minor_tweaks" | "significant_reframe" | "suspicious";
+
+export interface ResumeChange {
+  field: string;
+  inResumeA: string;
+  inResumeB: string;
+  severity: "minor" | "notable" | "red_flag";
+}
+
+export interface ComparisonQuestion {
+  question: string;
+  probes: string;
+}
+
+export interface ResumeComparisonResult {
+  verdict: ComparisonVerdict;
+  summary: string;
+  changes: ResumeChange[];
+  redFlags: string[];
+  questions: ComparisonQuestion[];
 }
 
 export type CalibrationLabel = "good" | "bad";

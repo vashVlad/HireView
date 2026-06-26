@@ -35,10 +35,14 @@ const SCORE_TOOL = {
       concerns: {
         type: "array",
         items: { type: "string" },
-        description: "Score <30: 1-2 critical must-have gaps. 30-50: 2-3. 50+: 2-4. Must-haves first; skip learnable gaps.",
+        description: "Score <50: 1-2 items, 8 words max each. Score 50+: 2-4 items, 1-2 sentences each with specific context (what's missing, by how much, why it matters for this role). Must-haves first; skip learnable gaps.",
+      },
+      careerTrajectory: {
+        type: "string",
+        description: "1-3 sentences on the candidate's role progression: does the sequence of positions lead naturally toward this role, and are there any suspicious patterns (frequent job hops, unexplained gaps, sudden domain shifts, title regression, lateral moves that don't build toward this type of role).",
       },
     },
-    required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns"],
+    required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory"],
   },
 };
 
@@ -85,7 +89,9 @@ MUST-HAVES: "required", "must have", or items in a Requirements section. NICE-TO
 
 POSITION FIT: flag if seniority progression makes this role unrealistic. Don't penalize title mismatches where responsibilities overlap.
 
-CONCERNS FORMAT: 8 words max each. Experience gaps as ratios: "Insurance: 5/8 yrs". One gap per bullet.
+CONCERNS FORMAT: Score <50: 8 words max each, experience gaps as ratios ("Insurance: 5/8 yrs"). Score 50+: 1-2 sentences each — name the gap, quantify it if possible, explain why it matters for this specific role. One gap per bullet. Must-haves first; skip learnable gaps.
+
+CAREER TRAJECTORY: Describe the sequence of roles — does it build logically toward this position? Flag suspicious patterns: frequent job changes (<1 yr per role), unexplained gaps (>6 months), sudden domain shifts, title regression, or lateral moves that don't accumulate relevant experience. If the progression is clean and logical, say so briefly.
 
 PRACTICAL EQUIVALENCE: 4-5 years with depth vs 8+ required = strong partial match. All must-haves met + missing nice-to-haves = 65-75.
 
@@ -105,7 +111,7 @@ ${jobDescription}`,
 
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 1500,
+    max_tokens: 2000,
     tools: [{ ...SCORE_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "submit_score" },
     messages: [{ role: "user", content }],
@@ -116,7 +122,7 @@ ${jobDescription}`,
     throw new Error("Claude did not return a score");
   }
 
-  const input = toolUse.input as Omit<CandidateResult, "fileName" | "recommendation">;
+  const input = toolUse.input as Omit<CandidateResult, "fileName" | "recommendation" | "status" | "id">;
 
   return {
     fileName,
