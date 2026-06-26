@@ -35,6 +35,7 @@ export default function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [statusCounts, setStatusCounts] = useState<Partial<Record<CandidateStatus, number>>>({});
+  const [comparisonCounts, setComparisonCounts] = useState<Record<number, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -99,6 +100,7 @@ export default function HistoryPage() {
         const data = await response.json();
         setScreenings(data.screenings ?? []);
         setStatusCounts(data.statusCounts ?? {});
+        setComparisonCounts(data.comparisonCounts ?? {});
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
           setError(err.message);
@@ -284,24 +286,36 @@ export default function HistoryPage() {
                             </svg>
                             View resume
                           </a>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const params = new URLSearchParams({
-                                id: String(screening.id),
-                                name: screening.candidateName,
-                                file: screening.fileName,
-                                score: String(screening.score),
-                              });
-                              router.push(`/compare?${params.toString()}`);
-                            }}
-                            className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            Compare
-                          </button>
+                          {(comparisonCounts[screening.id] ?? 0) > 0 ? (
+                            <a
+                              href={`/compare/${screening.id}`}
+                              className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              Compared ({comparisonCounts[screening.id]})
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const params = new URLSearchParams({
+                                  id: String(screening.id),
+                                  name: screening.candidateName,
+                                  file: screening.fileName,
+                                  score: String(screening.score),
+                                });
+                                router.push(`/compare?${params.toString()}`);
+                              }}
+                              className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                              Compare
+                            </button>
+                          )}
                         </div>
 
                         {confirmDeleteId === screening.id ? (

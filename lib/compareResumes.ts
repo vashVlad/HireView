@@ -44,28 +44,8 @@ const COMPARE_TOOL = {
         description:
           "Factual contradictions only: different employment dates, different companies, different titles for the same job, experience totals that don't reconcile. If none, return an empty array.",
       },
-      questions: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            question: {
-              type: "string",
-              description:
-                "Open-ended behavioral question. Do NOT reveal you've seen two versions of the resume. Force the candidate to commit to a specific answer that can be cross-checked against what's written.",
-            },
-            probes: {
-              type: "string",
-              description: "One sentence: the specific discrepancy or uncertainty this question is designed to surface.",
-            },
-          },
-          required: ["question", "probes"],
-        },
-        description:
-          "5-8 targeted interview questions. Mix: questions that verify factual claims, questions that test depth of knowledge for claimed skills, and questions that force timeline commitments. Behavioral framing — 'Tell me about a time…', 'Walk me through…', 'Describe the project where…'",
-      },
     },
-    required: ["verdict", "summary", "changes", "redFlags", "questions"],
+    required: ["verdict", "summary", "changes", "redFlags"],
   },
 };
 
@@ -88,14 +68,7 @@ Distinguish between:
 - MATERIAL differences: the same fact is stated differently in ways that can't both be true
 - FABRICATION signals: experience, titles, or companies appear in one resume but not the other in a way that looks like inflation
 
-PART 2 — BUILD QUESTIONS
-Generate questions that will:
-1. Force the candidate to commit to specific dates, titles, and facts without revealing you've seen two resumes
-2. Test depth of knowledge for skills they've claimed — someone who truly has 5 years of Python answers differently than someone who listed it to match the JD
-3. Surface timeline inconsistencies through natural follow-up questions about sequence and duration
-4. Verify quantified claims ("you mentioned a 40% improvement — walk me through how that was measured")
-
-Questions must be open-ended and behavioral. Do NOT ask "why does your resume say X" — that reveals you've caught them. Instead, ask questions that lead them to state the truth themselves.`;
+`;
 
 export async function compareResumes(
   resumeA: { text: string; fileName: string; jobTitle: string },
@@ -133,5 +106,7 @@ export async function compareResumes(
     throw new Error("Claude did not return a comparison result");
   }
 
-  return toolUse.input as ResumeComparisonResult;
+  const raw = toolUse.input as ResumeComparisonResult & { questions?: unknown };
+  const { questions: _q, ...result } = raw;
+  return result as ResumeComparisonResult;
 }

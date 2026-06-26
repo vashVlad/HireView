@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStatusCounts, listScreenings } from "@/lib/screenings";
+import { getComparisonCountsByScreeningIds } from "@/lib/comparisons";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
@@ -14,7 +15,10 @@ export async function GET(request: NextRequest) {
       listScreenings(query, statuses),
       getStatusCounts(),
     ]);
-    return NextResponse.json({ screenings, statusCounts });
+
+    const comparisonCounts = await getComparisonCountsByScreeningIds(screenings.map((s) => s.id));
+
+    return NextResponse.json({ screenings, statusCounts, comparisonCounts });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

@@ -1,9 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
+import { saveComparison, getComparisonsByScreeningId, getComparisonById } from "@/lib/comparisons";
 import { compareResumes } from "@/lib/compareResumes";
 import { extractResumeText } from "@/lib/parseResume";
 import { getScreeningResume, getScreeningsByIds } from "@/lib/screenings";
 
 export const maxDuration = 60;
+
+export async function GET(request: NextRequest) {
+  const screeningId = request.nextUrl.searchParams.get("screeningId");
+  const comparisonId = request.nextUrl.searchParams.get("comparisonId");
+
+  try {
+    if (comparisonId) {
+      const record = await getComparisonById(Number(comparisonId));
+      if (!record) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ comparison: record });
+    }
+    if (screeningId) {
+      const records = await getComparisonsByScreeningId(Number(screeningId));
+      return NextResponse.json({ comparisons: records });
+    }
+    return NextResponse.json({ error: "Provide screeningId or comparisonId." }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
 
 export async function POST(request: NextRequest) {
   const contentType = request.headers.get("content-type") ?? "";
@@ -13,7 +37,7 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const idField = formData.get("id");
     const fileField = formData.get("file");
-    const roleField = formData.get("role"); // optional label for the new resume
+    const roleField = formData.get("role");
 
     if (!idField || !fileField || !(fileField instanceof File)) {
       return NextResponse.json(
@@ -23,9 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     const id = Number(idField);
-    if (isNaN(id)) {
-      return NextResponse.json({ error: "id must be a number." }, { status: 400 });
-    }
+    if (isNaN(id)) return NextResponse.json({ error: "id must be a number." }, { status: 400 });
 
     const [records, newBuffer] = await Promise.all([
       getScreeningsByIds([id]),
@@ -33,9 +55,7 @@ export async function POST(request: NextRequest) {
     ]);
 
     const existing = records[0];
-    if (!existing) {
-      return NextResponse.json({ error: "Record not found." }, { status: 404 });
-    }
+    if (!existing) return NextResponse.json({ error: "Record not found." }, { status: 404 });
 
     const existingFile = await getScreeningResume(id);
     if (!existingFile) {
@@ -50,13 +70,27 @@ export async function POST(request: NextRequest) {
     const existingJobTitle =
       existing.jobDescription.split("\n").find((l) => l.trim().length > 10)?.trim().slice(0, 120) ??
       "Unknown role";
+    const newRole =
+      typeof roleField === "string" && roleField.trim() ? roleField.trim() : "New application";
 
     const comparison = await compareResumes(
       { text: existingText, fileName: existing.fileName, jobTitle: existingJobTitle },
-      { text: newText, fileName: fileField.name, jobTitle: (typeof roleField === "string" && roleField.trim()) ? roleField.trim() : "New application" }
+      { text: newText, fileName: fileField.name, jobTitle: newRole }
     );
 
+    const { id: comparisonId } = await saveComparison({
+      screeningId: id,
+      newResumeFilename: fileField.name,
+      newResumeRole: newRole,
+      verdict: comparison.verdict,
+      summary: comparison.summary,
+      changes: comparison.changes,
+      redFlags: comparison.redFlags,
+    });
+
     return NextResponse.json({
+      screeningId: id,
+      comparisonId,
       resumes: [
         {
           id: existing.id,
@@ -72,7 +106,7 @@ export async function POST(request: NextRequest) {
           candidateName: existing.candidateName,
           fileName: fileField.name,
           score: null,
-          jobTitle: (typeof roleField === "string" && roleField.trim()) ? roleField.trim() : "New application",
+          jobTitle: newRole,
           createdAt: new Date().toISOString(),
           source: "upload" as const,
         },
@@ -99,7 +133,7 @@ export async function POST(request: NextRequest) {
 
   const records = await getScreeningsByIds(numericIds);
   if (records.length < 2) {
-    return NextResponse.json({ error: "Could not find enough records for those IDs." }, { status: 404 });
+    return NextResponse.json({ error: "Could not find enough records." }, { status: 404 });
   }
 
   const withText = await Promise.all(
@@ -120,7 +154,19 @@ export async function POST(request: NextRequest) {
     { text: b.text, fileName: b.record.fileName, jobTitle: b.jobTitle }
   );
 
+  const { id: comparisonId } = await saveComparison({
+    screeningId: a.record.id,
+    newResumeFilename: b.record.fileName,
+    newResumeRole: b.jobTitle,
+    verdict: comparison.verdict,
+    summary: comparison.summary,
+    changes: comparison.changes,
+    redFlags: comparison.redFlags,
+  });
+
   return NextResponse.json({
+    screeningId: a.record.id,
+    comparisonId,
     resumes: withText.map(({ record, jobTitle }) => ({
       id: record.id,
       candidateName: record.candidateName,

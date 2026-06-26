@@ -72,17 +72,23 @@ export interface ResumeChange {
   severity: "minor" | "notable" | "red_flag";
 }
 
-export interface ComparisonQuestion {
-  question: string;
-  probes: string;
-}
-
 export interface ResumeComparisonResult {
   verdict: ComparisonVerdict;
   summary: string;
   changes: ResumeChange[];
   redFlags: string[];
-  questions: ComparisonQuestion[];
+}
+
+export interface ComparisonRecord {
+  id: number;
+  screeningId: number;
+  newResumeFilename: string;
+  newResumeRole: string | null;
+  verdict: ComparisonVerdict;
+  summary: string;
+  changes: ResumeChange[];
+  redFlags: string[];
+  createdAt: string;
 }
 
 export type CalibrationLabel = "good" | "bad";

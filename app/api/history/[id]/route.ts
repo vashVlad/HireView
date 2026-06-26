@@ -1,6 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteScreening, updateScreeningStatus } from "@/lib/screenings";
+import { deleteScreening, getScreeningsByIds, updateScreeningStatus } from "@/lib/screenings";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const screeningId = Number(id);
+  if (!Number.isInteger(screeningId)) {
+    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+  }
+  try {
+    const records = await getScreeningsByIds([screeningId]);
+    if (!records[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ screening: records[0] });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
+}
 
 export async function DELETE(
   _request: Request,
