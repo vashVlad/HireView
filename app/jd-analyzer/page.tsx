@@ -220,4 +220,117 @@ export default function Home() {
                 Decode the role
               </h2>
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                Paste a job description and get LinkedIn Recruiter filte
+                Paste a job description and get LinkedIn Recruiter filters and boolean strings ready to go.
+              </p>
+            </div>
+
+            <textarea
+              value={jobDescription}
+              onChange={(e) => setJobDescription(e.target.value)}
+              placeholder="Paste the full job description here..."
+              rows={12}
+              disabled={view === "loading"}
+              className="w-full resize-none rounded-2xl border border-zinc-200 bg-white p-4 text-sm leading-relaxed text-zinc-800 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-violet-500/20"
+            />
+
+            {formError && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
+                {formError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!canSubmit || view === "loading"}
+              className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-xl hover:shadow-violet-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
+            >
+              {view === "loading" ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Analyzing…
+                </>
+              ) : (
+                "Analyze job description"
+              )}
+            </button>
+          </div>
+        )}
+
+        {view === "loading" && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 py-20">
+            <span className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">Analyzing job description…</p>
+          </div>
+        )}
+
+        {view === "results" && analysis && (
+          <div className="flex flex-col gap-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                  LinkedIn Recruiter filters
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{analysis.rationale}</p>
+              </div>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="shrink-0 flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                Analyze again
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Key skills extracted</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-violet-500 dark:text-violet-400">Must-have</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {analysis.mustHaveSkills.map((s) => (
+                      <Chip key={s} variant="highlight">{s}</Chip>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Nice-to-have</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {analysis.niceToHaveSkills.map((s) => (
+                      <Chip key={s}>{s}</Chip>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <FilterSection title="Equivalent titles" items={analysis.jobTitles} />
+              <FilterSection title="Job functions" items={analysis.jobFunctions} />
+            </div>
+
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-1 self-start rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+                {(["wide", "narrow"] as SearchMode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors ${
+                      mode === m
+                        ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-50"
+                        : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} />
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
