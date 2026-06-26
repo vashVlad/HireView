@@ -19,6 +19,9 @@ interface ScreeningRow {
   job_description: string;
   resume_path: string;
   resume_mime_type: string;
+  flagged: boolean;
+  flag_note: string | null;
+  notes: string | null;
   created_at: string;
 }
 
@@ -39,6 +42,9 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.status_updated_at != null && { statusUpdatedAt: row.status_updated_at }),
     jobDescription: row.job_description,
     resumeMimeType: row.resume_mime_type,
+    flagged: row.flagged ?? false,
+    ...(row.flag_note ? { flagNote: row.flag_note } : {}),
+    ...(row.notes ? { notes: row.notes } : {}),
     createdAt: row.created_at,
   };
 }
@@ -80,14 +86,15 @@ export async function saveScreening(params: {
 
 export async function listScreenings(
   query?: string,
-  statuses?: CandidateStatus[]
+  statuses?: CandidateStatus[],
+  flaggedOnly?: boolean
 ): Promise<ScreeningRecord[]> {
   const supabase = getSupabaseClient();
 
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, created_at"
     )
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
@@ -100,10 +107,36 @@ export async function listScreenings(
     request = request.in("status", statuses);
   }
 
+  if (flaggedOnly) {
+    request = request.eq("flagged", true);
+  }
+
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
 
   return (data ?? []).map(rowToRecord);
+}
+
+export async function updateScreeningNotes(id: number, notes: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("screenings")
+    .update({ notes: notes.trim() || null })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function updateScreeningFlag(
+  id: number,
+  flagged: boolean,
+  flagNote?: string
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("screenings")
+    .update({ flagged, flag_note: flagged ? (flagNote ?? null) : null })
+    .eq("id", id);
+  if (error) throw error;
 }
 
 export async function getStatusCounts(): Promise<Record<CandidateStatus, number>> {
@@ -161,7 +194,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
   const { data, error } = await supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, created_at"
     )
     .in("id", ids)
     .returns<ScreeningRow[]>();

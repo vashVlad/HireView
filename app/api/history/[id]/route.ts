@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteScreening, getScreeningsByIds, updateScreeningStatus } from "@/lib/screenings";
+import { deleteScreening, getScreeningsByIds, updateScreeningFlag, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
 export async function GET(
@@ -57,10 +57,38 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => null);
+
+  // Update notes
+  if (typeof body?.notes === "string") {
+    try {
+      await updateScreeningNotes(screeningId, body.notes);
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Unknown error" },
+        { status: 500 }
+      );
+    }
+  }
+
+  // Toggle flag
+  if (typeof body?.flagged === "boolean") {
+    try {
+      const flagNote = typeof body.flagNote === "string" ? body.flagNote : undefined;
+      await updateScreeningFlag(screeningId, body.flagged, flagNote);
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Unknown error" },
+        { status: 500 }
+      );
+    }
+  }
+
   const status = body?.status as CandidateStatus | undefined;
 
   if (!status || !CANDIDATE_STATUSES.includes(status)) {
-    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid status or flagged value" }, { status: 400 });
   }
 
   try {

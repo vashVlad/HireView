@@ -6,13 +6,14 @@ import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q") ?? undefined;
   const statusParam = request.nextUrl.searchParams.get("status");
+  const flaggedOnly = request.nextUrl.searchParams.get("flagged") === "1";
   const statuses = statusParam
     ?.split(",")
     .filter((s): s is CandidateStatus => CANDIDATE_STATUSES.includes(s as CandidateStatus));
 
   try {
     const [screenings, statusCounts] = await Promise.all([
-      listScreenings(query, statuses),
+      listScreenings(query, statuses, flaggedOnly),
       getStatusCounts(),
     ]);
 

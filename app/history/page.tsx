@@ -33,17 +33,56 @@ export default function HistoryPage() {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
+  const [flaggedFilter, setFlaggedFilter] = useState(false);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [statusCounts, setStatusCounts] = useState<Partial<Record<CandidateStatus, number>>>({});
   const [comparisonCounts, setComparisonCounts] = useState<Record<number, number>>({});
+  const [flaggedCount, setFlaggedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [pendingFlagId, setPendingFlagId] = useState<number | null>(null);
+  const [pendingFlagNote, setPendingFlagNote] = useState("");
+  // Per-card notes: { [screeningId]: { text, saveState: "idle"|"saving"|"saved" } }
+  const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
 
   function toggleStatusFilter(status: CandidateStatus) {
     setStatusFilter((prev) => (prev === status ? null : status));
+  }
+
+  async function handleToggleFlag(id: number, current: boolean, note?: string) {
+    const next = !current;
+    setPendingFlagId(null);
+    setPendingFlagNote("");
+    setScreenings((prev) =>
+      prev
+        .map((s) => (s.id === id ? { ...s, flagged: next, flagNote: next ? note : undefined } : s))
+        .filter((s) => !flaggedFilter || s.flagged)
+    );
+    setFlaggedCount((c) => c + (next ? 1 : -1));
+    try {
+      const res = await fetch(`/api/history/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flagged: next, flagNote: note }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setScreenings((prev) => prev.map((s) => (s.id === id ? { ...s, flagged: current } : s)));
+      setFlaggedCount((c) => c + (next ? -1 : 1));
+    }
+  }
+
+  function handleFlagClick(e: React.MouseEvent, id: number, currentlyFlagged: boolean) {
+    e.stopPropagation();
+    if (currentlyFlagged) {
+      handleToggleFlag(id, true);
+    } else {
+      setPendingFlagId((prev) => (prev === id ? null : id));
+      setPendingFlagNote("");
+    }
   }
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
@@ -92,15 +131,18 @@ export default function HistoryPage() {
         const params = new URLSearchParams();
         if (query.trim()) params.set("q", query.trim());
         if (statusFilter) params.set("status", statusFilter);
+        if (flaggedFilter) params.set("flagged", "1");
         const search = params.toString();
         const response = await fetch(`/api/history${search ? `?${search}` : ""}`, {
           signal: controller.signal,
         });
         if (!response.ok) throw new Error("Failed to load history");
         const data = await response.json();
-        setScreenings(data.screenings ?? []);
+        const fetched: ScreeningRecord[] = data.screenings ?? [];
+        setScreenings(fetched);
         setStatusCounts(data.statusCounts ?? {});
         setComparisonCounts(data.comparisonCounts ?? {});
+        setFlaggedCount(fetched.filter((s) => s.flagged).length);
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
           setError(err.message);
@@ -114,7 +156,35 @@ export default function HistoryPage() {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [query, statusFilter]);
+  }, [query, statusFilter, flaggedFilter]);
+
+  function getNotesText(screening: ScreeningRecord): string {
+    return notesMap[screening.id]?.text ?? screening.notes ?? "";
+  }
+
+  async function saveNotes(id: number, text: string) {
+    setNotesMap((prev) => ({ ...prev, [id]: { text, saveState: "saving" } }));
+    try {
+      const res = await fetch(`/api/history/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: text }),
+      });
+      if (!res.ok) throw new Error();
+      setNotesMap((prev) => ({ ...prev, [id]: { text, saveState: "saved" } }));
+      setTimeout(() => {
+        setNotesMap((prev) => {
+          // Only reset if still "saved" (don't clobber a new save)
+          if (prev[id]?.saveState === "saved") {
+            return { ...prev, [id]: { text, saveState: "idle" } };
+          }
+          return prev;
+        });
+      }, 2000);
+    } catch {
+      setNotesMap((prev) => ({ ...prev, [id]: { text, saveState: "idle" } }));
+    }
+  }
 
   return (
     <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
@@ -140,6 +210,30 @@ export default function HistoryPage() {
           />
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFlaggedFilter((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                flaggedFilter
+                  ? "border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500 dark:bg-amber-500/10 dark:text-amber-400"
+                  : "border-zinc-200 text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900"
+              }`}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill={flaggedFilter ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M4 22V15" strokeLinecap="round" />
+              </svg>
+              Flagged
+              {flaggedCount > 0 && (
+                <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums ${
+                  flaggedFilter
+                    ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+                    : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                }`}>
+                  {flaggedCount}
+                </span>
+              )}
+            </button>
             {CANDIDATE_STATUSES.map((status) => {
               const active = statusFilter === status;
               const count = statusCounts[status];
@@ -210,6 +304,12 @@ export default function HistoryPage() {
                         {screening.statusUpdatedAt && (
                           <> · <span className="text-zinc-400 dark:text-zinc-500">status {formatStatusDate(screening.statusUpdatedAt)}</span></>
                         )}
+                        {screening.flagged && screening.flagNote && (
+                          <> · <span className="text-amber-500 dark:text-amber-400">{screening.flagNote}</span></>
+                        )}
+                        {getNotesText(screening) && (
+                          <> · <span className="text-violet-500 dark:text-violet-400">has notes</span></>
+                        )}
                       </span>
                     </div>
                     <div onClick={(e) => e.stopPropagation()}>
@@ -218,6 +318,21 @@ export default function HistoryPage() {
                         onChange={(status) => handleStatusChange(screening.id, status)}
                       />
                     </div>
+                    <button
+                      type="button"
+                      onClick={(e) => handleFlagClick(e, screening.id, screening.flagged)}
+                      aria-label={screening.flagged ? "Remove flag" : "Flag this candidate"}
+                      className={`shrink-0 rounded-full p-1.5 transition-colors ${
+                        screening.flagged
+                          ? "text-amber-500 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10"
+                          : "text-zinc-300 hover:bg-zinc-100 hover:text-zinc-500 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-400"
+                      }`}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill={screening.flagged ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M4 22V15" strokeLinecap="round" />
+                      </svg>
+                    </button>
                     <svg
                       width="18"
                       height="18"
@@ -230,6 +345,44 @@ export default function HistoryPage() {
                       <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </div>
+
+                  {pendingFlagId === screening.id && (
+                    <div
+                      className="flex items-center gap-2 border-t border-amber-100 bg-amber-50/50 px-5 py-3 dark:border-amber-500/20 dark:bg-amber-500/5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-amber-500">
+                        <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M4 22V15" strokeLinecap="round" />
+                      </svg>
+                      <input
+                        autoFocus
+                        type="text"
+                        value={pendingFlagNote}
+                        onChange={(e) => setPendingFlagNote(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleToggleFlag(screening.id, false, pendingFlagNote.trim() || undefined);
+                          if (e.key === "Escape") { setPendingFlagId(null); setPendingFlagNote(""); }
+                        }}
+                        placeholder="Reason to come back? (optional)"
+                        className="flex-1 rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-amber-400 focus:ring-1 focus:ring-amber-200 dark:border-amber-500/30 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleToggleFlag(screening.id, false, pendingFlagNote.trim() || undefined)}
+                        className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600"
+                      >
+                        Flag
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPendingFlagId(null); setPendingFlagNote(""); }}
+                        className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
 
                   {expanded && (
                     <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
@@ -261,6 +414,32 @@ export default function HistoryPage() {
                             <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{screening.careerTrajectory}</p>
                           </div>
                         )}
+                      </div>
+
+                      {/* Notes */}
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Notes</span>
+                          {notesMap[screening.id]?.saveState === "saving" && (
+                            <span className="text-xs text-zinc-400 dark:text-zinc-500">Saving…</span>
+                          )}
+                          {notesMap[screening.id]?.saveState === "saved" && (
+                            <span className="text-xs text-emerald-500 dark:text-emerald-400">Saved</span>
+                          )}
+                        </div>
+                        <textarea
+                          value={getNotesText(screening)}
+                          onChange={(e) =>
+                            setNotesMap((prev) => ({
+                              ...prev,
+                              [screening.id]: { text: e.target.value, saveState: "idle" },
+                            }))
+                          }
+                          onBlur={(e) => saveNotes(screening.id, e.target.value)}
+                          placeholder="Add notes about this candidate…"
+                          rows={3}
+                          className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900 dark:focus:ring-violet-500/10"
+                        />
                       </div>
 
                       <details className="text-sm text-zinc-600 dark:text-zinc-300">

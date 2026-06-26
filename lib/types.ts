@@ -58,6 +58,9 @@ export interface ScreeningRecord {
   statusUpdatedAt?: string;
   jobDescription: string;
   resumeMimeType: string;
+  flagged: boolean;
+  flagNote?: string;
+  notes?: string;
   createdAt: string;
 }
 
