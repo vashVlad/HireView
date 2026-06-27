@@ -208,7 +208,7 @@ export default function ScreenerPage() {
 
             <CalibrationPanel />
 
-            <ResumeUploader files={files} onChange={setFiles} disabled={view === "loading"} />
+            <ResumeUploader files={files} onFilesChange={setFiles} />
 
             {formError && (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
@@ -276,10 +276,11 @@ export default function ScreenerPage() {
             )}
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {results.map((result) => (
+              {results.map((result, i) => (
                 <ResultCard
                   key={result.fileName}
                   result={result}
+                  rank={i + 1}
                   onStatusChange={handleStatusChange}
                 />
               ))}
