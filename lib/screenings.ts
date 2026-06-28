@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
-import type { CandidateResult, CandidateStatus, Recommendation, ScreeningRecord } from "./types";
+import type { CandidateResult, CandidateStatus, CredibilityAssessment, Recommendation, ScreeningRecord } from "./types";
 
 interface ScreeningRow {
   id: number;
@@ -22,6 +22,7 @@ interface ScreeningRow {
   flagged: boolean;
   flag_note: string | null;
   notes: string | null;
+  credibility: CredibilityAssessment | null;
   created_at: string;
 }
 
@@ -45,6 +46,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     flagged: row.flagged ?? false,
     ...(row.flag_note ? { flagNote: row.flag_note } : {}),
     ...(row.notes ? { notes: row.notes } : {}),
+    ...(row.credibility ? { credibility: row.credibility } : {}),
     createdAt: row.created_at,
   };
 }
@@ -94,7 +96,7 @@ export async function listScreenings(
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, credibility, created_at"
     )
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
@@ -194,13 +196,25 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
   const { data, error } = await supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, credibility, created_at"
     )
     .in("id", ids)
     .returns<ScreeningRow[]>();
   if (error) throw error;
 
   return (data ?? []).map(rowToRecord);
+}
+
+export async function updateScreeningCredibility(
+  id: number,
+  credibility: CredibilityAssessment
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("screenings")
+    .update({ credibility })
+    .eq("id", id);
+  if (error) throw error;
 }
 
 export async function deleteScreening(id: number): Promise<void> {

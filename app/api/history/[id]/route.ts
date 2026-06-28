@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteScreening, getScreeningsByIds, updateScreeningFlag, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
+import { deleteScreening, getScreeningsByIds, updateScreeningCredibility, updateScreeningFlag, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
 export async function GET(
@@ -57,6 +57,19 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => null);
+
+  // Save credibility assessment
+  if (body?.credibility && typeof body.credibility === "object") {
+    try {
+      await updateScreeningCredibility(screeningId, body.credibility);
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Unknown error" },
+        { status: 500 }
+      );
+    }
+  }
 
   // Update notes
   if (typeof body?.notes === "string") {

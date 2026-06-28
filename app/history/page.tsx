@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { InsightList } from "@/components/InsightList";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusSelect } from "@/components/StatusSelect";
-import { CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS, type CandidateStatus, type ScreeningRecord } from "@/lib/types";
+import { CredibilityChecker } from "@/components/CredibilityChecker";
+import { CredibilitySection } from "@/components/CredibilitySection";
+import { CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS, type CandidateStatus, type CredibilityAssessment, type ScreeningRecord } from "@/lib/types";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
@@ -30,13 +31,11 @@ function formatStatusDate(iso: string) {
 }
 
 export default function HistoryPage() {
-  const router = useRouter();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [flaggedFilter, setFlaggedFilter] = useState(false);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [statusCounts, setStatusCounts] = useState<Partial<Record<CandidateStatus, number>>>({});
-  const [comparisonCounts, setComparisonCounts] = useState<Record<number, number>>({});
   const [flaggedCount, setFlaggedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +46,9 @@ export default function HistoryPage() {
   const [pendingFlagNote, setPendingFlagNote] = useState("");
   // Per-card notes: { [screeningId]: { text, saveState: "idle"|"saving"|"saved" } }
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
+  // Per-card credibility assessments
+  const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
+  const [showCheckerForId, setShowCheckerForId] = useState<number | null>(null);
 
   function toggleStatusFilter(status: CandidateStatus) {
     setStatusFilter((prev) => (prev === status ? null : status));
@@ -141,8 +143,13 @@ export default function HistoryPage() {
         const fetched: ScreeningRecord[] = data.screenings ?? [];
         setScreenings(fetched);
         setStatusCounts(data.statusCounts ?? {});
-        setComparisonCounts(data.comparisonCounts ?? {});
         setFlaggedCount(fetched.filter((s) => s.flagged).length);
+        // Pre-populate credibility from persisted DB data
+        const savedCredibility: Record<number, import("@/lib/types").CredibilityAssessment> = {};
+        for (const s of fetched) {
+          if (s.credibility) savedCredibility[s.id] = s.credibility;
+        }
+        setCredibilityMap(savedCredibility);
       } catch (err) {
         if (err instanceof Error && err.name !== "AbortError") {
           setError(err.message);
@@ -414,12 +421,53 @@ export default function HistoryPage() {
 
                       <div className="flex flex-col gap-3">
                         <InsightList label="Strengths" items={screening.strengths} variant="positive" />
-                        <InsightList label="Concerns" items={screening.concerns} variant="warning" />
-                        {screening.careerTrajectory && (
+                        <InsightList label="Concerns" items={screening.concerns} variant="warning" screeningId={screening.id} />
+                        {screening.careerTrajectory && !credibilityMap[screening.id] && (
                           <div className="flex flex-col gap-1">
                             <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</span>
                             <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{screening.careerTrajectory}</p>
                           </div>
+                        )}
+
+                        {credibilityMap[screening.id] ? (
+                          <CredibilitySection assessment={credibilityMap[screening.id]} />
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setShowCheckerForId((prev) => prev === screening.id ? null : screening.id)}
+                              className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                                showCheckerForId === screening.id
+                                  ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400"
+                                  : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10 dark:hover:text-violet-400"
+                              }`}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="11" cy="11" r="8" />
+                                <path d="m21 21-4.35-4.35" strokeLinecap="round" />
+                              </svg>
+                              Check credibility
+                            </button>
+                            <div
+                              className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+                              style={{ gridTemplateRows: showCheckerForId === screening.id ? "1fr" : "0fr" }}
+                            >
+                              <div className="overflow-hidden">
+                                <CredibilityChecker
+                                  screeningId={screening.id}
+                                  onComplete={(assessment) => {
+                                    setCredibilityMap((prev) => ({ ...prev, [screening.id]: assessment }));
+                                    setShowCheckerForId(null);
+                                    fetch(`/api/history/${screening.id}`, {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ credibility: assessment }),
+                                    }).catch(() => {});
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </>
                         )}
                       </div>
 
@@ -459,50 +507,18 @@ export default function HistoryPage() {
                       </details>
 
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={`/api/history/${screening.id}/resume`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20"
-                          >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M12 4v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                              <path d="M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                            View resume
-                          </a>
-                          {(comparisonCounts[screening.id] ?? 0) > 0 ? (
-                            <a
-                              href={`/compare/${screening.id}`}
-                              className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20"
-                            >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                              Compared ({comparisonCounts[screening.id]})
-                            </a>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const params = new URLSearchParams({
-                                  id: String(screening.id),
-                                  name: screening.candidateName,
-                                  file: screening.fileName,
-                                  score: String(screening.score),
-                                });
-                                router.push(`/compare?${params.toString()}`);
-                              }}
-                              className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                            >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M8 7h12M8 12h12M8 17h12M3 7h.01M3 12h.01M3 17h.01" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                              Compare
-                            </button>
-                          )}
-                        </div>
+                        <a
+                          href={`/api/history/${screening.id}/resume`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 4v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          View resume
+                        </a>
 
                         {confirmDeleteId === screening.id ? (
                           <div className="flex items-center gap-2">

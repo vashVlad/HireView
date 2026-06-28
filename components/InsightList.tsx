@@ -45,16 +45,72 @@ function Icon({ variant }: { variant: keyof typeof ICON_STYLES }) {
   );
 }
 
+function ConcernItem({ item, screeningId }: { item: string; screeningId?: number }) {
+  const [detail, setDetail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function elaborate() {
+    if (detail || loading || !screeningId) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/elaborate-concern", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ screeningId, concern: item }),
+      });
+      const data = await res.json();
+      setDetail(data.detail ?? null);
+    } catch {
+      setDetail("Could not load details — try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <li className={`flex items-start gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-700 dark:text-zinc-300 ${ROW_STYLES.warning}`}>
+      <span className={`mt-0.5 shrink-0 ${ICON_STYLES.warning}`}>
+        <Icon variant="warning" />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <span>{item}</span>
+        <div
+          className="grid transition-[grid-template-rows] duration-200 ease-in-out"
+          style={{ gridTemplateRows: detail ? "1fr" : "0fr" }}
+        >
+          <div className="overflow-hidden">
+            <p className="pt-1 text-xs leading-relaxed text-amber-800/80 dark:text-amber-300/70">
+              {detail}
+            </p>
+          </div>
+        </div>
+        {screeningId && !detail && (
+          <button
+            type="button"
+            onClick={elaborate}
+            disabled={loading}
+            className="self-start text-[11px] font-medium text-amber-600 underline-offset-2 hover:underline disabled:opacity-50 dark:text-amber-400"
+          >
+            {loading ? "Loading…" : "More"}
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export function InsightList({
   label,
   items,
   variant,
   defaultOpen = true,
+  screeningId,
 }: {
   label: string;
   items: string[];
   variant: keyof typeof ICON_STYLES;
   defaultOpen?: boolean;
+  screeningId?: number;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -98,17 +154,21 @@ export function InsightList({
       >
         <div className="overflow-hidden">
           <ul className="flex flex-col gap-2 pt-2">
-            {items.map((item) => (
-              <li
-                key={item}
-                className={`flex items-start gap-2 rounded-md px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 ${ROW_STYLES[variant]}`}
-              >
-                <span className={`mt-0.5 shrink-0 ${ICON_STYLES[variant]}`}>
-                  <Icon variant={variant} />
-                </span>
-                <span>{item}</span>
-              </li>
-            ))}
+            {items.map((item) =>
+              variant === "warning" ? (
+                <ConcernItem key={item} item={item} screeningId={screeningId} />
+              ) : (
+                <li
+                  key={item}
+                  className={`flex items-start gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-700 dark:text-zinc-300 ${ROW_STYLES[variant]}`}
+                >
+                  <span className={`mt-0.5 shrink-0 ${ICON_STYLES[variant]}`}>
+                    <Icon variant={variant} />
+                  </span>
+                  <span>{item}</span>
+                </li>
+              )
+            )}
           </ul>
         </div>
       </div>

@@ -23,6 +23,10 @@ export async function POST(request: NextRequest) {
   const jobDescriptionField = formData.get("jobDescription");
   const jdFileField = formData.get("jdFile");
   const files = formData.getAll("resumes");
+  const roleContextField = formData.get("roleContext");
+  const roleContext = typeof roleContextField === "string" && roleContextField.trim()
+    ? roleContextField.trim()
+    : undefined;
 
   let jobDescription: string;
 
@@ -89,7 +93,8 @@ export async function POST(request: NextRequest) {
         jobDescription,
         resume.fileName,
         resume.text,
-        calibrationExamples
+        calibrationExamples,
+        roleContext
       );
       results.push(result);
 

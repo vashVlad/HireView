@@ -18,6 +18,26 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
   archived: "Archived",
 };
 
+// ── Credibility assessment ───────────────────────────────────────────────────
+
+export interface CredibilityRow {
+  field: string;       // e.g. "Current title", "Google (2019–2022)"
+  resume: string;      // What the resume says
+  linkedIn: string;    // What LinkedIn says, or "Not shown on LinkedIn"
+  status: "match" | "discrepancy" | "cannot_verify";
+  note?: string;       // Extra context for discrepancies
+}
+
+export type CredibilitySignal = "clean" | "minor_concerns" | "significant_concerns";
+
+export interface CredibilityAssessment {
+  rows: CredibilityRow[];
+  trajectoryNote: string;
+  industryNote: string;
+  resumeDelta?: string;  // Only present when a second resume was uploaded
+  overallSignal: CredibilitySignal;
+}
+
 export interface CandidateResult {
   id?: number;
   fileName: string;
@@ -31,6 +51,7 @@ export interface CandidateResult {
   careerTrajectory?: string;
   recommendation: Recommendation;
   status?: CandidateStatus;
+  credibility?: CredibilityAssessment;
 }
 
 export interface ScreenResumesResponse {
@@ -61,6 +82,7 @@ export interface ScreeningRecord {
   flagged: boolean;
   flagNote?: string;
   notes?: string;
+  credibility?: CredibilityAssessment;
   createdAt: string;
 }
 

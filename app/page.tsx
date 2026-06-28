@@ -21,6 +21,7 @@ export default function ScreenerPage() {
   const [jdFile, setJDFile] = useState<File | null>(null);
   const [jdDragging, setJDDragging] = useState(false);
   const jdFileRef = useRef<HTMLInputElement>(null);
+  const [roleContext, setRoleContext] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [view, setView] = useState<ViewState>("form");
   const [results, setResults] = useState<CandidateResult[]>([]);
@@ -60,6 +61,7 @@ export default function ScreenerPage() {
     } else {
       formData.set("jobDescription", jobDescription);
     }
+    if (roleContext.trim()) formData.set("roleContext", roleContext.trim());
     files.forEach((file) => formData.append("resumes", file));
 
     try {
@@ -206,6 +208,24 @@ export default function ScreenerPage() {
               )}
             </section>
 
+            <section className="flex flex-col gap-2">
+              <label htmlFor="role-context" className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                Role context <span className="font-normal text-zinc-400 dark:text-zinc-500">(optional)</span>
+              </label>
+              <input
+                id="role-context"
+                type="text"
+                value={roleContext}
+                onChange={(e) => setRoleContext(e.target.value)}
+                placeholder="e.g. Forward Deployed Engineer — must have enterprise SaaS deployment experience"
+                disabled={view === "loading"}
+                className="w-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-800 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-violet-500/20"
+              />
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                Extra context that helps Claude calibrate scoring and credibility checks for this specific role.
+              </p>
+            </section>
+
             <CalibrationPanel />
 
             <ResumeUploader files={files} onFilesChange={setFiles} />
@@ -231,13 +251,6 @@ export default function ScreenerPage() {
                 "Screen resumes"
               )}
             </button>
-          </div>
-        )}
-
-        {view === "loading" && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 py-20">
-            <span className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">Screening resumes…</p>
           </div>
         )}
 
@@ -275,16 +288,18 @@ export default function ScreenerPage() {
               </ul>
             )}
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="list-none flex flex-col gap-4">
               {results.map((result, i) => (
                 <ResultCard
                   key={result.fileName}
                   result={result}
                   rank={i + 1}
+                  roleContext={roleContext || undefined}
                   onStatusChange={handleStatusChange}
+                  solo
                 />
               ))}
-            </div>
+            </ul>
           </div>
         )}
       </main>

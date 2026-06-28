@@ -25,21 +25,21 @@ const SCORE_TOOL = {
       },
       summary: {
         type: "string",
-        description: "Score <30: 1 sentence on key gaps. 30-50: 1-2 sentences on coverage and gaps. 50+: 2 sentences on fit and gaps.",
+        description: "ONE sentence only. Format: '[what fits] — gap is [the single biggest gap].' Max 25 words. No filler.",
       },
       strengths: {
         type: "array",
         items: { type: "string" },
-        description: "Score <30: 0-1 items. 30-50: 2. 50+: 2-4. Only requirements the candidate clearly meets.",
+        description: "Each item: 'Skill/area: evidence in 5 words or fewer.' Example: 'FHIR/HL7: implemented at Abridge with audit logging.' No full sentences, no elaboration. Score <30: 0-1. 30-50: 1-2. 50+: 2-4.",
       },
       concerns: {
         type: "array",
         items: { type: "string" },
-        description: "Score <50: 1-2 items, 8 words max each. Score 50+: 2-4 items, 1-2 sentences each with specific context (what's missing, by how much, why it matters for this role). Must-haves first; skip learnable gaps.",
+        description: "Each item: 'Requirement: gap in 4-6 words.' Example: 'Health insurance ops: not evidenced.' No explanation. Must-haves first. Score <30: 1-2. 30-50: 2-3. 50+: 2-4.",
       },
       careerTrajectory: {
         type: "string",
-        description: "1-3 sentences on the candidate's role progression: does the sequence of positions lead naturally toward this role, and are there any suspicious patterns (frequent job hops, unexplained gaps, sudden domain shifts, title regression, lateral moves that don't build toward this type of role).",
+        description: "ONE sentence. Clean progression = confirm it. Flag only the single most notable issue if one exists. No elaboration.",
       },
     },
     required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory"],
@@ -64,7 +64,8 @@ export async function scoreCandidate(
   jobDescription: string,
   fileName: string,
   resumeText: string,
-  calibrationExamples: CalibrationExample[] = []
+  calibrationExamples: CalibrationExample[] = [],
+  roleContext?: string
 ): Promise<CandidateResult> {
   const content: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [];
 
@@ -80,7 +81,7 @@ export async function scoreCandidate(
     {
       type: "text",
       text: `Today is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}. Do not flag past dates as future.
-
+${roleContext ? `\nRole context from the recruiter: ${roleContext}\n` : ""}
 Score this resume against the job description. Must-haves drive 65%, nice-to-haves 35%.
 
 SCORING: 65-80 = covers core requirements, worth advancing. 80-90 = near-exceptional. Above 90 = rare. Don't penalize learnable or secondary gaps.
@@ -89,13 +90,17 @@ MUST-HAVES: "required", "must have", or items in a Requirements section. NICE-TO
 
 POSITION FIT: flag if seniority progression makes this role unrealistic. Don't penalize title mismatches where responsibilities overlap.
 
-CONCERNS FORMAT: Score <50: 8 words max each, experience gaps as ratios ("Insurance: 5/8 yrs"). Score 50+: 1-2 sentences each — name the gap, quantify it if possible, explain why it matters for this specific role. One gap per bullet. Must-haves first; skip learnable gaps.
+SUMMARY: One sentence. "[What fits] — gap is [single biggest gap]." 25 words max.
 
-CAREER TRAJECTORY: Describe the sequence of roles — does it build logically toward this position? Flag suspicious patterns: frequent job changes (<1 yr per role), unexplained gaps (>6 months), sudden domain shifts, title regression, or lateral moves that don't accumulate relevant experience. If the progression is clean and logical, say so briefly.
+STRENGTHS: "Skill: evidence in 5 words." No sentences. No elaboration.
+
+CONCERNS: "Requirement: gap in 4-6 words." No explanation. The recruiter will ask for more if they want it.
+
+CAREER TRAJECTORY: One sentence. State the fact.
 
 PRACTICAL EQUIVALENCE: 4-5 years with depth vs 8+ required = strong partial match. All must-haves met + missing nice-to-haves = 65-75.
 
-VERBOSITY: <30 = 1-sentence summary, 1-2 concerns, no strengths. 30-50 = 1-2 sentences, 2 strengths, 2-3 concerns. 50+ = 2 sentences, 2-4 strengths, 2-4 concerns.
+VERBOSITY: <30 = 0-1 strengths, 1-2 concerns. 30-50 = 1-2 strengths, 2-3 concerns. 50+ = 2-4 strengths, 2-4 concerns.
 
 Only assess resume vs JD${calibrationExamples.length > 0 ? " and calibration anchors above" : ""}. Ignore company prestige.
 
