@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
-import type { CandidateResult, CandidateStatus, CredibilityAssessment, Recommendation, ScreeningRecord } from "./types";
+import type { CandidateResult, CandidateStatus, CredibilityAssessment, Recommendation, ScreeningRecord, TrackerEntry, TrackerStage } from "./types";
 
 interface ScreeningRow {
   id: number;
@@ -214,6 +214,128 @@ export async function updateScreeningCredibility(
     .from("screenings")
     .update({ credibility })
     .eq("id", id);
+  if (error) throw error;
+}
+
+// ── Tracker ──────────────────────────────────────────────────────────────────
+
+interface TrackerRow {
+  screening_id: number;
+  stage: TrackerStage;
+  lever_id: string;
+  company: string;
+  role: string;
+  expected_level: string;
+  next_step: string;
+  steps_completed: string;
+  comments: string;
+  immigration: string;
+  on_hold: boolean;
+  on_hold_reason: string;
+  order_index: number | null;
+  created_at: string;
+}
+
+export async function getTrackerEntries(): Promise<TrackerEntry[]> {
+  const supabase = getSupabaseClient();
+
+  // Fetch all screenings with status = "interview"
+  const { data: screenings, error: sErr } = await supabase
+    .from("screenings")
+    .select("id, candidate_name, file_name, score, job_description, created_at")
+    .eq("status", "interview")
+    .order("created_at", { ascending: false })
+    .returns<Pick<ScreeningRow, "id" | "candidate_name" | "file_name" | "score" | "job_description" | "created_at">[]>();
+  if (sErr) throw sErr;
+  if (!screenings || screenings.length === 0) return [];
+
+  const ids = screenings.map((s) => s.id);
+
+  // Fetch tracker rows for those screenings
+  const { data: trackerRows, error: tErr } = await supabase
+    .from("tracker")
+    .select("screening_id, stage, lever_id, company, role, expected_level, next_step, steps_completed, comments, immigration, on_hold, on_hold_reason, order_index, created_at")
+    .in("screening_id", ids)
+    .returns<TrackerRow[]>();
+  if (tErr) throw tErr;
+
+  const trackerMap = new Map<number, TrackerRow>();
+  for (const row of trackerRows ?? []) {
+    trackerMap.set(row.screening_id, row);
+  }
+
+  const mapped = screenings.map((s) => {
+    const t = trackerMap.get(s.id);
+    return {
+      screeningId: s.id,
+      candidateName: s.candidate_name,
+      fileName: s.file_name,
+      score: s.score,
+      jobDescription: s.job_description,
+      stage: t?.stage ?? "TA",
+      leverId: t?.lever_id ?? "",
+      company: t?.company ?? "",
+      role: t?.role ?? "",
+      expectedLevel: t?.expected_level ?? "",
+      nextStep: t?.next_step ?? "",
+      stepsCompleted: t?.steps_completed ?? "",
+      comments: t?.comments ?? "",
+      immigration: t?.immigration ?? "",
+      onHold: t?.on_hold ?? false,
+      onHoldReason: t?.on_hold_reason ?? "",
+      orderIndex: t?.order_index ?? Infinity,
+      createdAt: s.created_at,
+    };
+  });
+
+  // Sort by explicit order first, fall back to created_at desc (already ordered above)
+  mapped.sort((a, b) => {
+    if (a.orderIndex === Infinity && b.orderIndex === Infinity) return 0;
+    if (a.orderIndex === Infinity) return 1;
+    if (b.orderIndex === Infinity) return -1;
+    return a.orderIndex - b.orderIndex;
+  });
+
+  return mapped;
+}
+
+export async function upsertTrackerEntry(
+  screeningId: number,
+  fields: Partial<Omit<TrackerEntry, "screeningId" | "candidateName" | "fileName" | "score" | "jobDescription" | "createdAt">>
+): Promise<void> {
+  const supabase = getSupabaseClient();
+
+  const payload: Record<string, unknown> = { screening_id: screeningId };
+  if (fields.stage !== undefined) payload.stage = fields.stage;
+  if (fields.leverId !== undefined) payload.lever_id = fields.leverId;
+  if (fields.company !== undefined) payload.company = fields.company;
+  if (fields.role !== undefined) payload.role = fields.role;
+  if (fields.expectedLevel !== undefined) payload.expected_level = fields.expectedLevel;
+  if (fields.nextStep !== undefined) payload.next_step = fields.nextStep;
+  if (fields.stepsCompleted !== undefined) payload.steps_completed = fields.stepsCompleted;
+  if (fields.comments !== undefined) payload.comments = fields.comments;
+  if (fields.immigration !== undefined) payload.immigration = fields.immigration;
+  if (fields.onHold !== undefined) payload.on_hold = fields.onHold;
+  if (fields.onHoldReason !== undefined) payload.on_hold_reason = fields.onHoldReason;
+  if (fields.orderIndex !== undefined) payload.order_index = fields.orderIndex;
+
+  const { error } = await supabase
+    .from("tracker")
+    .upsert(payload, { onConflict: "screening_id" });
+  if (error) throw error;
+}
+
+export async function reorderTrackerEntries(
+  order: { screeningId: number; orderIndex: number }[]
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  const rows = order.map(({ screeningId, orderIndex }) => ({
+    screening_id: screeningId,
+    order_index: orderIndex,
+  }));
+  const { error } = await supabase
+    .from("tracker")
+    .upsert(rows, { onConflict: "screening_id" });
   if (error) throw error;
 }
 

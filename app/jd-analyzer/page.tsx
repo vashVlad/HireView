@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Chip } from "@/components/Chip";
 import { CopyField } from "@/components/CopyField";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -8,6 +8,12 @@ import type { FilterConfig, JDAnalysis } from "@/lib/types";
 
 type ViewState = "form" | "loading" | "results";
 type SearchMode = "wide" | "narrow";
+type JDMode = "paste" | "upload";
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function OperatorBadge({ isMustHave }: { isMustHave: boolean }) {
   if (isMustHave) {
@@ -169,23 +175,50 @@ function FilterSetView({ config }: { config: FilterConfig }) {
 
 export default function Home() {
   const [jobDescription, setJobDescription] = useState("");
+  const [jdMode, setJDMode] = useState<JDMode>("paste");
+  const [jdFile, setJDFile] = useState<File | null>(null);
+  const [jdDragging, setJDDragging] = useState(false);
+  const jdFileRef = useRef<HTMLInputElement>(null);
   const [view, setView] = useState<ViewState>("form");
   const [mode, setMode] = useState<SearchMode>("wide");
   const [analysis, setAnalysis] = useState<JDAnalysis | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const canSubmit = jobDescription.trim().length > 0;
+  function handleJDFile(incoming: FileList | File[]) {
+    const file = Array.from(incoming).find((f) => /\.(pdf|docx|doc|txt)$/i.test(f.name));
+    if (file) setJDFile(file);
+  }
+
+  const jdReady = jdMode === "paste" ? jobDescription.trim().length > 0 : jdFile !== null;
+  const canSubmit = jdReady;
 
   async function handleSubmit() {
     if (!canSubmit) return;
     setFormError(null);
     setView("loading");
 
+    let jdText = jobDescription;
+
+    if (jdMode === "upload" && jdFile) {
+      try {
+        const formData = new FormData();
+        formData.append("file", jdFile);
+        const res = await fetch("/api/parse-jd", { method: "POST", body: formData });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Failed to parse file");
+        jdText = data.text;
+      } catch (err) {
+        setFormError(err instanceof Error ? err.message : "Failed to read file");
+        setView("form");
+        return;
+      }
+    }
+
     try {
       const response = await fetch("/api/analyze-jd", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobDescription }),
+        body: JSON.stringify({ jobDescription: jdText }),
       });
 
       if (!response.ok) {
@@ -206,6 +239,7 @@ export default function Home() {
   function handleReset() {
     setView("form");
     setAnalysis(null);
+    setJDFile(null);
   }
 
   return (
@@ -224,14 +258,101 @@ export default function Home() {
               </p>
             </div>
 
-            <textarea
-              value={jobDescription}
-              onChange={(e) => setJobDescription(e.target.value)}
-              placeholder="Paste the full job description here..."
-              rows={12}
-              disabled={view === "loading"}
-              className="w-full resize-none rounded-2xl border border-zinc-200 bg-white p-4 text-sm leading-relaxed text-zinc-800 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-violet-500/20"
-            />
+            <section className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">Job description</span>
+                <div className="flex items-center gap-0.5 rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-700 dark:bg-zinc-800/50">
+                  <button
+                    type="button"
+                    onClick={() => setJDMode("paste")}
+                    className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                      jdMode === "paste"
+                        ? "bg-white text-zinc-800 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    Paste
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJDMode("upload")}
+                    className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                      jdMode === "upload"
+                        ? "bg-white text-zinc-800 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                    }`}
+                  >
+                    Upload file
+                  </button>
+                </div>
+              </div>
+
+              {jdMode === "paste" ? (
+                <textarea
+                  value={jobDescription}
+                  onChange={(e) => setJobDescription(e.target.value)}
+                  placeholder="Paste the full job description here..."
+                  rows={12}
+                  disabled={view === "loading"}
+                  className="w-full resize-none rounded-2xl border border-zinc-200 bg-white p-4 text-sm leading-relaxed text-zinc-800 shadow-sm outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:ring-violet-500/20"
+                />
+              ) : jdFile ? (
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-xs font-semibold uppercase text-violet-600 dark:bg-violet-500/20 dark:text-violet-400">
+                      {jdFile.name.split(".").pop()}
+                    </div>
+                    <div className="flex flex-col overflow-hidden">
+                      <span className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                        {jdFile.name}
+                      </span>
+                      <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                        {formatFileSize(jdFile.size)}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setJDFile(null)}
+                    className="shrink-0 rounded-full p-1.5 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10"
+                    aria-label="Remove file"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+              ) : (
+                <label
+                  onDragOver={(e) => { e.preventDefault(); setJDDragging(true); }}
+                  onDragLeave={() => setJDDragging(false)}
+                  onDrop={(e) => { e.preventDefault(); setJDDragging(false); handleJDFile(e.dataTransfer.files); }}
+                  className={`group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-colors ${
+                    jdDragging
+                      ? "border-violet-400 bg-violet-50 dark:border-violet-500 dark:bg-violet-500/10"
+                      : "border-zinc-200 hover:border-violet-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-violet-600 dark:hover:bg-zinc-900"
+                  }`}
+                >
+                  <input
+                    ref={jdFileRef}
+                    type="file"
+                    accept=".pdf,.docx,.doc,.txt"
+                    className="hidden"
+                    onChange={(e) => e.target.files && handleJDFile(e.target.files)}
+                  />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-100 text-violet-600 transition-transform group-hover:scale-105 dark:bg-violet-500/10 dark:text-violet-400">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 16V4m0 0 4 4m-4-4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                    Drop the JD here, or click to browse
+                  </p>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500">PDF, Word, or plain text</p>
+                </label>
+              )}
+            </section>
 
             {formError && (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">

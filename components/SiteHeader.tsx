@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { href: "/", label: "Resume Screener", badge: null },
   { href: "/jd-analyzer", label: "JD Analyzer", badge: "Beta" },
   { href: "/history", label: "History", badge: null },
+  { href: "/tracker", label: "Tracker", badge: null },
 ] as const;
 
 type NavHref = (typeof NAV_ITEMS)[number]["href"];

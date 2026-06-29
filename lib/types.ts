@@ -1,12 +1,13 @@
 export type Recommendation = "proceed" | "decline";
 
-export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived";
+export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "interview" | "archived";
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
   "new_applicant",
   "recruiter_screen",
   "contacted",
   "screening",
+  "interview",
   "archived",
 ];
 
@@ -15,8 +16,36 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
   recruiter_screen: "Recruiter Screen",
   contacted: "Contacted",
   screening: "Screening",
+  interview: "Interview",
   archived: "Archived",
 };
+
+// ── Tracker ──────────────────────────────────────────────────────────────────
+
+export type TrackerStage = "TA" | "L1" | "L2" | "In-Person" | "Offer" | "Reject";
+
+export const TRACKER_STAGES: TrackerStage[] = ["TA", "L1", "L2", "In-Person", "Offer", "Reject"];
+
+export interface TrackerEntry {
+  screeningId: number;
+  candidateName: string;
+  fileName: string;
+  score: number;
+  jobDescription: string;
+  stage: TrackerStage;
+  leverId: string;
+  company: string;
+  role: string;
+  expectedLevel: string;
+  nextStep: string;
+  stepsCompleted: string;
+  comments: string;
+  immigration: string;
+  onHold: boolean;
+  onHoldReason: string;
+  orderIndex: number;
+  createdAt: string;
+}
 
 // ── Credibility assessment ───────────────────────────────────────────────────
 
