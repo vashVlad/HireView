@@ -74,11 +74,12 @@ function CredibilityRowItem({ row }: { row: CredibilityRow }) {
 }
 
 export function CredibilitySection({ assessment }: { assessment: CredibilityAssessment }) {
-  const { label, className } = SIGNAL_CONFIG[assessment.overallSignal];
+  const { label, className } = SIGNAL_CONFIG[assessment.overallSignal] ?? SIGNAL_CONFIG.minor_concerns;
   const [tab, setTab] = useState<"flags" | "matches">("flags");
 
-  const flags = assessment.rows.filter((r) => r.status === "discrepancy");
-  const matches = assessment.rows.filter((r) => r.status === "match");
+  const rows = assessment.rows ?? [];
+  const flags = rows.filter((r) => r.status === "discrepancy");
+  const matches = rows.filter((r) => r.status === "match");
 
   const activeRows = tab === "flags" ? flags : matches;
 
