@@ -6,6 +6,7 @@ import type { CandidateResult, CandidateStatus, CredibilityAssessment } from "@/
 import { CredibilityChecker } from "./CredibilityChecker";
 import { CredibilitySection } from "./CredibilitySection";
 import { InsightList } from "./InsightList";
+import { QuestionGenerator } from "./QuestionGenerator";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusSelect } from "./StatusSelect";
@@ -29,6 +30,7 @@ export function ResultCard({
     result.credibility ?? null
   );
   const [showChecker, setShowChecker] = useState(false);
+  const [showQuestion, setShowQuestion] = useState(false);
   const [trajectoryOpen, setTrajectoryOpen] = useState(true);
   const trajectoryRef = useRef<HTMLDivElement>(null);
 
@@ -148,6 +150,34 @@ export function ResultCard({
                     }).catch(() => {});
                   }}
                 />
+              </div>
+            </div>
+          </>
+        )}
+
+        {canCheck && (
+          <>
+            <button
+              type="button"
+              onClick={() => setShowQuestion((v) => !v)}
+              className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                showQuestion
+                  ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400"
+                  : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10 dark:hover:text-violet-400"
+              }`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Generate question
+            </button>
+            <div
+              className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+              style={{ gridTemplateRows: showQuestion ? "1fr" : "0fr" }}
+            >
+              <div className="overflow-hidden">
+                <QuestionGenerator screeningId={result.id!} />
               </div>
             </div>
           </>
