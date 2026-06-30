@@ -51,11 +51,11 @@ export interface TrackerEntry {
 // ── Credibility assessment ───────────────────────────────────────────────────
 
 export interface CredibilityRow {
-  field: string;       // e.g. "Current title", "Google (2019–2022)"
-  resume: string;      // What the resume says
-  linkedIn: string;    // What LinkedIn says, or "Not shown on LinkedIn"
+  field: string;
+  resume: string;
+  linkedIn: string;
   status: "match" | "discrepancy" | "cannot_verify";
-  note?: string;       // Extra context for discrepancies
+  note?: string;
 }
 
 export type CredibilitySignal = "clean" | "minor_concerns" | "significant_concerns";
@@ -64,7 +64,7 @@ export interface CredibilityAssessment {
   rows: CredibilityRow[];
   trajectoryNote: string;
   industryNote: string;
-  resumeDelta?: string;  // Only present when a second resume was uploaded
+  resumeDelta?: string;
   overallSignal: CredibilitySignal;
 }
 
@@ -118,7 +118,6 @@ export interface ScreeningRecord {
   createdAt: string;
 }
 
-
 // ── Full tracker data (all tracker table fields) ─────────────────────────────
 
 export interface FullTrackerData {
@@ -135,35 +134,7 @@ export interface FullTrackerData {
   scheduled?: boolean;
 }
 
-// ── Resume comparison ────────────────────────────────────────────────────────
-
-export type ComparisonVerdict = "consistent" | "minor_tweaks" | "significant_reframe" | "suspicious";
-
-export interface ResumeChange {
-  field: string;
-  inResumeA: string;
-  inResumeB: string;
-  severity: "minor" | "notable" | "red_flag";
-}
-
-export interface ResumeComparisonResult {
-  verdict: ComparisonVerdict;
-  summary: string;
-  changes: ResumeChange[];
-  redFlags: string[];
-}
-
-export interface ComparisonRecord {
-  id: number;
-  screeningId: number;
-  newResumeFilename: string;
-  newResumeRole: string | null;
-  verdict: ComparisonVerdict;
-  summary: string;
-  changes: ResumeChange[];
-  redFlags: string[];
-  createdAt: string;
-}
+// ── Calibration ───────────────────────────────────────────────────────────────
 
 export type CalibrationLabel = "good" | "bad";
 
