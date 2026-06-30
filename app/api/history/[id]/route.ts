@@ -1,47 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteScreening, getScreeningsByIds, updateScreeningCredibility, updateScreeningFlag, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
+import { deleteScreening, getScreeningsByIds, updateScreening, updateScreeningCredibility, updateScreeningFlag, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
 export async function GET(
-  _request: Request,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const screeningId = Number(id);
-  if (!Number.isInteger(screeningId)) {
-    return NextResponse.json({ error: "Invalid id" }, { status: 400 });
-  }
+  const numId = parseInt(id, 10);
+  if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
   try {
-    const records = await getScreeningsByIds([screeningId]);
-    if (!records[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const records = await getScreeningsByIds([numId]);
+    if (!records.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({ screening: records[0] });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id } = await params;
-  const screeningId = Number(id);
-
-  if (!Number.isInteger(screeningId)) {
-    return NextResponse.json({ error: "Invalid screening id" }, { status: 400 });
-  }
-
-  try {
-    await deleteScreening(screeningId);
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed" }, { status: 500 });
   }
 }
 
@@ -50,67 +23,48 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const screeningId = Number(id);
-
-  if (!Number.isInteger(screeningId)) {
-    return NextResponse.json({ error: "Invalid screening id" }, { status: 400 });
-  }
+  const numId = parseInt(id, 10);
+  if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
   const body = await request.json().catch(() => null);
-
-  // Save credibility assessment
-  if (body?.credibility && typeof body.credibility === "object") {
-    try {
-      await updateScreeningCredibility(screeningId, body.credibility);
-      return NextResponse.json({ ok: true });
-    } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Unknown error" },
-        { status: 500 }
-      );
-    }
-  }
-
-  // Update notes
-  if (typeof body?.notes === "string") {
-    try {
-      await updateScreeningNotes(screeningId, body.notes);
-      return NextResponse.json({ ok: true });
-    } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Unknown error" },
-        { status: 500 }
-      );
-    }
-  }
-
-  // Toggle flag
-  if (typeof body?.flagged === "boolean") {
-    try {
-      const flagNote = typeof body.flagNote === "string" ? body.flagNote : undefined;
-      await updateScreeningFlag(screeningId, body.flagged, flagNote);
-      return NextResponse.json({ ok: true });
-    } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Unknown error" },
-        { status: 500 }
-      );
-    }
-  }
-
-  const status = body?.status as CandidateStatus | undefined;
-
-  if (!status || !CANDIDATE_STATUSES.includes(status)) {
-    return NextResponse.json({ error: "Invalid status or flagged value" }, { status: 400 });
-  }
+  if (!body) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
   try {
-    await updateScreeningStatus(screeningId, status);
+    if (body.status !== undefined) {
+      if (!CANDIDATE_STATUSES.includes(body.status as CandidateStatus)) {
+        return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+      }
+      await updateScreeningStatus(numId, body.status as CandidateStatus);
+    }
+    if (body.flagged !== undefined) {
+      await updateScreeningFlag(numId, body.flagged, body.flagNote);
+    }
+    if (body.notes !== undefined) {
+      await updateScreeningNotes(numId, body.notes);
+    }
+    if (body.leverUrl !== undefined) {
+      await updateScreening(numId, { leverUrl: body.leverUrl });
+    }
+    if (body.credibility !== undefined) {
+      await updateScreeningCredibility(numId, body.credibility);
+    }
     return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const numId = parseInt(id, 10);
+  if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+  try {
+    await deleteScreening(numId);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Failed" }, { status: 500 });
   }
 }

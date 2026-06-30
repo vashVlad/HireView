@@ -23,9 +23,9 @@ export async function POST(request: NextRequest) {
   const jobDescriptionField = formData.get("jobDescription");
   const jdFileField = formData.get("jdFile");
   const files = formData.getAll("resumes");
-  const roleContextField = formData.get("roleContext");
-  const roleContext = typeof roleContextField === "string" && roleContextField.trim()
-    ? roleContextField.trim()
+  const projectIdField = formData.get("projectId");
+  const projectId = typeof projectIdField === "string" && projectIdField.trim()
+    ? parseInt(projectIdField.trim(), 10) || undefined
     : undefined;
 
   let jobDescription: string;
@@ -48,6 +48,12 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  // First non-empty line of the JD gives Claude a concise role label
+  const roleContext = jobDescription
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
 
   if (files.length === 0) {
     return NextResponse.json(
@@ -108,13 +114,11 @@ export async function POST(request: NextRequest) {
           const { id } = await saveScreening({
             result,
             jobDescription,
-            resumeFile: resume.buffer,
-            resumeMimeType: resume.mimeType,
+            projectId,
           });
           result.id = id;
-          result.status = "new_applicant";
-        } catch (error) {
-          console.error("Failed to save screening history:", error);
+        } catch (err) {
+          console.error("Failed to persist screening result:", err);
         }
       }
     } catch (error) {
@@ -125,14 +129,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Score the first resume alone so its call writes the job description
-  // into Anthropic's prompt cache. Firing every call at once would race —
-  // most would miss the cache and pay full price instead of the ~90%
-  // discounted cached rate. The rest can then run in parallel against a
-  // warm cache.
-  const [first, ...rest] = parsed;
-  if (first) await score(first);
-  await Promise.all(rest.map((resume) => score(resume)));
+  // Score up to 3 resumes concurrently to stay within Anthropic rate limits
+  // while still being meaningfully faster than sequential processing.
+  const CONCURRENCY = 3;
+  for (let i = 0; i < parsed.length; i += CONCURRENCY) {
+    await Promise.all(parsed.slice(i, i + CONCURRENCY).map(score));
+  }
 
   results.sort((a, b) => b.score - a.score);
 

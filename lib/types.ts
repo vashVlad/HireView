@@ -43,6 +43,7 @@ export interface TrackerEntry {
   immigration: string;
   onHold: boolean;
   onHoldReason: string;
+  scheduled: boolean;
   orderIndex: number;
   createdAt: string;
 }
@@ -111,8 +112,27 @@ export interface ScreeningRecord {
   flagged: boolean;
   flagNote?: string;
   notes?: string;
+  leverUrl?: string;
   credibility?: CredibilityAssessment;
+  projectId?: number;
   createdAt: string;
+}
+
+
+// ── Full tracker data (all tracker table fields) ─────────────────────────────
+
+export interface FullTrackerData {
+  stage?: TrackerStage;
+  company?: string;
+  role?: string;
+  expectedLevel?: string;
+  nextStep?: string;
+  stepsCompleted?: string;
+  comments?: string;
+  immigration?: string;
+  onHold?: boolean;
+  onHoldReason?: string;
+  scheduled?: boolean;
 }
 
 // ── Resume comparison ────────────────────────────────────────────────────────
@@ -155,6 +175,25 @@ export interface CalibrationExample {
   resumeMimeType: string;
   extractedText: string;
   createdAt: string;
+}
+
+// ── Projects ─────────────────────────────────────────────────────────────────
+
+export type ProjectStatus = "active" | "archived" | "closed";
+
+export interface Project {
+  id: number;
+  name: string;
+  jobDescription: string;
+  jdAnalysis: JDAnalysis | null;
+  status: ProjectStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectSummary extends Project {
+  screeningCount: number;
+  interviewCount: number;
 }
 
 export interface FilterConfig {

@@ -2,10 +2,8 @@ import Link from "next/link";
 import { ThemeToggle } from "./ThemeToggle";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Resume Screener", badge: null },
-  { href: "/jd-analyzer", label: "JD Analyzer", badge: "Beta" },
-  { href: "/history", label: "History", badge: null },
-  { href: "/tracker", label: "Tracker", badge: null },
+  { href: "/projects", label: "Projects" },
+  { href: "/candidates", label: "All Candidates" },
 ] as const;
 
 type NavHref = (typeof NAV_ITEMS)[number]["href"];
@@ -37,11 +35,6 @@ export function SiteHeader({ active }: { active: NavHref }) {
                   }`}
                 >
                   {item.label}
-                  {item.badge && (
-                    <span className="rounded-full bg-violet-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-500/20 dark:text-violet-400">
-                      {item.badge}
-                    </span>
-                  )}
                 </Link>
               );
             })}
