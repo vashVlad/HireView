@@ -192,4 +192,5 @@ export interface JDAnalysis {
   rationale: string;
   wide: FilterConfig;
   narrow: FilterConfig;
+  linkedInContext?: string;
 }

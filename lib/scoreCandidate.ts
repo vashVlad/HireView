@@ -1,6 +1,26 @@
 import { getAnthropicClient, CLAUDE_MODEL } from "./anthropic";
 import type { CalibrationExample, CandidateResult } from "./types";
 
+function detectLinkedInProfile(fileName: string, text: string): boolean {
+  if (fileName.toLowerCase().includes("linkedin")) return true;
+  const sample = text.slice(0, 1200).toLowerCase();
+  const markerHits = ["linkedin.com", "recommendations", " · ", "connections"].filter((m) =>
+    sample.includes(m)
+  ).length;
+  if (markerHits >= 2) return true;
+  // Bare section headers with no resume-style labels above them
+  const hasSections = /\bexperience\s*\n/i.test(sample) && /\beducation\s*\n/i.test(sample);
+  const noResumeLabels = !/resume|curriculum vitae|\bcv\b/.test(sample.slice(0, 300));
+  return hasSections && noResumeLabels;
+}
+
+const LINKEDIN_SCORING_NOTE = `LINKEDIN PROFILE NOTE: This document is a LinkedIn profile export, not a tailored resume.
+- Profiles are written for general audiences — do not penalise for a missing role-specific summary or objective
+- The Skills section reflects endorsements and personal curation, not exhaustive competency; cross-reference actual job duties described in Experience entries
+- Short gaps or omitted contract/consulting roles are common on LinkedIn; interpret charitably
+- Weight career trajectory signals heavily: company types, scope of responsibilities, progression pace
+- Focus scoring on depth and relevance of Experience entries, not keyword density`;
+
 const SCORE_TOOL = {
   name: "submit_score",
   description: "Submit the candidate's score and evaluation against the job description.",
@@ -65,8 +85,11 @@ export async function scoreCandidate(
   fileName: string,
   resumeText: string,
   calibrationExamples: CalibrationExample[] = [],
-  roleContext?: string
+  roleContext?: string,
+  linkedInContext?: string,
+  isLinkedInOverride?: boolean
 ): Promise<CandidateResult> {
+  const isLinkedIn = isLinkedInOverride ?? detectLinkedInProfile(fileName, resumeText);
   const content: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [];
 
   if (calibrationExamples.length > 0) {
@@ -82,6 +105,8 @@ export async function scoreCandidate(
       type: "text",
       text: `Today is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}. Do not flag past dates as future.
 ${roleContext ? `\nRole context from the recruiter: ${roleContext}\n` : ""}
+${isLinkedIn ? `\n${LINKEDIN_SCORING_NOTE}\n` : ""}
+${isLinkedIn && linkedInContext ? `\nROLE-SPECIFIC LINKEDIN SIGNALS: ${linkedInContext}\n` : ""}
 Score this resume against the job description. Must-haves drive 65%, nice-to-haves 35%.
 
 SCORING: 65-80 = covers core requirements, worth advancing. 80-90 = near-exceptional. Above 90 = rare. Don't penalize learnable or secondary gaps.

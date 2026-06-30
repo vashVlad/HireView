@@ -131,6 +131,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
   const [results, setResults] = useState<CandidateResult[]>([]);
   const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isLinkedInMode, setIsLinkedInMode] = useState(false);
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -152,6 +153,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
     formData.set("jobDescription", project.jobDescription);
     formData.set("roleContext", project.name);
     formData.set("projectId", String(project.id));
+    if (isLinkedInMode) formData.set("linkedInMode", "true");
     files.forEach((f) => formData.append("resumes", f));
 
     try {
@@ -217,9 +219,13 @@ function ScreenTab({ project, onScreeningsSaved }: {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Screen resumes</h3>
+        <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          {isLinkedInMode ? "Screen LinkedIn profiles" : "Screen resumes"}
+        </h3>
         <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-          Upload resumes and Claude will rank them against the saved job description.
+          {isLinkedInMode
+            ? "Upload LinkedIn profile PDFs and Claude will rank them against the saved job description."
+            : "Upload resumes and Claude will rank them against the saved job description."}
         </p>
       </div>
 
@@ -234,6 +240,18 @@ function ScreenTab({ project, onScreeningsSaved }: {
       <CalibrationPanel />
       <ResumeUploader files={files} onFilesChange={setFiles} />
 
+      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-zinc-200 px-4 py-3 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800/50">
+        <input
+          type="checkbox"
+          checked={isLinkedInMode}
+          onChange={(e) => setIsLinkedInMode(e.target.checked)}
+          className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600"
+        />
+        <span className="text-sm text-zinc-700 dark:text-zinc-300">
+          LinkedIn profiles <span className="text-zinc-400 dark:text-zinc-500">— adjusts scoring for profile PDFs instead of tailored resumes</span>
+        </span>
+      </label>
+
       {formError && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
           {formError}
@@ -246,9 +264,9 @@ function ScreenTab({ project, onScreeningsSaved }: {
         {screenView === "loading" ? (
           <>
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-            Screening resumes...
+            {isLinkedInMode ? "Screening profiles..." : "Screening resumes..."}
           </>
-        ) : "Screen resumes"}
+        ) : isLinkedInMode ? "Screen profiles" : "Screen resumes"}
       </button>
     </div>
   );
@@ -1395,5 +1413,5 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         )}
       </main>
     </div>
-  );
+    );
 }

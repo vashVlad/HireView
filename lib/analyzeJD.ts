@@ -67,10 +67,11 @@ const ANALYZE_TOOL = {
       jobTitles: { type: "array", items: { type: "string" }, description: "All equivalent titles a qualified candidate might hold." },
       jobFunctions: { type: "array", items: { type: "string" }, description: "LinkedIn functional categories." },
       rationale: { type: "string", description: "2-3 sentences on why key titles/filters were chosen." },
+      linkedInContext: { type: "string", description: "2-3 sentences on what a strong LinkedIn profile for this role typically looks like: expected career trajectory, company/industry types that signal fit, and what to look for in Experience entries beyond title matching. Written so an AI scorer can recognise a strong candidate from a LinkedIn profile export that may not use the exact JD keywords." },
       wide: { ...FILTER_CONFIG_SCHEMA, description: "Discovery filter set. Goal: 5k–15k results." },
       narrow: { ...FILTER_CONFIG_SCHEMA, description: "Execution filter set. Goal: 500–1k results." },
     },
-    required: ["mustHaveSkills", "niceToHaveSkills", "jobTitles", "jobFunctions", "rationale", "wide", "narrow"],
+    required: ["mustHaveSkills", "niceToHaveSkills", "jobTitles", "jobFunctions", "rationale", "linkedInContext", "wide", "narrow"],
   },
 };
 
@@ -82,28 +83,21 @@ NARROW (execution, 500–1k results): tight title boolean (3-5 core titles), tog
 
 BOOLEAN SYNTAX: operators UPPERCASE (AND, OR, NOT), quote multi-word phrases, avoid stop words.
 
+LINKEDIN_CONTEXT: Think about what a genuinely strong candidate for this role looks like on LinkedIn — not just title matches, but their career arc, the types of companies they would realistically come from, and what their Experience bullet points would say. Write 2-3 sentences that help an AI scorer recognise a strong match from a LinkedIn profile export that isn’t tailored to the JD. Focus on trajectory signals and company/industry patterns, not keywords.
+
 JOB DESCRIPTION:`;
+
 
 export async function analyzeJobDescription(jobDescription: string): Promise<JDAnalysis> {
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 2000,
-    tools: [{ ...ANALYZE_TOOL, cache_control: { type: "ephemeral" } }],
+    max_tokens: 4096,
+    tools: [ANALYZE_TOOL],
     tool_choice: { type: "tool", name: "submit_jd_analysis" },
     messages: [
       {
         role: "user",
-        content: [
-          {
-            type: "text",
-            text: INSTRUCTIONS,
-            cache_control: { type: "ephemeral" },
-          },
-          {
-            type: "text",
-            text: jobDescription,
-          },
-        ],
+        content: `${INSTRUCTIONS}\n\n${jobDescription}`,
       },
     ],
   });

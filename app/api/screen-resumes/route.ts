@@ -3,6 +3,7 @@ import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { saveScreening } from "@/lib/screenings";
+import { getProject } from "@/lib/projects";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
   const projectId = typeof projectIdField === "string" && projectIdField.trim()
     ? parseInt(projectIdField.trim(), 10) || undefined
     : undefined;
+  const linkedInModeOverride = formData.get("linkedInMode") === "true";
 
   let jobDescription: string;
 
@@ -54,6 +56,13 @@ export async function POST(request: NextRequest) {
     .split("\n")
     .map((l) => l.trim())
     .find((l) => l.length > 0);
+
+  // Pull LinkedIn profile scoring context from the project's JD analysis if available
+  let linkedInContext: string | undefined;
+  if (projectId) {
+    const project = await getProject(projectId).catch(() => null);
+    linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
+  }
 
   if (files.length === 0) {
     return NextResponse.json(
@@ -100,7 +109,9 @@ export async function POST(request: NextRequest) {
         resume.fileName,
         resume.text,
         calibrationExamples,
-        roleContext
+        roleContext,
+        linkedInContext,
+        linkedInModeOverride
       );
       results.push(result);
 
