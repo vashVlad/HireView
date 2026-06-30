@@ -114,6 +114,8 @@ export async function POST(request: NextRequest) {
           const { id } = await saveScreening({
             result,
             jobDescription,
+            resumeFile: resume.buffer,
+            resumeMimeType: resume.mimeType,
             projectId,
           });
           result.id = id;
