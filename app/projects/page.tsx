@@ -206,11 +206,11 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 <div className="flex items-center gap-4 border-t border-zinc-100 pt-3 dark:border-zinc-700/50">
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Seniority</span>
-                    <span className="text-sm text-zinc-700 dark:text-zinc-200">{analysis.seniorityLevel}</span>
+                    <span className="text-sm text-zinc-700 dark:text-zinc-200">{analysis.narrow.seniority.join(", ")}</span>
                   </div>
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Experience</span>
-                    <span className="text-sm text-zinc-700 dark:text-zinc-200">{analysis.yearsOfExperience}</span>
+                    <span className="text-sm text-zinc-700 dark:text-zinc-200">{analysis.narrow.yearsExperience}</span>
                   </div>
                 </div>
               </div>

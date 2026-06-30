@@ -333,7 +333,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       const res = await fetch(`/api/history/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
       setScreenings((prev) => prev.filter((s) => s.id !== id));
-      setExpandedId((cur) => cur === id ? null : cur);
+      setExpandedId(expandedId === id ? null : expandedId);
     } catch { /* show nothing */ }
     finally {
       setDeletingId(null);
