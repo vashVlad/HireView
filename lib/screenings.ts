@@ -251,6 +251,7 @@ export async function upsertTrackerEntry(
       ...(fields.onHold !== undefined && { on_hold: fields.onHold }),
       ...(fields.onHoldReason !== undefined && { on_hold_reason: fields.onHoldReason }),
       ...(fields.scheduled !== undefined && { scheduled: fields.scheduled }),
+      ...(fields.interviewDate !== undefined && { interview_date: fields.interviewDate }),
       ...(fields.orderIndex !== undefined && { order_index: fields.orderIndex }),
     },
     { onConflict: "screening_id" }
@@ -282,7 +283,7 @@ export async function getFullTrackerEntries(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("tracker")
-    .select("screening_id, stage, company, role, expected_level, next_step, steps_completed, comments, immigration, on_hold, on_hold_reason, scheduled")
+    .select("screening_id, stage, company, role, expected_level, next_step, steps_completed, comments, immigration, on_hold, on_hold_reason, scheduled, interview_date")
     .in("screening_id", screeningIds);
   if (error) throw error;
   const map: Record<number, FullTrackerData> = {};
@@ -299,6 +300,7 @@ export async function getFullTrackerEntries(
       onHold: (row.on_hold as boolean) ?? false,
       onHoldReason: (row.on_hold_reason as string) ?? undefined,
       scheduled: (row.scheduled as boolean) ?? false,
+      interviewDate: (row.interview_date as string) ?? undefined,
     };
   }
   return map;

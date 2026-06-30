@@ -10,6 +10,7 @@ interface CalibrationExampleRow {
   resume_path: string;
   resume_mime_type: string;
   extracted_text: string;
+  project_id: number | null;
   created_at: string;
 }
 
@@ -32,8 +33,9 @@ export async function saveCalibrationExample(params: {
   extractedText: string;
   resumeFile: Buffer;
   resumeMimeType: string;
+  projectId?: number;
 }): Promise<CalibrationExample> {
-  const { label, note, fileName, extractedText, resumeFile, resumeMimeType } = params;
+  const { label, note, fileName, extractedText, resumeFile, resumeMimeType, projectId } = params;
   const supabase = getSupabaseClient();
 
   const resumePath = `calibration/${randomUUID()}/${fileName}`;
@@ -51,6 +53,7 @@ export async function saveCalibrationExample(params: {
       resume_path: resumePath,
       resume_mime_type: resumeMimeType,
       extracted_text: extractedText,
+      project_id: projectId ?? null,
     })
     .select()
     .single<CalibrationExampleRow>();
@@ -59,14 +62,19 @@ export async function saveCalibrationExample(params: {
   return rowToExample(insert.data);
 }
 
-export async function listCalibrationExamples(): Promise<CalibrationExample[]> {
+export async function listCalibrationExamples(projectId?: number): Promise<CalibrationExample[]> {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("calibration_examples")
-    .select("id, label, note, file_name, resume_mime_type, extracted_text, created_at")
-    .order("created_at", { ascending: false })
-    .returns<CalibrationExampleRow[]>();
+    .select("id, label, note, file_name, resume_mime_type, extracted_text, project_id, created_at")
+    .order("created_at", { ascending: false });
+
+  if (projectId != null) {
+    query = query.eq("project_id", projectId);
+  }
+
+  const { data, error } = await query.returns<CalibrationExampleRow[]>();
   if (error) throw error;
 
   return (data ?? []).map(rowToExample);

@@ -14,9 +14,12 @@ function resolveMimeType(file: File): string {
   return MIME_TYPES_BY_EXTENSION[extension] ?? "application/octet-stream";
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const projectIdParam = request.nextUrl.searchParams.get("projectId");
+  const projectId = projectIdParam ? parseInt(projectIdParam, 10) || undefined : undefined;
+
   try {
-    const examples = await listCalibrationExamples();
+    const examples = await listCalibrationExamples(projectId);
     return NextResponse.json({ examples });
   } catch (error) {
     return NextResponse.json(
@@ -31,9 +34,14 @@ export async function POST(request: NextRequest) {
   const labelField = formData.get("label");
   const noteField = formData.get("note");
   const file = formData.get("resume");
+  const projectIdField = formData.get("projectId");
+  const projectId =
+    typeof projectIdField === "string" && projectIdField.trim()
+      ? parseInt(projectIdField.trim(), 10) || undefined
+      : undefined;
 
   if (labelField !== "good" && labelField !== "bad") {
-    return NextResponse.json({ error: "label must be \"good\" or \"bad\"" }, { status: 400 });
+    return NextResponse.json({ error: 'label must be "good" or "bad"' }, { status: 400 });
   }
   const label: CalibrationLabel = labelField;
 
@@ -54,6 +62,7 @@ export async function POST(request: NextRequest) {
       extractedText,
       resumeFile: buffer,
       resumeMimeType: resolveMimeType(file),
+      projectId,
     });
 
     return NextResponse.json({ example });

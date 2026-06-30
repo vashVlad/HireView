@@ -75,7 +75,8 @@ export async function POST(request: NextRequest) {
   const errors: ScreenResumesError[] = [];
 
   // Best-effort: a calibration library issue shouldn't block screening.
-  const calibrationExamples = await listCalibrationExamples().catch(() => []);
+  // Scoped to the current project so examples from other projects don't bleed in.
+  const calibrationExamples = await listCalibrationExamples(projectId).catch(() => []);
 
   // Extract text for every resume first — this is local parsing, no API
   // calls, so it's free to fully parallelize.

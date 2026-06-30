@@ -44,6 +44,7 @@ export interface TrackerEntry {
   onHold: boolean;
   onHoldReason: string;
   scheduled: boolean;
+  interviewDate?: string;
   orderIndex: number;
   createdAt: string;
 }
@@ -132,6 +133,7 @@ export interface FullTrackerData {
   onHold?: boolean;
   onHoldReason?: string;
   scheduled?: boolean;
+  interviewDate?: string;
 }
 
 // ── Calibration ───────────────────────────────────────────────────────────────

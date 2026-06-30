@@ -46,6 +46,7 @@ export async function PATCH(
       ...(body.onHold !== undefined && { onHold: body.onHold }),
       ...(body.onHoldReason !== undefined && { onHoldReason: body.onHoldReason }),
       ...(body.scheduled !== undefined && { scheduled: body.scheduled }),
+      ...(body.interviewDate !== undefined && { interviewDate: body.interviewDate }),
       ...(body.orderIndex !== undefined && { orderIndex: body.orderIndex }),
     });
     return NextResponse.json({ ok: true });

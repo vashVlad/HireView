@@ -237,7 +237,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
         <span className="text-sm text-violet-700 dark:text-violet-300">Using job description saved to <strong>{project.name}</strong></span>
       </div>
 
-      <CalibrationPanel />
+      <CalibrationPanel projectId={project.id} />
 
       <div className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
         <span className="text-sm text-zinc-700 dark:text-zinc-300">
@@ -278,11 +278,12 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
 // ── Pipeline tab ───────────────────────────────────────────────────────────
 
-function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onStageChange, expandedId: externalExpandedId, onExpandedChange }: {
+function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onStageChange, onStatusChange, expandedId: externalExpandedId, onExpandedChange }: {
   screenings: ScreeningRecord[];
   projectId: number;
   stagesMap: Record<number, TrackerStage>;
   onStageChange: (id: number, stage: TrackerStage) => void;
+  onStatusChange?: (id: number, status: CandidateStatus) => void;
   expandedId?: number | null;
   onExpandedChange?: (id: number | null) => void;
 }) {
@@ -332,6 +333,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   async function handleStatusChange(id: number, status: CandidateStatus) {
     const now = new Date().toISOString();
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: now } : s));
+    onStatusChange?.(id, status);
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
     } catch { /* non-fatal */ }
@@ -725,6 +727,7 @@ function DrawerBody({
   const [onHold, setOnHold] = useState(trackerEntry.onHold ?? false);
   const [onHoldReason, setOnHoldReason] = useState(trackerEntry.onHoldReason ?? "");
   const [scheduled, setScheduled] = useState(trackerEntry.scheduled ?? false);
+  const [interviewDate, setInterviewDate] = useState(trackerEntry.interviewDate ?? "");
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -745,6 +748,7 @@ function DrawerBody({
     setOnHold(trackerEntry.onHold ?? false);
     setOnHoldReason(trackerEntry.onHoldReason ?? "");
     setScheduled(trackerEntry.scheduled ?? false);
+    setInterviewDate(trackerEntry.interviewDate ?? "");
   }, [selected.id]);
 
   function flashSaved(key: string) {
@@ -821,6 +825,14 @@ function DrawerBody({
           <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Click to toggle</p>
         </div>
       </button>
+
+      {/* Interview date */}
+      <div>
+        <FieldLabel label="Interview date" fkey="interviewDate" />
+        <input type="date" value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
+          onBlur={(e) => saveTrackerField({ interviewDate: e.target.value }, "interviewDate")}
+          className={inputCls} />
+      </div>
 
       {/* Lever URL */}
       <div>
@@ -1012,7 +1024,8 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
         "Steps Completed": td.stepsCompleted ?? "",
         "Comments": td.comments ?? "",
         "Immigration": td.immigration ?? "",
-        "On Hold": td.onHold ? (td.onHoldReason ? `Yes — ${td.onHoldReason}` : "Yes") : "No",
+        "Interview Date": td.interviewDate ?? "",
+             "On Hold": td.onHold ? (td.onHoldReason ? `Yes — ${td.onHoldReason}` : "Yes") : "No",
         "Lever URL": s.leverUrl ?? "",
       };
     });
@@ -1146,6 +1159,11 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                             <circle cx="2" cy="12" r="1.5"/><circle cx="6" cy="12" r="1.5"/>
                           </svg>
                           <span className="font-medium text-zinc-900 dark:text-zinc-100">{s.candidateName}</span>
+                          {trackerData[s.id]?.interviewDate && (
+                            <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                              {new Date(trackerData[s.id].interviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
+                          )}
                           {!isUnplaced && (
                             trackerData[s.id]?.scheduled
                               ? <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" title="Scheduled" />
@@ -1402,7 +1420,18 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           <ScreenTab project={project} onScreeningsSaved={loadScreenings} />
         )}
         {tab === "pipeline" && (
-          <PipelineTab screenings={screenings} projectId={project.id} stagesMap={stagesMap} onStageChange={handleStageChange} expandedId={expandedId} onExpandedChange={setExpandedId} />
+          <PipelineTab
+            screenings={screenings}
+            projectId={project.id}
+            stagesMap={stagesMap}
+            onStageChange={handleStageChange}
+            onStatusChange={(id, status) => {
+              const now = new Date().toISOString();
+              setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: now } : s));
+            }}
+            expandedId={expandedId}
+            onExpandedChange={setExpandedId}
+          />
         )}
         {tab === "tracker" && (
           <TrackerTab
@@ -1425,5 +1454,5 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         )}
       </main>
     </div>
-    );
+  );
 }

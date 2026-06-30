@@ -1,16 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { CalibrationExample, CalibrationLabel } from "@/lib/types";
+import type { CalibrationExample } from "@/lib/types";
 
-export function CalibrationPanel() {
+export function CalibrationPanel({ projectId }: { projectId?: number }) {
   const [examples, setExamples] = useState<CalibrationExample[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const [file, setFile] = useState<File | null>(null);
-  const [label, setLabel] = useState<CalibrationLabel>("good");
-  const [note, setNote] = useState("");
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -18,9 +14,12 @@ export function CalibrationPanel() {
   async function refresh() {
     setLoading(true);
     try {
-      const response = await fetch("/api/calibration-examples");
-      if (!response.ok) throw new Error("Failed to load calibration examples");
-      const data = await response.json();
+      const url = projectId != null
+        ? `/api/calibration-examples?projectId=${projectId}`
+        : "/api/calibration-examples";
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to load");
+      const data = await res.json();
       setExamples(Array.isArray(data.examples) ? data.examples : []);
     } catch {
       setError("Couldn't load calibration examples.");
@@ -30,31 +29,24 @@ export function CalibrationPanel() {
   }
 
   useEffect(() => {
-    const timeout = setTimeout(refresh, 0);
-    return () => clearTimeout(timeout);
-  }, []);
+    const t = setTimeout(refresh, 0);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
-  async function handleUpload() {
-    if (!file) return;
+  async function handleFileChange(file: File) {
     setUploading(true);
     setError(null);
-
     const formData = new FormData();
-    formData.set("label", label);
-    formData.set("note", note);
+    formData.set("label", "good");
     formData.set("resume", file);
-
+    if (projectId != null) formData.set("projectId", String(projectId));
     try {
-      const response = await fetch("/api/calibration-examples", {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
+      const res = await fetch("/api/calibration-examples", { method: "POST", body: formData });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "Failed to add example");
       }
-      setFile(null);
-      setNote("");
       if (fileInputRef.current) fileInputRef.current.value = "";
       await refresh();
     } catch (err) {
@@ -67,8 +59,8 @@ export function CalibrationPanel() {
   async function handleDelete(id: number) {
     setDeletingId(id);
     try {
-      const response = await fetch(`/api/calibration-examples/${id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Failed to delete");
+      const res = await fetch(`/api/calibration-examples/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete");
       setExamples((prev) => prev.filter((e) => e.id !== id));
     } catch {
       setError("Couldn't delete that example.");
@@ -88,23 +80,16 @@ export function CalibrationPanel() {
             </span>
           )}
         </span>
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          className="shrink-0 text-zinc-400 transition-transform group-open:rotate-180"
-        >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          className="shrink-0 text-zinc-400 transition-transform group-open:rotate-180">
           <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </summary>
 
       <div className="flex flex-col gap-4 border-t border-zinc-100 px-4 py-4 dark:border-zinc-800">
         <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-          Upload resumes you&apos;ve marked acceptable or not acceptable for roles like this. Claude uses
-          them to calibrate your bar — not as templates candidates must match.
+          Upload resumes you&apos;d consider acceptable for this type of role. Claude uses them to calibrate
+          your bar &mdash; not as templates candidates must match.
         </p>
 
         {error && (
@@ -113,43 +98,16 @@ export function CalibrationPanel() {
           </div>
         )}
 
-        {loading ? (
-          <p className="text-xs text-zinc-400">Loading…</p>
-        ) : examples.length === 0 ? (
-          <p className="text-xs text-zinc-400">No calibration examples yet.</p>
-        ) : (
+        {!loading && examples.length > 0 && (
           <ul className="flex flex-col gap-2">
             {examples.map((example) => (
-              <li
-                key={example.id}
-                className="flex items-start justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950"
-              >
-                <div className="flex flex-col gap-1 overflow-hidden">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                        example.label === "good"
-                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
-                          : "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400"
-                      }`}
-                    >
-                      {example.label === "good" ? "Acceptable" : "Not acceptable"}
-                    </span>
-                    <span className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                      {example.fileName}
-                    </span>
-                  </div>
-                  {example.note && (
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">{example.note}</span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(example.id)}
+              <li key={example.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-950">
+                <span className="truncate text-sm text-zinc-700 dark:text-zinc-200">{example.fileName}</span>
+                <button type="button" onClick={() => handleDelete(example.id)}
                   disabled={deletingId === example.id}
                   aria-label={`Remove ${example.fileName}`}
-                  className="shrink-0 rounded-full p-1.5 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-500 disabled:opacity-50 dark:hover:bg-rose-500/10"
-                >
+                  className="shrink-0 rounded-full p-1.5 text-zinc-400 transition-colors hover:bg-rose-50 hover:text-rose-500 disabled:opacity-50 dark:hover:bg-rose-500/10">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
                   </svg>
@@ -159,40 +117,35 @@ export function CalibrationPanel() {
           </ul>
         )}
 
-        <div className="flex flex-col gap-2 rounded-xl border border-dashed border-zinc-200 p-3 dark:border-zinc-700">
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={label}
-              onChange={(e) => setLabel(e.target.value as CalibrationLabel)}
-              className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-sm text-zinc-700 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-            >
-              <option value="good">Acceptable</option>
-              <option value="bad">Not acceptable</option>
-            </select>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.docx"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="flex-1 text-xs text-zinc-500 dark:text-zinc-400"
-            />
-          </div>
+        <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-3.5 text-sm font-medium transition-colors
+          ${uploading
+            ? "border-violet-200 bg-violet-50/40 text-violet-400 dark:border-violet-700/40 dark:bg-violet-500/5 dark:text-violet-500"
+            : "border-violet-300 bg-violet-50/60 text-violet-600 hover:border-violet-400 hover:bg-violet-50 dark:border-violet-600/50 dark:bg-violet-500/5 dark:text-violet-400 dark:hover:bg-violet-500/10"
+          }`}>
+          {uploading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-300 border-t-violet-600" />
+              Uploading&hellip;
+            </>
+          ) : (
+            <>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+                <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
+                <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" />
+              </svg>
+              Choose file
+            </>
+          )}
           <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder='Optional note (e.g. "too junior for this level")'
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:placeholder:text-zinc-500"
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.docx"
+            className="sr-only"
+            disabled={uploading}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileChange(f); }}
           />
-          <button
-            type="button"
-            onClick={handleUpload}
-            disabled={!file || uploading}
-            className="self-end rounded-lg bg-zinc-900 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
-          >
-            {uploading ? "Adding…" : "Add example"}
-          </button>
-        </div>
+        </label>
       </div>
     </details>
   );
