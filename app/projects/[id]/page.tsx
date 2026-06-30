@@ -46,9 +46,44 @@ function formatStatusDate(iso: string) {
 
 // ── Filters tab ────────────────────────────────────────────────────────────
 
-function FiltersTab({ analysis, projectId }: { analysis: JDAnalysis; projectId: number }) {
+function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: {
+  analysis: JDAnalysis;
+  projectId: number;
+  jobDescription: string;
+  onAnalysisUpdated: (analysis: JDAnalysis, jobDescription: string) => void;
+}) {
   const [open, setOpen] = useState(true);
   const [mode, setMode] = useState<SearchMode>("narrow");
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeOpen, setReanalyzeOpen] = useState(false);
+  const [jdText, setJdText] = useState(jobDescription);
+  const [reanalyzeError, setReanalyzeError] = useState<string | null>(null);
+
+  async function handleReanalyze() {
+    if (!jdText.trim()) return;
+    setReanalyzeError(null);
+    setReanalyzing(true);
+    try {
+      const res = await fetch("/api/analyze-jd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: jdText }),
+      });
+      if (!res.ok) throw new Error("Analysis failed");
+      const { analysis: newAnalysis } = await res.json();
+      await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobDescription: jdText, jdAnalysis: newAnalysis }),
+      });
+      onAnalysisUpdated(newAnalysis, jdText);
+      setReanalyzeOpen(false);
+    } catch {
+      setReanalyzeError("Re-analysis failed. Try again.");
+    } finally {
+      setReanalyzing(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -107,11 +142,37 @@ function FiltersTab({ analysis, projectId }: { analysis: JDAnalysis; projectId: 
               </div>
 
               <div className="border-t border-zinc-100 pt-4 dark:border-zinc-800">
-                <Link href={`/jd-analyzer?projectId=${projectId}`}
+                <button type="button" onClick={() => { setReanalyzeOpen((v) => !v); setJdText(jobDescription); setReanalyzeError(null); }}
                   className="text-xs text-zinc-400 underline underline-offset-2 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300">
                   Re-analyze JD
-                </Link>
+                </button>
               </div>
+
+              {reanalyzeOpen && (
+                <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-900/60">
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">Paste the correct job description to replace the current analysis.</p>
+                  <textarea
+                    value={jdText}
+                    onChange={(e) => setJdText(e.target.value)}
+                    rows={8}
+                    className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                    placeholder="Paste job description here..."
+                  />
+                  {reanalyzeError && (
+                    <p className="text-xs text-rose-500">{reanalyzeError}</p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={handleReanalyze} disabled={reanalyzing || !jdText.trim()}
+                      className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
+                      {reanalyzing ? "Analyzing…" : "Re-analyze"}
+                    </button>
+                    <button type="button" onClick={() => setReanalyzeOpen(false)}
+                      className="text-sm text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1405,7 +1466,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         {/* Tab content */}
         {/* Tab content */}
         {tab === "filters" && project.jdAnalysis && (
-          <FiltersTab analysis={project.jdAnalysis} projectId={project.id} />
+          <FiltersTab
+            analysis={project.jdAnalysis}
+            projectId={project.id}
+            jobDescription={project.jobDescription}
+            onAnalysisUpdated={(newAnalysis, newJd) => setProject((p) => p ? { ...p, jdAnalysis: newAnalysis, jobDescription: newJd } : p)}
+          />
         )}
         {tab === "filters" && !project.jdAnalysis && (
           <div className="flex flex-col items-center gap-4 py-12 text-center">
