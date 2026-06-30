@@ -344,11 +344,33 @@ export default function CandidatesPage() {
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
         {/* Header */}
-        <div className="mb-8 flex flex-col gap-1">
-          <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">All Candidates</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {loading ? "Loading..." : `${screenings.length} candidate${screenings.length !== 1 ? "s" : ""} across all roles`}
-          </p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">All Candidates</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              {loading ? "Loading..." : projectFilter && projectFilter !== -1
+                ? `${filtered.length} candidate${filtered.length !== 1 ? "s" : ""} in ${projects.find((p) => p.id === projectFilter)?.name ?? "this role"}`
+                : projectFilter === -1
+                ? `${filtered.length} candidate${filtered.length !== 1 ? "s" : ""} with no role`
+                : `${screenings.length} candidate${screenings.length !== 1 ? "s" : ""} across all roles`}
+            </p>
+          </div>
+          {projects.length > 0 && (
+            <select
+              value={projectFilter ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                setProjectFilter(v === "" ? null : v === "-1" ? -1 : parseInt(v, 10));
+              }}
+              className="max-w-[200px] truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 shadow-sm outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+            >
+              <option value="">All roles</option>
+              {projects.map((p) => (
+                <option key={p.id} value={String(p.id)}>{p.name}</option>
+              ))}
+              <option value="-1">No role</option>
+            </select>
+          )}
         </div>
 
         {/* Filters */}
@@ -386,26 +408,6 @@ export default function CandidatesPage() {
             ))}
           </div>
 
-          {/* Role filter */}
-          {projects.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <span className="self-center text-xs text-zinc-400 dark:text-zinc-500">Role:</span>
-              <button type="button" onClick={() => setProjectFilter(null)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${!projectFilter ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
-                All
-              </button>
-              {projects.map((p) => (
-                <button key={p.id} type="button" onClick={() => setProjectFilter((prev) => prev === p.id ? null : p.id)}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${projectFilter === p.id ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
-                  {p.name}
-                </button>
-              ))}
-              <button type="button" onClick={() => setProjectFilter(-1)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${projectFilter === -1 ? "border-zinc-400 bg-zinc-100 text-zinc-700 dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-300" : "border-zinc-200 bg-white text-zinc-400 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-500"}`}>
-                No role
-              </button>
-            </div>
-          )}
 
           {/* Active filter summary */}
           {(statusFilter || projectFilter || flaggedOnly || query) && (

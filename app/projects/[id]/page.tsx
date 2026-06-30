@@ -706,11 +706,13 @@ function DrawerBody({
   trackerEntry,
   onTrackerSave,
   onViewResult,
+  onScreeningFieldSaved,
 }: {
   selected: ScreeningRecord;
   trackerEntry: FullTrackerData;
   onTrackerSave: (fields: Partial<FullTrackerData>) => void;
   onViewResult: (id: number) => void;
+  onScreeningFieldSaved: (id: number, fields: Partial<ScreeningRecord>) => void;
 }) {
   const [leverUrl, setLeverUrl] = useState(selected.leverUrl ?? "");
   const [company, setCompany] = useState(trackerEntry.company ?? "");
@@ -754,11 +756,14 @@ function DrawerBody({
   async function saveScreeningField(field: string, value: string) {
     setSaving(field);
     try {
-      await fetch(`/api/history/${selected.id}`, {
+      const res = await fetch(`/api/history/${selected.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: value }),
       });
-      flashSaved(field);
+      if (res.ok) {
+        flashSaved(field);
+        onScreeningFieldSaved(selected.id, { [field]: value } as Partial<ScreeningRecord>);
+      }
     } catch { /* non-fatal */ }
     setSaving(null);
   }
@@ -922,13 +927,14 @@ function DrawerBody({
   );
 }
 
-function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrackerDataChange, onViewResult }: {
+function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrackerDataChange, onViewResult, onScreeningFieldSaved }: {
   screenings: ScreeningRecord[];
   stagesMap: Record<number, TrackerStage>;
   onStageChange: (id: number, stage: TrackerStage) => void;
   trackerData: Record<number, FullTrackerData>;
   onTrackerDataChange: (id: number, fields: Partial<FullTrackerData>) => void;
   onViewResult: (id: number) => void;
+  onScreeningFieldSaved: (id: number, fields: Partial<ScreeningRecord>) => void;
 }) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<ScreeningRecord | null>(null);
@@ -1242,6 +1248,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               trackerEntry={trackerData[selected.id] ?? {}}
               onTrackerSave={(fields) => onTrackerDataChange(selected.id, fields)}
               onViewResult={(id) => { setSelected(null); onViewResult(id); }}
+              onScreeningFieldSaved={onScreeningFieldSaved}
             />
           </div>
         </>
@@ -1405,6 +1412,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             trackerData={trackerData}
             onTrackerDataChange={handleTrackerDataChange}
             onViewResult={(id: number) => { setExpandedId(id); setTab("pipeline"); }}
+            onScreeningFieldSaved={(id, fields) => setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s))}
           />
         )}
         {tab === "settings" && (
