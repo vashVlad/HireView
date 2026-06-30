@@ -238,7 +238,6 @@ function ScreenTab({ project, onScreeningsSaved }: {
       </div>
 
       <CalibrationPanel />
-      <ResumeUploader files={files} onFilesChange={setFiles} />
 
       <div className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
         <span className="text-sm text-zinc-700 dark:text-zinc-300">
@@ -254,6 +253,8 @@ function ScreenTab({ project, onScreeningsSaved }: {
           <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${isLinkedInMode ? "translate-x-4" : "translate-x-0"}`} />
         </button>
       </div>
+
+      <ResumeUploader files={files} onFilesChange={setFiles} />
 
       {formError && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
