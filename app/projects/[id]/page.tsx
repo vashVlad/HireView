@@ -57,27 +57,39 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
   const [reanalyzing, setReanalyzing] = useState(false);
   const [reanalyzeOpen, setReanalyzeOpen] = useState(false);
   const [jdText, setJdText] = useState(jobDescription);
+  const [jdFile, setJdFile] = useState<File | null>(null);
   const [reanalyzeError, setReanalyzeError] = useState<string | null>(null);
+  const jdFileRef = useRef<HTMLInputElement>(null);
 
   async function handleReanalyze() {
-    if (!jdText.trim()) return;
+    if (!jdFile && !jdText.trim()) return;
     setReanalyzeError(null);
     setReanalyzing(true);
     try {
-      const res = await fetch("/api/analyze-jd", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobDescription: jdText }),
-      });
+      let res: Response;
+      if (jdFile) {
+        const fd = new FormData();
+        fd.set("jdFile", jdFile);
+        res = await fetch("/api/analyze-jd", { method: "POST", body: fd });
+      } else {
+        res = await fetch("/api/analyze-jd", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobDescription: jdText }),
+        });
+      }
       if (!res.ok) throw new Error("Analysis failed");
-      const { analysis: newAnalysis } = await res.json();
+      const data = await res.json();
+      const newAnalysis: JDAnalysis = data.analysis;
+      const newJd: string = data.jobDescription ?? jdText;
       await fetch(`/api/projects/${projectId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobDescription: jdText, jdAnalysis: newAnalysis }),
+        body: JSON.stringify({ jobDescription: newJd, jdAnalysis: newAnalysis }),
       });
-      onAnalysisUpdated(newAnalysis, jdText);
+      onAnalysisUpdated(newAnalysis, newJd);
       setReanalyzeOpen(false);
+      setJdFile(null);
     } catch {
       setReanalyzeError("Re-analysis failed. Try again.");
     } finally {
@@ -142,7 +154,7 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
               </div>
 
               <div className="border-t border-zinc-100 pt-4 dark:border-zinc-800">
-                <button type="button" onClick={() => { setReanalyzeOpen((v) => !v); setJdText(jobDescription); setReanalyzeError(null); }}
+                <button type="button" onClick={() => { setReanalyzeOpen((v) => !v); setJdText(jobDescription); setJdFile(null); setReanalyzeError(null); }}
                   className="text-xs text-zinc-400 underline underline-offset-2 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300">
                   Re-analyze JD
                 </button>
@@ -150,19 +162,37 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
 
               {reanalyzeOpen && (
                 <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-900/60">
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">Paste the correct job description to replace the current analysis.</p>
-                  <textarea
-                    value={jdText}
-                    onChange={(e) => setJdText(e.target.value)}
-                    rows={8}
-                    className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                    placeholder="Paste job description here..."
-                  />
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">Upload a JD file or paste the text below.</p>
+                  <label className={`flex cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3 py-2.5 text-sm transition-colors ${
+                    jdFile ? "border-violet-300 bg-violet-50/60 text-violet-700 dark:border-violet-600/50 dark:bg-violet-500/10 dark:text-violet-300"
+                           : "border-zinc-300 text-zinc-500 hover:border-zinc-400 dark:border-zinc-600 dark:hover:border-zinc-500"}`}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+                      <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
+                      <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" />
+                    </svg>
+                    <span className="truncate">{jdFile ? jdFile.name : "Upload JD file (.pdf or .docx)"}</span>
+                    {jdFile && (
+                      <button type="button" onClick={(e) => { e.preventDefault(); setJdFile(null); if (jdFileRef.current) jdFileRef.current.value = ""; }}
+                        className="ml-auto shrink-0 text-zinc-400 hover:text-rose-500">✕</button>
+                    )}
+                    <input ref={jdFileRef} type="file" accept=".pdf,.docx" className="sr-only"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) { setJdFile(f); setJdText(""); } }} />
+                  </label>
+                  {!jdFile && (
+                    <textarea
+                      value={jdText}
+                      onChange={(e) => setJdText(e.target.value)}
+                      rows={8}
+                      className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                      placeholder="Or paste job description here..."
+                    />
+                  )}
                   {reanalyzeError && (
                     <p className="text-xs text-rose-500">{reanalyzeError}</p>
                   )}
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={handleReanalyze} disabled={reanalyzing || !jdText.trim()}
+                    <button type="button" onClick={handleReanalyze} disabled={reanalyzing || (!jdFile && !jdText.trim())}
                       className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50">
                       {reanalyzing ? "Analyzing…" : "Re-analyze"}
                     </button>
