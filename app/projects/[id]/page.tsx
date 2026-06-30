@@ -240,17 +240,20 @@ function ScreenTab({ project, onScreeningsSaved }: {
       <CalibrationPanel />
       <ResumeUploader files={files} onFilesChange={setFiles} />
 
-      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-zinc-200 px-4 py-3 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800/50">
-        <input
-          type="checkbox"
-          checked={isLinkedInMode}
-          onChange={(e) => setIsLinkedInMode(e.target.checked)}
-          className="h-4 w-4 rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600"
-        />
+      <div className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
         <span className="text-sm text-zinc-700 dark:text-zinc-300">
-          LinkedIn profiles <span className="text-zinc-400 dark:text-zinc-500">— adjusts scoring for profile PDFs instead of tailored resumes</span>
+          LinkedIn profiles <span className="text-zinc-400 dark:text-zinc-500">— adjusts scoring for profile PDFs</span>
         </span>
-      </label>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isLinkedInMode}
+          onClick={() => setIsLinkedInMode((v) => !v)}
+          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${isLinkedInMode ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"}`}
+        >
+          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${isLinkedInMode ? "translate-x-4" : "translate-x-0"}`} />
+        </button>
+      </div>
 
       {formError && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
