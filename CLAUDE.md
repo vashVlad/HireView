@@ -1,5 +1,17 @@
 # HireView — Project Brief
 
+## Session Memory — read this first
+
+Vlad works on this project across two machines. Before doing any work, read `memory/00-index.md`
+and `memory/state.md` to pick up where the last session left off — do not re-derive project status
+from scratch or from this brief alone (this brief is the stable pitch/spec, not the current build
+state). Check `memory/open-questions.md` for anything that needs Vlad's input before proceeding.
+
+At the end of any session where real changes were made (code, decisions, or new open questions),
+append a short entry to `memory/session-log.md` and update `memory/state.md` and
+`memory/decisions-log.md` in place if the change affects them. Keep entries short — this is a
+handoff note for the next session, not a full changelog (that's what `HireView-Dev-Log.docx` is for).
+
 ## What is HireView?
 
 HireView is an AI-powered recruiting assistant built to make the recruiting workflow faster, smarter, and less repetitive. The name is a double meaning: *Hire* (recruiting) + *Higher View* (bigger picture perspective on candidates).
