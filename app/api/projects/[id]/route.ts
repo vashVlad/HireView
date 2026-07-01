@@ -29,6 +29,7 @@ export async function PATCH(
   try {
     await updateProject(numId, {
       ...(body?.name !== undefined && { name: body.name }),
+      ...(body?.jobDescription !== undefined && { jobDescription: body.jobDescription }),
       ...(body?.jdAnalysis !== undefined && { jdAnalysis: body.jdAnalysis }),
       ...(body?.status !== undefined && { status: body.status }),
     });

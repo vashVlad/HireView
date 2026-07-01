@@ -67,11 +67,12 @@ export async function getProject(id: number): Promise<Project | null> {
 
 export async function updateProject(
   id: number,
-  fields: { name?: string; jdAnalysis?: JDAnalysis; status?: ProjectStatus }
+  fields: { name?: string; jobDescription?: string; jdAnalysis?: JDAnalysis; status?: ProjectStatus }
 ): Promise<void> {
   const supabase = getSupabaseClient();
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (fields.name !== undefined) payload.name = fields.name.trim();
+  if (fields.jobDescription !== undefined) payload.job_description = fields.jobDescription;
   if (fields.jdAnalysis !== undefined) payload.jd_analysis = fields.jdAnalysis;
   if (fields.status !== undefined) payload.status = fields.status;
   const { error } = await supabase.from("projects").update(payload).eq("id", id);

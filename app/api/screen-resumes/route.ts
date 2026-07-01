@@ -116,9 +116,9 @@ export async function POST(request: NextRequest) {
       );
       results.push(result);
 
-      // Only persist candidates worth revisiting. Scores under 30 are
+      // Only persist candidates worth revisiting. Scores under 45 are
       // clear mismatches — saving them would pollute history without value.
-      if (result.score >= 30) {
+      if (result.score >= 45) {
         // Awaited (not fire-and-forget): Vercel can freeze the function as
         // soon as the response is sent, which would silently drop an
         // un-awaited write.
