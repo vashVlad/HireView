@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { CredibilityChecker } from "@/components/CredibilityChecker";
 import { CredibilitySection } from "@/components/CredibilitySection";
 import { InsightList } from "@/components/InsightList";
+import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusSelect } from "@/components/StatusSelect";
@@ -172,8 +173,8 @@ function CandidateCard({
       {expanded && (
         <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</p>
-            <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{s.careerTrajectory ?? s.summary}</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</p>
+            <TrajectoryRenderer text={s.careerTrajectory ?? s.summary} className="text-sm" />
           </div>
 
           {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (

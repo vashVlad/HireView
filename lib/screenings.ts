@@ -174,6 +174,7 @@ export async function updateScreening(
     flagged?: boolean;
     flagNote?: string;
     credibility?: CredibilityAssessment;
+    careerTrajectory?: string;
   }
 ): Promise<void> {
   const supabase = getSupabaseClient();
@@ -184,6 +185,7 @@ export async function updateScreening(
   if (fields.flagged !== undefined) update.flagged = fields.flagged;
   if (fields.flagNote !== undefined) update.flag_note = fields.flagNote;
   if (fields.credibility !== undefined) update.credibility = fields.credibility;
+  if (fields.careerTrajectory !== undefined) update.career_trajectory = fields.careerTrajectory;
   if (Object.keys(update).length === 0) return;
   const { error } = await supabase.from("screenings").update(update).eq("id", id);
   if (error) throw error;

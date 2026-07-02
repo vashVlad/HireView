@@ -8,6 +8,7 @@ import { CredibilitySection } from "@/components/CredibilitySection";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
 import { ResultCard } from "@/components/ResultCard";
+import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -577,8 +578,8 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             {expanded && (
               <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
                 <div>
-                  <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</p>
-                  <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{s.careerTrajectory ?? s.summary}</p>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</p>
+                  <TrajectoryRenderer text={s.careerTrajectory ?? s.summary} className="text-sm" />
                 </div>
 
                 {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
@@ -595,12 +596,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 <div className="flex flex-col gap-3">
                   <InsightList label="Strengths" items={s.strengths} variant="positive" />
                   <InsightList label="Concerns" items={s.concerns} variant="warning" screeningId={s.id} />
-                  {s.careerTrajectory && !credibilityMap[s.id] && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</span>
-                      <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{s.careerTrajectory}</p>
-                    </div>
-                  )}
                   {credibilityMap[s.id] ? (
                     <CredibilitySection assessment={credibilityMap[s.id]} />
                   ) : (

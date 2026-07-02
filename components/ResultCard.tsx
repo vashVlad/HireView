@@ -10,6 +10,7 @@ import { QuestionGenerator } from "./QuestionGenerator";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusSelect } from "./StatusSelect";
+import { TrajectoryRenderer } from "./TrajectoryRenderer";
 
 // ── Main ResultCard ─────────────────────────────────────────────────────────
 
@@ -75,12 +76,13 @@ export function ResultCard({
       </div>
       {trajectoryText && (
         <div className="mt-4">
-          <p className={`mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500`}>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
             Career trajectory
           </p>
-          <p className={`leading-relaxed text-zinc-600 dark:text-zinc-300 ${solo ? "text-base" : "text-sm"}`}>
-            {trajectoryText}
-          </p>
+          <TrajectoryRenderer
+            text={trajectoryText}
+            className={solo ? "text-base" : "text-sm"}
+          />
         </div>
       )}
 

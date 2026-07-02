@@ -59,7 +59,7 @@ const SCORE_TOOL = {
       },
       careerTrajectory: {
         type: "string",
-        description: `Career arc narrative covering every role. For each role, write one short opening sentence (company name, what they do — use training knowledge; if unknown say "company not found" and infer from title/description — and employment type: full-time or contract, inferred from tenure length, title signals like "Consultant"/"Contract"/"via [staffing agency]", or consecutive short stints at different companies). Follow that sentence with 2–3 tight bullet points covering: domain alignment with the role being hired for, the key signal this role adds to the candidate's story, and whether the transition into or out of this role makes sense. Keep bullets short — one line each. After all roles, add a final short paragraph (3–4 sentences max) with a clear recommendation: is this candidate worth a conversation, and why or why not.`,
+        description: `Career arc narrative covering every role. For each role, write a bold header line in this exact format: **[Company Name] — [Title], [full-time or contract], [date range]**. Employment type is inferred from tenure length, title signals like "Consultant"/"Contract"/"via [staffing agency]", or consecutive short stints at different companies. Do not add a sentence after the header — go straight to 3 tight bullet points: (1) what the company does and whether its domain aligns with the role being hired for (use training knowledge; if unknown say "company not found" and infer from title/description), (2) the key signal this role adds to the candidate's story, (3) whether the transition into or out of this role makes sense. Keep bullets to one line each. After all roles, add a final short paragraph (3–4 sentences max): clear recommendation on whether this candidate is worth a conversation and why.`,
       },
     },
     required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory"],
@@ -121,7 +121,7 @@ STRENGTHS: "Skill: evidence in 5 words." No sentences. No elaboration.
 
 CONCERNS: "Requirement: gap in 4-6 words." No explanation. The recruiter will ask for more if they want it.
 
-CAREER TRAJECTORY: For each role — one short sentence (company, what they do, full-time or contract), then 2–3 bullet points (domain alignment, key signal, transition logic). Keep bullets one line. End with a short paragraph (3–4 sentences): clear recommendation on whether this candidate is worth a conversation and why.
+CAREER TRAJECTORY: For each role — bold header: **Company — Title, full-time or contract, dates**. No sentence after the header. Then 3 bullets: (1) company focus + domain alignment, (2) key signal, (3) transition logic. One line per bullet. End with a short paragraph (3–4 sentences): worth a conversation or not, and why.
 
 PRACTICAL EQUIVALENCE: 4-5 years with depth vs 8+ required = strong partial match. All must-haves met + missing nice-to-haves = 65-75.
 
