@@ -93,8 +93,8 @@ export function TrajectoryRenderer({ text, className }: { text: string; classNam
         return (
           <ul key={i} className="mt-1 space-y-0.5 [&+*]:mt-3">
             {block.items.map((item, j) => (
-              <li key={j} className="flex gap-2 leading-relaxed text-zinc-600 dark:text-zinc-300">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+              <li key={j} className="flex gap-1.5 leading-relaxed text-zinc-600 dark:text-zinc-300">
+                <span className="shrink-0 text-zinc-400 dark:text-zinc-500">•</span>
                 <span><InlineContent text={item} /></span>
               </li>
             ))}

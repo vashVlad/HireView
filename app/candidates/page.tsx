@@ -191,13 +191,6 @@ function CandidateCard({
           <InsightList label="Strengths" items={s.strengths} variant="positive" />
           <InsightList label="Concerns" items={s.concerns} variant="warning" screeningId={s.id} />
 
-          {s.careerTrajectory && !credibility && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</span>
-              <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{s.careerTrajectory}</p>
-            </div>
-          )}
-
           {credibility ? (
             <CredibilitySection assessment={credibility} />
           ) : (
