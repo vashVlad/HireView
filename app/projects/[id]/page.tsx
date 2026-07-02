@@ -524,11 +524,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedId(expanded ? null : s.id); }}
               className="flex w-full cursor-pointer items-center gap-4 p-5 text-left">
               <ScoreBadge score={s.score} />
-              <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+                  <span className="truncate font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
                   {s.flagged && s.flagNote && (
-                    <span className="truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
+                    <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
                   )}
                 </div>
                 <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">{s.fileName}</span>
@@ -537,15 +537,15 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   {s.statusUpdatedAt && <> · status {formatStatusDate(s.statusUpdatedAt)}</>}
                   {getNotesText(s) && <> · <span className="text-violet-500 dark:text-violet-400">has notes</span></>}
                 </span>
-              </div>
-              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                <StatusSelect status={s.status} onChange={(status) => handleStatusChange(s.id, status)} />
-                {s.status === "interview" && (
-                  <TrackerStageSelect
-                    stage={stagesMap[s.id] ?? null}
-                    onChange={(stage) => handleStageChange(s.id, stage)}
-                  />
-                )}
+                <div className="mt-1.5 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  <StatusSelect status={s.status} onChange={(status) => handleStatusChange(s.id, status)} />
+                  {s.status === "interview" && (
+                    <TrackerStageSelect
+                      stage={stagesMap[s.id] ?? null}
+                      onChange={(stage) => handleStageChange(s.id, stage)}
+                    />
+                  )}
+                </div>
               </div>
               <button type="button"
                 onClick={(e) => { e.stopPropagation(); s.flagged ? handleToggleFlag(s.id, true) : setPendingFlagId((p) => p === s.id ? null : s.id); }}
