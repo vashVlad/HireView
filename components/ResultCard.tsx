@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import type { CandidateResult, CandidateStatus, CredibilityAssessment } from "@/lib/types";
 
 import { CredibilityChecker } from "./CredibilityChecker";
@@ -31,10 +31,9 @@ export function ResultCard({
   );
   const [showChecker, setShowChecker] = useState(false);
   const [showQuestion, setShowQuestion] = useState(false);
-  const [trajectoryOpen, setTrajectoryOpen] = useState(true);
-  const trajectoryRef = useRef<HTMLDivElement>(null);
 
   const canCheck = result.id !== undefined;
+  const trajectoryText = result.careerTrajectory ?? result.summary;
 
   return (
     <li className={`animate-fade-in-up rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${solo ? "p-10" : "p-5"}`}>
@@ -74,45 +73,21 @@ export function ResultCard({
           <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>{result.fileName}</p>
         </div>
       </div>
-      <p className={`mt-4 leading-relaxed text-zinc-600 dark:text-zinc-300 ${solo ? "text-base" : "text-sm"}`}>
-        {result.summary}
-      </p>
+      {trajectoryText && (
+        <div className="mt-4">
+          <p className={`mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500`}>
+            Career trajectory
+          </p>
+          <p className={`leading-relaxed text-zinc-600 dark:text-zinc-300 ${solo ? "text-base" : "text-sm"}`}>
+            {trajectoryText}
+          </p>
+        </div>
+      )}
 
       {/* Full-width sections below the header row */}
       <div className={`flex flex-col ${solo ? "mt-6 gap-4" : "mt-4 gap-3"}`}>
         <InsightList label="Strengths" items={result.strengths} variant="positive" />
         <InsightList label="Concerns" items={result.concerns} variant="warning" screeningId={result.id} />
-        {result.careerTrajectory && !credibility && (
-          <div className="flex flex-col">
-            <button
-              type="button"
-              onClick={() => setTrajectoryOpen((v) => !v)}
-              className="flex items-center gap-2 py-1 text-left"
-            >
-              <span className={`text-xs font-semibold uppercase tracking-wide transition-colors ${trajectoryOpen ? "text-zinc-600 dark:text-zinc-300" : "text-zinc-400 dark:text-zinc-500"}`}>
-                Career trajectory
-              </span>
-              <svg
-                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                className={`ml-auto shrink-0 text-zinc-400 transition-transform duration-200 ${trajectoryOpen ? "rotate-90" : ""}`}
-              >
-                <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <div
-              ref={trajectoryRef}
-              className="grid transition-[grid-template-rows] duration-200 ease-in-out"
-              style={{ gridTemplateRows: trajectoryOpen ? "1fr" : "0fr" }}
-            >
-              <div className="overflow-hidden">
-                <p className="pt-1 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
-                  {result.careerTrajectory}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
         {credibility && <CredibilitySection assessment={credibility} />}
 
         {canCheck && !credibility && (

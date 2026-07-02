@@ -59,7 +59,7 @@ const SCORE_TOOL = {
       },
       careerTrajectory: {
         type: "string",
-        description: "ONE sentence. Clean progression = confirm it. Flag only the single most notable issue if one exists. No elaboration.",
+        description: `Rich prose narrative of the candidate's full career arc — written in flowing paragraphs, no bullet points or lists. Cover every role in the candidate's history (oldest to most recent). For each role: identify the company and what it does — use your training knowledge for recognisable companies; if you do not recognise a company, say 'company not found' and infer its focus from the job title and description provided. State whether that company's domain aligns with the role being hired for (strong alignment, partial alignment, or unrelated). Determine the likely employment type: full-time or contract/consulting — infer this from tenure length, title signals such as 'Consultant', 'Contract', 'Freelance', or 'via [staffing agency]', or a pattern of consecutive short-tenure roles (under 12 months) at different companies. Note how long the candidate stayed in each role. Then analyse each career transition: does the move from one role to the next make logical sense? Does it represent a natural progression, a deliberate pivot, or an unexplained jump? Look for and name patterns: a long full-time role followed by a chain of short contracts often signals a layoff or departure with the candidate bridging while job hunting; a domain pivot with no bridging role may indicate a deliberate career change or opportunistic jump; a seniority regression may reflect a gap fill or a company-size trade-off. Synthesise all of this into a recruiter-readable story told in prose — what happened, why the moves likely happened, whether the arc points naturally toward this role or represents a stretch, and what a recruiter should carry into the conversation with this person. Be specific and draw confident inferences from the evidence. Acknowledge uncertainty where genuine but do not hedge on things the evidence clearly supports.`,
       },
     },
     required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory"],
@@ -121,7 +121,7 @@ STRENGTHS: "Skill: evidence in 5 words." No sentences. No elaboration.
 
 CONCERNS: "Requirement: gap in 4-6 words." No explanation. The recruiter will ask for more if they want it.
 
-CAREER TRAJECTORY: One sentence. State the fact.
+CAREER TRAJECTORY: Rich prose narrative, multiple paragraphs. For each role: company focus (use training knowledge; if unknown, say "company not found" and infer from title/description), domain alignment with this role, employment type (full-time or contract — infer from tenure, title signals, short consecutive roles), and tenure. Analyse every transition: does it make sense? Name patterns (contract chain after FT = likely bridge while job hunting; domain pivot; seniority regression). Synthesise into a recruiter-readable career story — what happened, why, and what it means for this candidate's fit. No bullet points. Confident inferences from evidence.
 
 PRACTICAL EQUIVALENCE: 4-5 years with depth vs 8+ required = strong partial match. All must-haves met + missing nice-to-haves = 65-75.
 
@@ -141,7 +141,7 @@ ${jobDescription}`,
 
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 2000,
+    max_tokens: 4000,
     tools: [{ ...SCORE_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "submit_score" },
     messages: [{ role: "user", content }],

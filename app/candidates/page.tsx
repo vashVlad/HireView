@@ -171,7 +171,10 @@ function CandidateCard({
       {/* Expanded detail */}
       {expanded && (
         <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
-          <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{s.summary}</p>
+          <div>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</p>
+            <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{s.careerTrajectory ?? s.summary}</p>
+          </div>
 
           {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
             <div className="flex items-center gap-1.5">
