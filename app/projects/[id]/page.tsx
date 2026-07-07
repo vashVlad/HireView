@@ -2,6 +2,7 @@
 import * as XLSX from "xlsx";
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CredibilityChecker } from "@/components/CredibilityChecker";
@@ -389,6 +390,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [screenings, setScreenings] = useState(initialScreenings);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
+  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
   const [expandedId, setExpandedIdState] = useState<number | null>(externalExpandedId ?? null);
   function setExpandedId(id: number | null) {
     setExpandedIdState(id);
@@ -419,11 +421,18 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
   const handleStageChange = onStageChange;
 
-  const filteredScreenings = screenings.filter((s) => {
-    if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
-    if (statusFilter && s.status !== statusFilter) return false;
-    return true;
-  });
+  const filteredScreenings = screenings
+    .filter((s) => {
+      if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
+      if (statusFilter && s.status !== statusFilter) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => {
+      if (sortOrder === "desc") return b.score - a.score;
+      if (sortOrder === "asc") return a.score - b.score;
+      return 0;
+    });
 
   function getNotesText(s: ScreeningRecord) {
     return notesMap[s.id]?.text ?? s.notes ?? "";
@@ -505,7 +514,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             className="w-full rounded-xl border border-zinc-200 bg-white py-2 pl-9 pr-4 text-sm placeholder-zinc-400 focus:border-violet-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
           />
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_PILLS.map((p) => (
             <button key={String(p.value)} type="button" onClick={() => setStatusFilter(p.value)}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
@@ -516,6 +525,20 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               {p.label}
             </button>
           ))}
+          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
+              <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
+            </svg>
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc")}
+              className="bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
+            >
+              <option value="default">Default</option>
+              <option value="desc">Score ↓</option>
+              <option value="asc">Score ↑</option>
+            </select>
+          </div>
         </div>
       </div>
       {filteredScreenings.length === 0 && (
@@ -787,9 +810,11 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
   onDeleted: () => void;
   onThresholdSaved: (threshold: number) => void;
 }) {
+  const router = useRouter();
   const [nameValue, setNameValue] = useState(project.name);
   const [savingName, setSavingName] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [threshold, setThreshold] = useState(project.scoreThreshold ?? 45);
@@ -823,15 +848,25 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
 
   async function toggleStatus() {
     setTogglingStatus(true);
+    setStatusError(null);
     const next = project.status === "active" ? "archived" : "active";
     try {
-      await fetch(`/api/projects/${project.id}`, {
+      const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: next }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStatusError(data.error ?? "Failed to update status");
+        return;
+      }
       onStatusToggled(next);
-    } catch { /* non-fatal */ }
-    finally { setTogglingStatus(false); }
+      router.refresh();
+    } catch {
+      setStatusError("Network error — please try again");
+    } finally {
+      setTogglingStatus(false);
+    }
   }
 
   async function deleteProject() {
@@ -894,17 +929,22 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
       </div>
 
       {/* Status */}
-      <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <div>
-          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Role status</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            {project.status === "active" ? "Currently active — visible in your projects list." : "Archived — hidden from the main list."}
-          </p>
+      <div className="flex flex-col gap-2 rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Role status</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              {project.status === "active" ? "Currently active — visible in your projects list." : "Archived — hidden from the main list."}
+            </p>
+          </div>
+          <button type="button" onClick={toggleStatus} disabled={togglingStatus}
+            className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${project.status === "active" ? "border border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
+            {togglingStatus ? "Updating..." : project.status === "active" ? "Archive role" : "Restore role"}
+          </button>
         </div>
-        <button type="button" onClick={toggleStatus} disabled={togglingStatus}
-          className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${project.status === "active" ? "border border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
-          {togglingStatus ? "Updating..." : project.status === "active" ? "Archive role" : "Restore role"}
-        </button>
+        {statusError && (
+          <p className="text-xs text-rose-500 dark:text-rose-400">{statusError}</p>
+        )}
       </div>
 
       {/* Delete */}

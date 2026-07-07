@@ -338,6 +338,7 @@ export default function CandidatesPage() {
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [projectFilter, setProjectFilter] = useState<number | null>(null);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
 
   useEffect(() => {
     Promise.all([
@@ -369,13 +370,20 @@ export default function CandidatesPage() {
 
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
 
-  const filtered = screenings.filter((s) => {
-    if (query && !s.candidateName.toLowerCase().includes(query.toLowerCase())) return false;
-    if (statusFilter && s.status !== statusFilter) return false;
-    if (projectFilter && s.projectId !== projectFilter) return false;
-    if (flaggedOnly && !s.flagged) return false;
-    return true;
-  });
+  const filtered = screenings
+    .filter((s) => {
+      if (query && !s.candidateName.toLowerCase().includes(query.toLowerCase())) return false;
+      if (statusFilter && s.status !== statusFilter) return false;
+      if (projectFilter && s.projectId !== projectFilter) return false;
+      if (flaggedOnly && !s.flagged) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => {
+      if (sortOrder === "desc") return b.score - a.score;
+      if (sortOrder === "asc") return a.score - b.score;
+      return 0;
+    });
 
   const flaggedCount = screenings.filter((s) => s.flagged).length;
 
@@ -444,15 +452,31 @@ export default function CandidatesPage() {
 
         {/* Filters */}
         <div className="mb-6 flex flex-col gap-3">
-          {/* Search */}
-          <div className="relative">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400">
-              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" />
-            </svg>
-            <input type="text" value={query} onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name..."
-              className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-10 pr-4 text-sm text-zinc-800 outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" />
+          {/* Search + sort row */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400">
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" />
+              </svg>
+              <input type="text" value={query} onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name..."
+                className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-10 pr-4 text-sm text-zinc-800 outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" />
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-900">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
+                <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
+              </svg>
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc")}
+                className="bg-transparent text-sm font-medium text-zinc-500 outline-none dark:text-zinc-400"
+              >
+                <option value="default">Default</option>
+                <option value="desc">Score ↓</option>
+                <option value="asc">Score ↑</option>
+              </select>
+            </div>
           </div>
 
           {/* Filter chips */}
