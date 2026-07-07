@@ -42,6 +42,21 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 **Next:** Phase 4 Outreach Drafting — needs Phase 2 problem statement before building.
 
+## 2026-07-07 (session 3) — Access requests, keyword highlighting, invite + photo polish
+
+**Code changes:**
+- **Access request feature** — `access_requests` Supabase table; collapsible request form on login page (email + name + message); `POST /api/access-requests` saves to DB + fires Resend email to vladvashchuk2005@gmail.com (requires `RESEND_API_KEY`); GET returns pending list for admins. Team page shows amber "Pending requests" panel with Approve (auto-creates user with `HireView2026!`) / Dismiss. SiteHeader shows pulsing amber dot on Team link when count > 0.
+- **Keyword highlighting** — must-have (amber) and nice-to-have (violet) keywords highlighted in career trajectory text; score chips show `X/Y kw` match badge for fraud detection.
+- **Invite default password** — changed from `HireView2025!` to `HireView2026!` throughout; Approve action in access requests also uses `HireView2026!`.
+- **Tracker photo fix** — private Supabase bucket; photos now proxied through `GET /api/history/[id]/photo` (service role, 1h cache). Chip shows photo if uploaded; drawer has circular profile photo with camera overlay on hover.
+- **TypeScript fix** — `cookiesToSet` implicit `any` in `lib/supabase-server.ts` and `middleware.ts`.
+
+**Pending Vlad actions:**
+- Run `supabase-migration-access-requests.sql` in Supabase SQL Editor
+- Get a Resend API key (resend.com, free tier) and add `RESEND_API_KEY` to `.env.local` and Vercel env vars
+
+**Next:** Phase 5 Outreach Drafting (needs problem statement first), or tackle pending migrations.
+
 ## 2026-07-07 (session 2) — Auth UX polish, analytics tracking, JD file upload
 
 **Code changes:**

@@ -24,14 +24,28 @@ export function SiteHeader({ active }: { active: NavHref }) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   useEffect(() => {
     const supabase = getBrowserSupabaseClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setIsAdmin(user?.app_metadata?.role === "admin");
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      const admin = user?.app_metadata?.role === "admin";
+      setIsAdmin(admin);
       setEmail(user?.email ?? null);
+
+      if (admin) {
+        try {
+          const res = await fetch("/api/access-requests");
+          if (res.ok) {
+            const data = await res.json();
+            setPendingRequests((data.requests ?? []).length);
+          }
+        } catch {
+          // non-fatal
+        }
+      }
     });
   }, []);
 
@@ -88,17 +102,24 @@ export function SiteHeader({ active }: { active: NavHref }) {
                 <span className="mx-1 h-4 w-px bg-zinc-300 dark:bg-zinc-700" />
                 {ADMIN_NAV_ITEMS.map((item) => {
                   const isActive = active === item.href;
+                  const showBadge = item.href === "/admin/users" && pendingRequests > 0;
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
-                      className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                      className={`relative flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
                         isActive
                           ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-50"
                           : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
                       }`}
                     >
                       {item.label}
+                      {showBadge && (
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

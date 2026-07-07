@@ -27,6 +27,14 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 - **`/auth/set-password` page** — lets users update their temp password. Accessible via header dropdown.
 - **JD file upload** — "Upload file" button in New Role modal. Supports PDF, DOCX, TXT via `POST /api/extract-jd-text` (reuses `extractResumeText`).
 
+## What's shipped (added 2026-07-07, session 3)
+
+- **Access request feature** — "Don't have access? Request it →" link on login page expands a collapsible form (email + name + message). Submissions saved to `access_requests` table + email to vladvashchuk2005@gmail.com via Resend (requires `RESEND_API_KEY` env var). Team page shows amber "Pending requests" section with Approve (creates account with `HireView2026!`) / Dismiss. SiteHeader shows pulsing amber dot badge on Team link when pending requests exist.
+- **Keyword highlighting + match counts** — must-have (amber) and nice-to-have (violet) keywords highlighted inline in career trajectory text. Score chips show `X/Y kw` badge for fraud detection visibility.
+- **Invite flow overhaul** — switched from `inviteUserByEmail` to `createUser` (no email rate limits, immediate activation). Default temp password `HireView2026!` pre-filled in form.
+- **Photo in drawer** — candidate profile photo moved from chip to drawer as circular profile photo; still displays on tracker chip.
+- **TypeScript fix** — `cookiesToSet` type annotation in `lib/supabase-server.ts` and `middleware.ts`.
+
 ## What's NOT shipped yet
 
 - **Outreach drafting (Phase 5)** — auto-draft LinkedIn messages. Repeatedly listed as next, never started.
