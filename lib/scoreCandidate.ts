@@ -1,6 +1,26 @@
 import { getAnthropicClient, CLAUDE_MODEL } from "./anthropic";
 import type { CalibrationExample, CandidateResult } from "./types";
 
+function detectLinkedInProfile(fileName: string, text: string): boolean {
+  if (fileName.toLowerCase().includes("linkedin")) return true;
+  const sample = text.slice(0, 1200).toLowerCase();
+  const markerHits = ["linkedin.com", "recommendations", " · ", "connections"].filter((m) =>
+    sample.includes(m)
+  ).length;
+  if (markerHits >= 2) return true;
+  // Bare section headers with no resume-style labels above them
+  const hasSections = /\bexperience\s*\n/i.test(sample) && /\beducation\s*\n/i.test(sample);
+  const noResumeLabels = !/resume|curriculum vitae|\bcv\b/.test(sample.slice(0, 300));
+  return hasSections && noResumeLabels;
+}
+
+const LINKEDIN_SCORING_NOTE = `LINKEDIN PROFILE NOTE: This document is a LinkedIn profile export, not a tailored resume.
+- Profiles are written for general audiences — do not penalise for a missing role-specific summary or objective
+- The Skills section reflects endorsements and personal curation, not exhaustive competency; cross-reference actual job duties described in Experience entries
+- Short gaps or omitted contract/consulting roles are common on LinkedIn; interpret charitably
+- Weight career trajectory signals heavily: company types, scope of responsibilities, progression pace
+- Focus scoring on depth and relevance of Experience entries, not keyword density`;
+
 const SCORE_TOOL = {
   name: "submit_score",
   description: "Submit the candidate's score and evaluation against the job description.",
@@ -25,21 +45,21 @@ const SCORE_TOOL = {
       },
       summary: {
         type: "string",
-        description: "Score <30: 1 sentence on key gaps. 30-50: 1-2 sentences on coverage and gaps. 50+: 2 sentences on fit and gaps.",
+        description: "ONE sentence only. Format: '[what fits] — gap is [the single biggest gap].' Max 25 words. No filler.",
       },
       strengths: {
         type: "array",
         items: { type: "string" },
-        description: "Score <30: 0-1 items. 30-50: 2. 50+: 2-4. Only requirements the candidate clearly meets.",
+        description: "Each item: 'Skill/area: evidence in 5 words or fewer.' Example: 'FHIR/HL7: implemented at Abridge with audit logging.' No full sentences, no elaboration. Score <30: 0-1. 30-50: 1-2. 50+: 2-4.",
       },
       concerns: {
         type: "array",
         items: { type: "string" },
-        description: "Score <50: 1-2 items, 8 words max each. Score 50+: 2-4 items, 1-2 sentences each with specific context (what's missing, by how much, why it matters for this role). Must-haves first; skip learnable gaps.",
+        description: "Each item: 'Requirement: gap in 4-6 words.' Example: 'Health insurance ops: not evidenced.' No explanation. Must-haves first. Score <30: 1-2. 30-50: 2-3. 50+: 2-4.",
       },
       careerTrajectory: {
         type: "string",
-        description: "1-3 sentences on the candidate's role progression: does the sequence of positions lead naturally toward this role, and are there any suspicious patterns (frequent job hops, unexplained gaps, sudden domain shifts, title regression, lateral moves that don't build toward this type of role).",
+        description: `Career arc narrative covering every role. For each role, write a bold header line in this exact format: **[Company Name] — [Title], [full-time or contract], [date range]**. Employment type is inferred from tenure length, title signals like "Consultant"/"Contract"/"via [staffing agency]", or consecutive short stints at different companies. Do not add a sentence after the header — go straight to 3 tight bullet points: (1) what the company does and whether its domain aligns with the role being hired for (use training knowledge; if unknown say "company not found" and infer from title/description), (2) the key signal this role adds to the candidate's story, (3) whether the transition into or out of this role makes sense. Keep bullets to one line each. After all roles, add a final short paragraph (3–4 sentences max): clear recommendation on whether this candidate is worth a conversation and why.`,
       },
     },
     required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory"],
@@ -64,8 +84,12 @@ export async function scoreCandidate(
   jobDescription: string,
   fileName: string,
   resumeText: string,
-  calibrationExamples: CalibrationExample[] = []
+  calibrationExamples: CalibrationExample[] = [],
+  roleContext?: string,
+  linkedInContext?: string,
+  isLinkedInOverride?: boolean
 ): Promise<CandidateResult> {
+  const isLinkedIn = isLinkedInOverride ?? detectLinkedInProfile(fileName, resumeText);
   const content: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [];
 
   if (calibrationExamples.length > 0) {
@@ -80,7 +104,9 @@ export async function scoreCandidate(
     {
       type: "text",
       text: `Today is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}. Do not flag past dates as future.
-
+${roleContext ? `\nRole context from the recruiter: ${roleContext}\n` : ""}
+${isLinkedIn ? `\n${LINKEDIN_SCORING_NOTE}\n` : ""}
+${isLinkedIn && linkedInContext ? `\nROLE-SPECIFIC LINKEDIN SIGNALS: ${linkedInContext}\n` : ""}
 Score this resume against the job description. Must-haves drive 65%, nice-to-haves 35%.
 
 SCORING: 65-80 = covers core requirements, worth advancing. 80-90 = near-exceptional. Above 90 = rare. Don't penalize learnable or secondary gaps.
@@ -89,13 +115,17 @@ MUST-HAVES: "required", "must have", or items in a Requirements section. NICE-TO
 
 POSITION FIT: flag if seniority progression makes this role unrealistic. Don't penalize title mismatches where responsibilities overlap.
 
-CONCERNS FORMAT: Score <50: 8 words max each, experience gaps as ratios ("Insurance: 5/8 yrs"). Score 50+: 1-2 sentences each — name the gap, quantify it if possible, explain why it matters for this specific role. One gap per bullet. Must-haves first; skip learnable gaps.
+SUMMARY: One sentence. "[What fits] — gap is [single biggest gap]." 25 words max.
 
-CAREER TRAJECTORY: Describe the sequence of roles — does it build logically toward this position? Flag suspicious patterns: frequent job changes (<1 yr per role), unexplained gaps (>6 months), sudden domain shifts, title regression, or lateral moves that don't accumulate relevant experience. If the progression is clean and logical, say so briefly.
+STRENGTHS: "Skill: evidence in 5 words." No sentences. No elaboration.
+
+CONCERNS: "Requirement: gap in 4-6 words." No explanation. The recruiter will ask for more if they want it.
+
+CAREER TRAJECTORY: For each role — bold header: **Company — Title, full-time or contract, dates**. No sentence after the header. Then 3 bullets: (1) company focus + domain alignment, (2) key signal, (3) transition logic. One line per bullet. End with a short paragraph (3–4 sentences): worth a conversation or not, and why.
 
 PRACTICAL EQUIVALENCE: 4-5 years with depth vs 8+ required = strong partial match. All must-haves met + missing nice-to-haves = 65-75.
 
-VERBOSITY: <30 = 1-sentence summary, 1-2 concerns, no strengths. 30-50 = 1-2 sentences, 2 strengths, 2-3 concerns. 50+ = 2 sentences, 2-4 strengths, 2-4 concerns.
+VERBOSITY: <30 = 0-1 strengths, 1-2 concerns. 30-50 = 1-2 strengths, 2-3 concerns. 50+ = 2-4 strengths, 2-4 concerns.
 
 Only assess resume vs JD${calibrationExamples.length > 0 ? " and calibration anchors above" : ""}. Ignore company prestige.
 
@@ -111,7 +141,7 @@ ${jobDescription}`,
 
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 2000,
+    max_tokens: 4000,
     tools: [{ ...SCORE_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "submit_score" },
     messages: [{ role: "user", content }],

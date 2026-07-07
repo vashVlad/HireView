@@ -27,36 +27,28 @@ function getScoreStyles(score: number) {
   };
 }
 
-export function ScoreBadge({ score }: { score: number }) {
+export function ScoreBadge({ score, size = "md" }: { score: number; size?: "md" | "lg" }) {
   const styles = getScoreStyles(score);
-  const radius = 26;
+  const radius = size === "lg" ? 44 : 26;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (score / 100) * circumference;
+  const dim = size === "lg" ? "h-28 w-28" : "h-16 w-16";
+  const vb = size === "lg" ? "0 0 100 100" : "0 0 60 60";
+  const cx = size === "lg" ? 50 : 30;
+  const sw = size === "lg" ? 5 : 4;
+  const textSize = size === "lg" ? "text-3xl" : "text-lg";
 
   return (
-    <div className={`relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full shadow-lg ${styles.glow}`}>
-      <svg className="absolute h-16 w-16 -rotate-90" viewBox="0 0 60 60">
+    <div className={`relative flex ${dim} shrink-0 items-center justify-center rounded-full shadow-lg ${styles.glow}`}>
+      <svg className={`absolute ${dim} -rotate-90`} viewBox={vb}>
+        <circle cx={cx} cy={cx} r={radius} fill="none" strokeWidth={sw} className="stroke-zinc-100 dark:stroke-zinc-800" />
         <circle
-          cx="30"
-          cy="30"
-          r={radius}
-          fill="none"
-          strokeWidth="4"
-          className="stroke-zinc-100 dark:stroke-zinc-800"
-        />
-        <circle
-          cx="30"
-          cy="30"
-          r={radius}
-          fill="none"
-          strokeWidth="4"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
+          cx={cx} cy={cx} r={radius} fill="none" strokeWidth={sw} strokeLinecap="round"
+          strokeDasharray={circumference} strokeDashoffset={offset}
           className={`transition-all duration-700 ease-out ${styles.ring}`}
         />
       </svg>
-      <span className={`text-lg font-semibold tabular-nums ${styles.text}`}>{score}</span>
+      <span className={`${textSize} font-semibold tabular-nums ${styles.text}`}>{score}</span>
     </div>
   );
 }

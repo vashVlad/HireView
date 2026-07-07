@@ -1,12 +1,13 @@
 export type Recommendation = "proceed" | "decline";
 
-export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived";
+export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "interview" | "archived";
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
   "new_applicant",
   "recruiter_screen",
   "contacted",
   "screening",
+  "interview",
   "archived",
 ];
 
@@ -15,8 +16,58 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
   recruiter_screen: "Recruiter Screen",
   contacted: "Contacted",
   screening: "Screening",
+  interview: "Interview",
   archived: "Archived",
 };
+
+// ── Tracker ──────────────────────────────────────────────────────────────────
+
+export type TrackerStage = "TA" | "L1" | "L2" | "In-Person" | "Offer" | "Reject";
+
+export const TRACKER_STAGES: TrackerStage[] = ["TA", "L1", "L2", "In-Person", "Offer", "Reject"];
+
+export interface TrackerEntry {
+  screeningId: number;
+  candidateName: string;
+  fileName: string;
+  score: number;
+  jobDescription: string;
+  stage: TrackerStage;
+  leverId: string;
+  company: string;
+  role: string;
+  expectedLevel: string;
+  nextStep: string;
+  stepsCompleted: string;
+  comments: string;
+  immigration: string;
+  onHold: boolean;
+  onHoldReason: string;
+  scheduled: boolean;
+  interviewDate?: string;
+  orderIndex: number;
+  createdAt: string;
+}
+
+// ── Credibility assessment ───────────────────────────────────────────────────
+
+export interface CredibilityRow {
+  field: string;
+  resume: string;
+  linkedIn: string;
+  status: "match" | "discrepancy" | "cannot_verify";
+  note?: string;
+}
+
+export type CredibilitySignal = "clean" | "minor_concerns" | "significant_concerns";
+
+export interface CredibilityAssessment {
+  rows: CredibilityRow[];
+  trajectoryNote: string;
+  industryNote: string;
+  resumeDelta?: string;
+  overallSignal: CredibilitySignal;
+}
 
 export interface CandidateResult {
   id?: number;
@@ -31,6 +82,7 @@ export interface CandidateResult {
   careerTrajectory?: string;
   recommendation: Recommendation;
   status?: CandidateStatus;
+  credibility?: CredibilityAssessment;
 }
 
 export interface ScreenResumesResponse {
@@ -58,32 +110,36 @@ export interface ScreeningRecord {
   statusUpdatedAt?: string;
   jobDescription: string;
   resumeMimeType: string;
+  flagged: boolean;
+  flagNote?: string;
+  notes?: string;
+  leverUrl?: string;
+  credibility?: CredibilityAssessment;
+  photoUrl?: string;
+  linkedInPdfPath?: string;
+  interviewQuestions?: string[];
+  projectId?: number;
   createdAt: string;
 }
 
-// ── Resume comparison ────────────────────────────────────────────────────────
+// ── Full tracker data (all tracker table fields) ─────────────────────────────
 
-export type ComparisonVerdict = "consistent" | "minor_tweaks" | "significant_reframe" | "suspicious";
-
-export interface ResumeChange {
-  field: string;
-  inResumeA: string;
-  inResumeB: string;
-  severity: "minor" | "notable" | "red_flag";
+export interface FullTrackerData {
+  stage?: TrackerStage;
+  company?: string;
+  role?: string;
+  expectedLevel?: string;
+  nextStep?: string;
+  stepsCompleted?: string;
+  comments?: string;
+  immigration?: string;
+  onHold?: boolean;
+  onHoldReason?: string;
+  scheduled?: boolean;
+  interviewDate?: string;
 }
 
-export interface ComparisonQuestion {
-  question: string;
-  probes: string;
-}
-
-export interface ResumeComparisonResult {
-  verdict: ComparisonVerdict;
-  summary: string;
-  changes: ResumeChange[];
-  redFlags: string[];
-  questions: ComparisonQuestion[];
-}
+// ── Calibration ───────────────────────────────────────────────────────────────
 
 export type CalibrationLabel = "good" | "bad";
 
@@ -95,6 +151,25 @@ export interface CalibrationExample {
   resumeMimeType: string;
   extractedText: string;
   createdAt: string;
+}
+
+// ── Projects ─────────────────────────────────────────────────────────────────
+
+export type ProjectStatus = "active" | "archived" | "closed";
+
+export interface Project {
+  id: number;
+  name: string;
+  jobDescription: string;
+  jdAnalysis: JDAnalysis | null;
+  status: ProjectStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectSummary extends Project {
+  screeningCount: number;
+  interviewCount: number;
 }
 
 export interface FilterConfig {
@@ -122,4 +197,5 @@ export interface JDAnalysis {
   rationale: string;
   wide: FilterConfig;
   narrow: FilterConfig;
+  linkedInContext?: string;
 }

@@ -3,6 +3,7 @@ import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { saveScreening } from "@/lib/screenings";
+import { getProject } from "@/lib/projects";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -23,6 +24,11 @@ export async function POST(request: NextRequest) {
   const jobDescriptionField = formData.get("jobDescription");
   const jdFileField = formData.get("jdFile");
   const files = formData.getAll("resumes");
+  const projectIdField = formData.get("projectId");
+  const projectId = typeof projectIdField === "string" && projectIdField.trim()
+    ? parseInt(projectIdField.trim(), 10) || undefined
+    : undefined;
+  const linkedInModeOverride = formData.get("linkedInMode") === "true";
 
   let jobDescription: string;
 
@@ -45,6 +51,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // First non-empty line of the JD gives Claude a concise role label
+  const roleContext = jobDescription
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+
+  // Pull LinkedIn profile scoring context from the project's JD analysis if available
+  let linkedInContext: string | undefined;
+  if (projectId) {
+    const project = await getProject(projectId).catch(() => null);
+    linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
+  }
+
   if (files.length === 0) {
     return NextResponse.json(
       { error: "At least one resume file is required" },
@@ -56,7 +75,8 @@ export async function POST(request: NextRequest) {
   const errors: ScreenResumesError[] = [];
 
   // Best-effort: a calibration library issue shouldn't block screening.
-  const calibrationExamples = await listCalibrationExamples().catch(() => []);
+  // Scoped to the current project so examples from other projects don't bleed in.
+  const calibrationExamples = await listCalibrationExamples(projectId).catch(() => []);
 
   // Extract text for every resume first — this is local parsing, no API
   // calls, so it's free to fully parallelize.
@@ -89,13 +109,16 @@ export async function POST(request: NextRequest) {
         jobDescription,
         resume.fileName,
         resume.text,
-        calibrationExamples
+        calibrationExamples,
+        roleContext,
+        linkedInContext,
+        linkedInModeOverride
       );
       results.push(result);
 
-      // Only persist candidates worth revisiting. Scores under 30 are
+      // Only persist candidates worth revisiting. Scores under 45 are
       // clear mismatches — saving them would pollute history without value.
-      if (result.score >= 30) {
+      if (result.score >= 45) {
         // Awaited (not fire-and-forget): Vercel can freeze the function as
         // soon as the response is sent, which would silently drop an
         // un-awaited write.
@@ -105,11 +128,11 @@ export async function POST(request: NextRequest) {
             jobDescription,
             resumeFile: resume.buffer,
             resumeMimeType: resume.mimeType,
+            projectId,
           });
           result.id = id;
-          result.status = "new_applicant";
-        } catch (error) {
-          console.error("Failed to save screening history:", error);
+        } catch (err) {
+          console.error("Failed to persist screening result:", err);
         }
       }
     } catch (error) {
@@ -120,14 +143,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Score the first resume alone so its call writes the job description
-  // into Anthropic's prompt cache. Firing every call at once would race —
-  // most would miss the cache and pay full price instead of the ~90%
-  // discounted cached rate. The rest can then run in parallel against a
-  // warm cache.
-  const [first, ...rest] = parsed;
-  if (first) await score(first);
-  await Promise.all(rest.map((resume) => score(resume)));
+  // Score up to 3 resumes concurrently to stay within Anthropic rate limits
+  // while still being meaningfully faster than sequential processing.
+  const CONCURRENCY = 3;
+  for (let i = 0; i < parsed.length; i += CONCURRENCY) {
+    await Promise.all(parsed.slice(i, i + CONCURRENCY).map(score));
+  }
 
   results.sort((a, b) => b.score - a.score);
 
