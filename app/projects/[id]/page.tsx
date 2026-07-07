@@ -952,12 +952,16 @@ function DrawerBody({
   onTrackerSave,
   onViewResult,
   onScreeningFieldSaved,
+  photoUrl,
+  onPhotoUpload,
 }: {
   selected: ScreeningRecord;
   trackerEntry: FullTrackerData;
   onTrackerSave: (fields: Partial<FullTrackerData>) => void;
   onViewResult: (id: number) => void;
   onScreeningFieldSaved: (id: number, fields: Partial<ScreeningRecord>) => void;
+  photoUrl?: string;
+  onPhotoUpload: (file: File) => void;
 }) {
   const [leverUrl, setLeverUrl] = useState(selected.leverUrl ?? "");
   const [company, setCompany] = useState(trackerEntry.company ?? "");
@@ -1033,8 +1037,41 @@ function DrawerBody({
     );
   }
 
+  const initials = selected.candidateName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
+      {/* Profile photo */}
+      <label className="group relative mx-auto block h-24 w-24 cursor-pointer">
+        <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800">
+          {photoUrl ? (
+            <img src={photoUrl} alt={selected.candidateName} className="h-full w-full object-cover" />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-2xl font-bold text-zinc-400 dark:text-zinc-500">
+              {initials}
+            </span>
+          )}
+        </div>
+        {/* Camera overlay on hover */}
+        <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+        </div>
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) onPhotoUpload(f); e.target.value = ""; }}
+        />
+      </label>
+
       {/* View result link */}
       <button type="button" onClick={() => onViewResult(selected.id)}
         className="flex items-center gap-1.5 self-start text-xs font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300">
@@ -1196,7 +1233,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>(() =>
-    Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, s.photoUrl!]))
+    Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, `/api/history/${s.id}/photo`]))
   );
 
   async function handlePhotoUpload(screeningId: number, file: File) {
@@ -1204,8 +1241,9 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
     form.append("photo", file);
     const res = await fetch(`/api/history/${screeningId}/photo`, { method: "POST", body: form });
     if (res.ok) {
-      const { photoUrl } = await res.json();
-      setPhotoUrls((prev) => ({ ...prev, [screeningId]: photoUrl }));
+      const proxyUrl = `/api/history/${screeningId}/photo`;
+      setPhotoUrls((prev) => ({ ...prev, [screeningId]: proxyUrl }));
+      const { photoUrl } = await res.json(); // storage path, saved to DB by the route
       onScreeningFieldSaved(screeningId, { photoUrl });
     }
   }
@@ -1405,11 +1443,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                               ? "border-violet-300 bg-violet-50 shadow-md dark:border-violet-500/40 dark:bg-violet-500/10"
                               : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-600"
                           }`}>
-                          <label
-                            className="relative h-7 w-7 shrink-0 cursor-pointer overflow-hidden rounded-lg"
-                            onClick={(e) => e.stopPropagation()}
-                            title="Upload photo"
-                          >
+                          <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-lg">
                             {photoUrls[s.id] ? (
                               <img src={photoUrls[s.id]} alt={s.candidateName} className="h-full w-full object-cover" />
                             ) : (
@@ -1419,13 +1453,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                                 : "bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400"
                               }`}>{s.score}</span>
                             )}
-                            <input
-                              type="file"
-                              accept="image/jpeg,image/png,image/webp,image/gif"
-                              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                              onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePhotoUpload(s.id, f); e.target.value = ""; }}
-                            />
-                          </label>
+                          </span>
                           <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor" className="shrink-0 text-zinc-300 dark:text-zinc-600">
                             <circle cx="2" cy="2" r="1.5"/><circle cx="6" cy="2" r="1.5"/>
                             <circle cx="2" cy="7" r="1.5"/><circle cx="6" cy="7" r="1.5"/>
@@ -1540,6 +1568,8 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               onTrackerSave={(fields) => onTrackerDataChange(selected.id, fields)}
               onViewResult={(id) => { setSelected(null); onViewResult(id); }}
               onScreeningFieldSaved={onScreeningFieldSaved}
+              photoUrl={photoUrls[selected.id]}
+              onPhotoUpload={(file) => handlePhotoUpload(selected.id, file)}
             />
           </div>
         </>
