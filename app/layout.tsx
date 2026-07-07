@@ -46,7 +46,7 @@ export default function RootLayout({
           {THEME_INIT_SCRIPT}
         </Script>
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body suppressHydrationWarning className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }

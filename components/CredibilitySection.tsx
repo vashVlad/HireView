@@ -73,8 +73,9 @@ function CredibilityRowItem({ row }: { row: CredibilityRow }) {
   );
 }
 
-export function CredibilitySection({ assessment }: { assessment: CredibilityAssessment }) {
+export function CredibilitySection({ assessment, showSummary = true }: { assessment: CredibilityAssessment; showSummary?: boolean }) {
   const { label, className } = SIGNAL_CONFIG[assessment.overallSignal] ?? SIGNAL_CONFIG.minor_concerns;
+  const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"flags" | "matches">("flags");
 
   const rows = assessment.rows ?? [];
@@ -84,73 +85,102 @@ export function CredibilitySection({ assessment }: { assessment: CredibilityAsse
   const activeRows = tab === "flags" ? flags : matches;
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-800/40">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-          Credibility check
-        </span>
-        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${className}`}>
-          {label}
-        </span>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-4 border-b border-zinc-200 dark:border-zinc-700">
-        <button
-          type="button"
-          onClick={() => setTab("flags")}
-          className={`flex items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
-            tab === "flags"
-              ? "border-amber-500 text-amber-600 dark:text-amber-400"
-              : "border-transparent text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
-          }`}
-        >
-          Flags
-          <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums ${tab === "flags" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"}`}>
-            {flags.length}
+    <div className="rounded-xl border border-zinc-100 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/40">
+      {/* Header — always visible, toggles open/close */}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+            Credibility check
           </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("matches")}
-          className={`flex items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
-            tab === "matches"
-              ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
-              : "border-transparent text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
-          }`}
-        >
-          Matches
-          <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums ${tab === "matches" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"}`}>
-            {matches.length}
+          {flags.length > 0 && (
+            <span className="rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-amber-700 dark:bg-amber-500/20 dark:text-amber-400">
+              {flags.length} flag{flags.length !== 1 ? "s" : ""}
+            </span>
+          )}
+          <span className="rounded-full bg-zinc-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+            {matches.length} match{matches.length !== 1 ? "es" : ""}
           </span>
-        </button>
-      </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${className}`}>
+            {label}
+          </span>
+          <svg
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className={`shrink-0 text-zinc-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          >
+            <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      </button>
 
-      {/* Rows */}
-      <div className="flex flex-col gap-1.5">
-        {activeRows.length > 0 ? (
-          activeRows.map((row, i) => <CredibilityRowItem key={i} row={row} />)
-        ) : (
-          <p className="py-2 text-center text-xs text-zinc-400 dark:text-zinc-500">
-            {tab === "flags" ? "No flags — everything checked out." : "No verified matches."}
-          </p>
-        )}
-      </div>
+      {/* Expandable content */}
+      {open && (
+        <div className="flex flex-col gap-3 border-t border-zinc-100 px-4 pb-4 pt-3 dark:border-zinc-800">
+          {/* Tabs */}
+          <div className="flex gap-4 border-b border-zinc-200 dark:border-zinc-700">
+            <button
+              type="button"
+              onClick={() => setTab("flags")}
+              className={`flex items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
+                tab === "flags"
+                  ? "border-amber-500 text-amber-600 dark:text-amber-400"
+                  : "border-transparent text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+              }`}
+            >
+              Flags
+              <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums ${tab === "flags" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"}`}>
+                {flags.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("matches")}
+              className={`flex items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
+                tab === "matches"
+                  ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                  : "border-transparent text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+              }`}
+            >
+              Matches
+              <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums ${tab === "matches" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"}`}>
+                {matches.length}
+              </span>
+            </button>
+          </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-zinc-200 pt-3 text-xs dark:border-zinc-700">
-        <span className="font-semibold text-zinc-400 dark:text-zinc-500">Industry</span>
-        <span className="text-zinc-600 dark:text-zinc-400">{assessment.industryNote}</span>
-        <span className="font-semibold text-zinc-400 dark:text-zinc-500">Trajectory</span>
-        <span className="text-zinc-600 dark:text-zinc-400">{assessment.trajectoryNote}</span>
-        {assessment.resumeDelta && (
-          <>
-            <span className="font-semibold text-zinc-400 dark:text-zinc-500">Δ Resume</span>
-            <span className="text-zinc-600 dark:text-zinc-400">{assessment.resumeDelta}</span>
-          </>
-        )}
-      </div>
+          {/* Rows */}
+          <div className="flex flex-col gap-1.5">
+            {activeRows.length > 0 ? (
+              activeRows.map((row, i) => <CredibilityRowItem key={i} row={row} />)
+            ) : (
+              <p className="py-2 text-center text-xs text-zinc-400 dark:text-zinc-500">
+                {tab === "flags" ? "No flags — everything checked out." : "No verified matches."}
+              </p>
+            )}
+          </div>
+
+          {/* Summary — only shown when not lifted into parent */}
+          {showSummary && (
+            <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-zinc-200 pt-3 text-xs dark:border-zinc-700">
+              <span className="font-semibold text-zinc-400 dark:text-zinc-500">Industry</span>
+              <span className="text-zinc-600 dark:text-zinc-400">{assessment.industryNote}</span>
+              <span className="font-semibold text-zinc-400 dark:text-zinc-500">Trajectory</span>
+              <span className="text-zinc-600 dark:text-zinc-400">{assessment.trajectoryNote}</span>
+              {assessment.resumeDelta && (
+                <>
+                  <span className="font-semibold text-zinc-400 dark:text-zinc-500">Δ Resume</span>
+                  <span className="text-zinc-600 dark:text-zinc-400">{assessment.resumeDelta}</span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

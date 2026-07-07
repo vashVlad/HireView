@@ -16,9 +16,15 @@ import { StatusSelect } from "@/components/StatusSelect";
 import { TrackerStageSelect } from "@/components/TrackerStageSelect";
 import { TRACKER_STAGES } from "@/lib/types";
 import type {
-  CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
+  CandidateResult, CandidateStatus, CredibilityAssessment, CredibilitySignal, FullTrackerData,
   JDAnalysis, Project, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
+
+const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
+  clean:                { label: "LinkedIn clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
+  minor_concerns:       { label: "LinkedIn minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",          icon: "⚠" },
+  significant_concerns: { label: "LinkedIn flags",          className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",              icon: "⛔" },
+};
 
 type SearchMode = "wide" | "narrow";
 
@@ -522,21 +528,27 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             <div role="button" tabIndex={0}
               onClick={() => setExpandedId(expanded ? null : s.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedId(expanded ? null : s.id); }}
-              className="flex w-full cursor-pointer items-center gap-4 p-5 text-left">
+              className="flex w-full cursor-pointer items-center gap-3 px-5 py-4 text-left">
               <ScoreBadge score={s.score} />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden">
+                {/* Name row */}
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
                   {s.flagged && s.flagNote && (
                     <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
                   )}
                 </div>
-                <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">{s.fileName}</span>
-                <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">
-                  {formatDate(s.createdAt)}
-                  {s.statusUpdatedAt && <> · status {formatStatusDate(s.statusUpdatedAt)}</>}
-                  {getNotesText(s) && <> · <span className="text-violet-500 dark:text-violet-400">has notes</span></>}
-                </span>
+                {/* Meta row — date · notes indicator */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                    {formatDate(s.createdAt)}
+                    {s.statusUpdatedAt && <> · {formatStatusDate(s.statusUpdatedAt)}</>}
+                  </span>
+                  {getNotesText(s) && (
+                    <span className="rounded-full bg-violet-100 px-1.5 py-px text-[10px] font-medium text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">notes</span>
+                  )}
+                </div>
+                {/* Status row */}
                 <div className="mt-1.5 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
                   <StatusSelect status={s.status} onChange={(status) => handleStatusChange(s.id, status)} />
                   {s.status === "interview" && (
@@ -547,6 +559,52 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   )}
                 </div>
               </div>
+              {/* Resume button */}
+              <button type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const sw = window.screen.availWidth;
+                  const sh = window.screen.availHeight;
+                  const halfW = Math.floor(sw / 2);
+                  // Use sw - halfW so resume + notes widths sum to exactly sw (handles odd screen widths)
+                  window.open(
+                    `/interview/${s.id}/document`,
+                    `iv_doc_${s.id}`,
+                    `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`
+                  );
+                }}
+                aria-label="Open resume"
+                title="Open resume"
+                className="shrink-0 rounded-full p-1.5 text-zinc-300 transition-colors hover:bg-violet-50 hover:text-violet-600 dark:text-zinc-600 dark:hover:bg-violet-500/10 dark:hover:text-violet-400">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              {/* Notes button */}
+              <button type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const sw = window.screen.availWidth;
+                  const sh = window.screen.availHeight;
+                  const halfW = Math.floor(sw / 2);
+                  const halfH = Math.floor(sh / 2);
+                  // left = sw - halfW so it abuts the resume window exactly
+                  window.open(
+                    `/interview/${s.id}`,
+                    `iv_notes_${s.id}`,
+                    `width=${halfW},height=${halfH},left=${sw - halfW},top=0,menubar=no,toolbar=no,location=no,status=no`
+                  );
+                }}
+                aria-label="Open interview notes"
+                title="Open interview notes"
+                className="shrink-0 rounded-full p-1.5 text-zinc-300 transition-colors hover:bg-violet-50 hover:text-violet-600 dark:text-zinc-600 dark:hover:bg-violet-500/10 dark:hover:text-violet-400">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <div className="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
               <button type="button"
                 onClick={(e) => { e.stopPropagation(); s.flagged ? handleToggleFlag(s.id, true) : setPendingFlagId((p) => p === s.id ? null : s.id); }}
                 aria-label={s.flagged ? "Remove flag" : "Flag"}
@@ -577,11 +635,65 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
             {expanded && (
               <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
+
+                {/* ── Career story ──────────────────────────────────────── */}
                 <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</p>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career story</p>
+                    {credibilityMap[s.id] && (() => {
+                      const sig = SIGNAL_BADGE[credibilityMap[s.id].overallSignal] ?? SIGNAL_BADGE.minor_concerns;
+                      return (
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${sig.className}`}>
+                          {sig.icon} {sig.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <TrajectoryRenderer text={s.careerTrajectory ?? s.summary} className="text-sm" />
+                  {credibilityMap[s.id] && (
+                    <div className="mt-2.5 flex flex-col gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                        <span className="font-medium text-zinc-500 dark:text-zinc-400">LinkedIn trajectory: </span>
+                        {credibilityMap[s.id].trajectoryNote}
+                      </p>
+                      <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                        <span className="font-medium text-zinc-500 dark:text-zinc-400">Industry: </span>
+                        {credibilityMap[s.id].industryNote}
+                      </p>
+                      {credibilityMap[s.id].resumeDelta && (
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                          <span className="font-medium text-zinc-500 dark:text-zinc-400">Δ Resume: </span>
+                          {credibilityMap[s.id].resumeDelta}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
+                {/* ── LinkedIn verification ─────────────────────────────── */}
+                {credibilityMap[s.id] ? (
+                  <CredibilitySection assessment={credibilityMap[s.id]} showSummary={false} />
+                ) : (
+                  <div>
+                    <button type="button"
+                      onClick={() => setShowCheckerForId((p) => p === s.id ? null : s.id)}
+                      className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${showCheckerForId === s.id ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"}`}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" /></svg>
+                      Check credibility
+                    </button>
+                    <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: showCheckerForId === s.id ? "1fr" : "0fr" }}>
+                      <div className="overflow-hidden">
+                        <CredibilityChecker screeningId={s.id} onComplete={(assessment) => {
+                          setCredibilityMap((prev) => ({ ...prev, [s.id]: assessment }));
+                          setShowCheckerForId(null);
+                          fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
+                        }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Assessment ────────────────────────────────────────── */}
                 {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
                   <div className="flex items-center gap-1.5">
                     {s.mustHaveScore !== undefined && (
@@ -596,27 +708,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 <div className="flex flex-col gap-3">
                   <InsightList label="Strengths" items={s.strengths} variant="positive" />
                   <InsightList label="Concerns" items={s.concerns} variant="warning" screeningId={s.id} />
-                  {credibilityMap[s.id] ? (
-                    <CredibilitySection assessment={credibilityMap[s.id]} />
-                  ) : (
-                    <>
-                      <button type="button"
-                        onClick={() => setShowCheckerForId((p) => p === s.id ? null : s.id)}
-                        className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${showCheckerForId === s.id ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"}`}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" /></svg>
-                        Check credibility
-                      </button>
-                      <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: showCheckerForId === s.id ? "1fr" : "0fr" }}>
-                        <div className="overflow-hidden">
-                          <CredibilityChecker screeningId={s.id} onComplete={(assessment) => {
-                            setCredibilityMap((prev) => ({ ...prev, [s.id]: assessment }));
-                            setShowCheckerForId(null);
-                            fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
-                          }} />
-                        </div>
-                      </div>
-                    </>
-                  )}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
@@ -633,14 +724,20 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <a href={`/api/history/${s.id}/resume`} target="_blank" rel="noopener noreferrer"
+                  <button type="button"
+                    onClick={() => {
+                      const sw = window.screen.availWidth;
+                      const sh = window.screen.availHeight;
+                      const halfW = Math.floor(sw / 2);
+                      window.open(`/interview/${s.id}/document`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+                    }}
                     className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 4v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
                     View resume
-                  </a>
+                  </button>
                   {confirmDeleteId === s.id ? (
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-zinc-500 dark:text-zinc-400">Delete this record?</span>
@@ -1041,6 +1138,20 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   const [selected, setSelected] = useState<ScreeningRecord | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<Record<number, string>>(() =>
+    Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, s.photoUrl!]))
+  );
+
+  async function handlePhotoUpload(screeningId: number, file: File) {
+    const form = new FormData();
+    form.append("photo", file);
+    const res = await fetch(`/api/history/${screeningId}/photo`, { method: "POST", body: form });
+    if (res.ok) {
+      const { photoUrl } = await res.json();
+      setPhotoUrls((prev) => ({ ...prev, [screeningId]: photoUrl }));
+      onScreeningFieldSaved(screeningId, { photoUrl });
+    }
+  }
 
   // Close drawer on Escape
   useEffect(() => {
@@ -1237,11 +1348,27 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                               ? "border-violet-300 bg-violet-50 shadow-md dark:border-violet-500/40 dark:bg-violet-500/10"
                               : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-600"
                           }`}>
-                          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
-                            s.score >= 80 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
-                            : s.score >= 60 ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
-                            : "bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400"
-                          }`}>{s.score}</span>
+                          <label
+                            className="relative h-7 w-7 shrink-0 cursor-pointer overflow-hidden rounded-lg"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Upload photo"
+                          >
+                            {photoUrls[s.id] ? (
+                              <img src={photoUrls[s.id]} alt={s.candidateName} className="h-full w-full object-cover" />
+                            ) : (
+                              <span className={`flex h-full w-full items-center justify-center text-xs font-bold ${
+                                s.score >= 80 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+                                : s.score >= 60 ? "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+                                : "bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400"
+                              }`}>{s.score}</span>
+                            )}
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/gif"
+                              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                              onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePhotoUpload(s.id, f); e.target.value = ""; }}
+                            />
+                          </label>
                           <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor" className="shrink-0 text-zinc-300 dark:text-zinc-600">
                             <circle cx="2" cy="2" r="1.5"/><circle cx="6" cy="2" r="1.5"/>
                             <circle cx="2" cy="7" r="1.5"/><circle cx="6" cy="7" r="1.5"/>
@@ -1480,7 +1607,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         {/* Tabs */}
         <div className="mb-6 flex items-center gap-1 border-b border-zinc-200 dark:border-zinc-800">
           {TABS.map((t) => (
-            <button key={t.key} type="button" onClick={() => setTab(t.key)}
+            <button key={t.key} type="button" onClick={() => { setTab(t.key); setExpandedId(null); }}
               className={`-mb-px px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
                 tab === t.key
                   ? "border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-400"

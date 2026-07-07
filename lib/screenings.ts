@@ -27,6 +27,9 @@ interface ScreeningRow {
   notes: string | null;
   lever_url: string | null;
   credibility: CredibilityAssessment | null;
+  photo_url: string | null;
+  linkedin_pdf_path: string | null;
+  interview_questions: string[] | null;
   project_id: number | null;
   created_at: string;
 }
@@ -53,6 +56,9 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.notes ? { notes: row.notes } : {}),
     ...(row.lever_url ? { leverUrl: row.lever_url } : {}),
     ...(row.credibility ? { credibility: row.credibility } : {}),
+    ...(row.photo_url ? { photoUrl: row.photo_url } : {}),
+    ...(row.linkedin_pdf_path ? { linkedInPdfPath: row.linkedin_pdf_path } : {}),
+    ...(row.interview_questions ? { interviewQuestions: row.interview_questions } : {}),
     ...(row.project_id != null ? { projectId: row.project_id } : {}),
     createdAt: row.created_at,
   };
@@ -114,7 +120,7 @@ export async function listScreenings(
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, lever_url, credibility, project_id, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
     )
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
@@ -135,7 +141,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
   const { data, error } = await supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, lever_url, credibility, project_id, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
     )
     .in("id", ids)
     .returns<ScreeningRow[]>();
@@ -175,6 +181,9 @@ export async function updateScreening(
     flagNote?: string;
     credibility?: CredibilityAssessment;
     careerTrajectory?: string;
+    photoUrl?: string;
+    linkedInPdfPath?: string;
+    interviewQuestions?: string[];
   }
 ): Promise<void> {
   const supabase = getSupabaseClient();
@@ -186,6 +195,9 @@ export async function updateScreening(
   if (fields.flagNote !== undefined) update.flag_note = fields.flagNote;
   if (fields.credibility !== undefined) update.credibility = fields.credibility;
   if (fields.careerTrajectory !== undefined) update.career_trajectory = fields.careerTrajectory;
+  if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
+  if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
+  if (fields.interviewQuestions !== undefined) update.interview_questions = fields.interviewQuestions;
   if (Object.keys(update).length === 0) return;
   const { error } = await supabase.from("screenings").update(update).eq("id", id);
   if (error) throw error;

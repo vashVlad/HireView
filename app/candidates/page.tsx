@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { CredibilityChecker } from "@/components/CredibilityChecker";
 import { CredibilitySection } from "@/components/CredibilitySection";
 import { InsightList } from "@/components/InsightList";
@@ -12,9 +12,17 @@ import { StatusSelect } from "@/components/StatusSelect";
 import { TrackerStageSelect } from "@/components/TrackerStageSelect";
 import {
   CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS,
-  type CandidateStatus, type CredibilityAssessment,
+  type CandidateStatus, type CredibilityAssessment, type CredibilitySignal,
   type ProjectSummary, type ScreeningRecord, type TrackerStage,
 } from "@/lib/types";
+
+// ── Credibility signal inline badge ───────────────────────────────────────
+
+const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
+  clean:                { label: "LinkedIn clean",         className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
+  minor_concerns:       { label: "LinkedIn minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",   icon: "⚠" },
+  significant_concerns: { label: "LinkedIn flags",          className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",       icon: "⛔" },
+};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -98,42 +106,49 @@ function CandidateCard({
       <div role="button" tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded((v) => !v); }}
-        className="flex w-full cursor-pointer items-center gap-4 p-5 text-left">
+        className="flex w-full cursor-pointer items-center gap-3 px-5 py-4 text-left">
         <ScoreBadge score={s.score} />
 
         <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
+          {/* Name row */}
           <div className="flex items-center gap-2">
             <span className="font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
             {s.flagged && s.flagNote && (
               <span className="truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
             )}
           </div>
-          <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
-            {projectName && projectId ? (
-              <Link href={`/projects/${projectId}?tab=pipeline`}
-                onClick={(e) => e.stopPropagation()}
-                className="font-medium text-violet-500 hover:text-violet-600 dark:text-violet-400 dark:hover:text-violet-300">
-                {projectName}
-              </Link>
-            ) : (
-              <span className="text-zinc-300 dark:text-zinc-600">No role</span>
+          {/* Meta row — role link · date · notes */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-zinc-400 dark:text-zinc-500">
+              {projectName && projectId ? (
+                <Link href={`/projects/${projectId}?tab=pipeline`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="font-medium text-violet-500 hover:text-violet-600 dark:text-violet-400 dark:hover:text-violet-300">
+                  {projectName}
+                </Link>
+              ) : (
+                <span className="text-zinc-300 dark:text-zinc-600">No role</span>
+              )}
+              {" · "}{formatDate(s.createdAt)}
+              {s.statusUpdatedAt && <> · {formatStatusDate(s.statusUpdatedAt)}</>}
+            </span>
+            {noteText && (
+              <span className="rounded-full bg-violet-100 px-1.5 py-px text-[10px] font-medium text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">notes</span>
             )}
-            <span>·</span>
-            <span>{formatDate(s.createdAt)}</span>
-            {s.statusUpdatedAt && <><span>·</span><span>status {formatStatusDate(s.statusUpdatedAt)}</span></>}
-            {noteText && <><span>·</span><span className="text-violet-500 dark:text-violet-400">has notes</span></>}
+          </div>
+          {/* Status row */}
+          <div className="mt-1.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <StatusSelect status={s.status} onChange={(status) => onStatusChange(s.id, status)} />
+            {s.status === "interview" && (
+              <TrackerStageSelect
+                stage={trackerStage ?? null}
+                onChange={(stage) => onStageChange(s.id, stage)}
+              />
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <StatusSelect status={s.status} onChange={(status) => onStatusChange(s.id, status)} />
-          {s.status === "interview" && (
-            <TrackerStageSelect
-              stage={trackerStage ?? null}
-              onChange={(stage) => onStageChange(s.id, stage)}
-            />
-          )}
-        </div>
+        <div className="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
 
         <button type="button"
           onClick={(e) => { e.stopPropagation(); s.flagged ? onFlagToggle(s.id, true) : setPendingFlag((p) => !p); }}
@@ -172,29 +187,46 @@ function CandidateCard({
       {/* Expanded detail */}
       {expanded && (
         <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
+
+          {/* ── Career story ─────────────────────────────────────────── */}
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career trajectory</p>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career story</p>
+              {credibility && (() => {
+                const sig = SIGNAL_BADGE[credibility.overallSignal] ?? SIGNAL_BADGE.minor_concerns;
+                return (
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${sig.className}`}>
+                    {sig.icon} {sig.label}
+                  </span>
+                );
+              })()}
+            </div>
             <TrajectoryRenderer text={s.careerTrajectory ?? s.summary} className="text-sm" />
+            {credibility && (
+              <div className="mt-2.5 flex flex-col gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                  <span className="font-medium text-zinc-500 dark:text-zinc-400">LinkedIn trajectory: </span>
+                  {credibility.trajectoryNote}
+                </p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                  <span className="font-medium text-zinc-500 dark:text-zinc-400">Industry: </span>
+                  {credibility.industryNote}
+                </p>
+                {credibility.resumeDelta && (
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                    <span className="font-medium text-zinc-500 dark:text-zinc-400">Δ Resume: </span>
+                    {credibility.resumeDelta}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
-          {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
-            <div className="flex items-center gap-1.5">
-              {s.mustHaveScore !== undefined && (
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">Must-have {s.mustHaveScore}</span>
-              )}
-              {s.niceToHaveScore !== undefined && (
-                <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400">Nice-to-have {s.niceToHaveScore}</span>
-              )}
-            </div>
-          )}
-
-          <InsightList label="Strengths" items={s.strengths} variant="positive" />
-          <InsightList label="Concerns" items={s.concerns} variant="warning" screeningId={s.id} />
-
+          {/* ── LinkedIn verification ─────────────────────────────────── */}
           {credibility ? (
-            <CredibilitySection assessment={credibility} />
+            <CredibilitySection assessment={credibility} showSummary={false} />
           ) : (
-            <>
+            <div>
               <button type="button" onClick={() => setShowChecker((p) => !p)}
                 className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${showChecker ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"}`}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" /></svg>
@@ -210,8 +242,23 @@ function CandidateCard({
                   }} />
                 </div>
               </div>
-            </>
+            </div>
           )}
+
+          {/* ── Assessment ────────────────────────────────────────────── */}
+          {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
+            <div className="flex items-center gap-1.5">
+              {s.mustHaveScore !== undefined && (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">Must-have {s.mustHaveScore}</span>
+              )}
+              {s.niceToHaveScore !== undefined && (
+                <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400">Nice-to-have {s.niceToHaveScore}</span>
+              )}
+            </div>
+          )}
+
+          <InsightList label="Strengths" items={s.strengths} variant="positive" />
+          <InsightList label="Concerns" items={s.concerns} variant="warning" screeningId={s.id} />
 
           {/* Notes */}
           <div className="flex flex-col gap-1.5">
@@ -228,11 +275,20 @@ function CandidateCard({
 
           {/* Actions */}
           <div className="flex items-center justify-between">
-            <a href={`/api/history/${s.id}/resume`} target="_blank" rel="noopener noreferrer"
+            <button type="button"
+              onClick={() => {
+                const sw = window.screen.availWidth;
+                const sh = window.screen.availHeight;
+                const halfW = Math.floor(sw / 2);
+                window.open(`/interview/${s.id}/document`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+              }}
               className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 4v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 18v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
               View resume
-            </a>
+            </button>
             {confirmDelete ? (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-zinc-500">Delete?</span>
@@ -287,7 +343,14 @@ export default function CandidatesPage() {
         if (interviewIds.length > 0) {
           fetch(`/api/tracker?ids=${interviewIds.join(",")}`)
             .then((r) => r.json())
-            .then((d) => setStagesMap(d.stages ?? {}))
+            .then((d) => {
+              const entries: Record<string, { stage?: TrackerStage }> = d.entries ?? {};
+              const stages: Record<number, TrackerStage> = {};
+              for (const [sid, entry] of Object.entries(entries)) {
+                if (entry.stage) stages[Number(sid)] = entry.stage;
+              }
+              setStagesMap(stages);
+            })
             .catch(() => {});
         }
       })

@@ -115,6 +115,9 @@ export interface ScreeningRecord {
   notes?: string;
   leverUrl?: string;
   credibility?: CredibilityAssessment;
+  photoUrl?: string;
+  linkedInPdfPath?: string;
+  interviewQuestions?: string[];
   projectId?: number;
   createdAt: string;
 }
