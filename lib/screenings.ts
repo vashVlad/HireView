@@ -72,8 +72,9 @@ export async function saveScreening(params: {
   resumeFile: Buffer;
   resumeMimeType: string;
   projectId?: number;
+  userId?: string;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, projectId } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, projectId, userId } = params;
   const supabase = getSupabaseClient();
 
   const resumePath = `${randomUUID()}/${result.fileName}`;
@@ -99,6 +100,7 @@ export async function saveScreening(params: {
       resume_path: resumePath,
       resume_mime_type: resumeMimeType,
       project_id: projectId ?? null,
+      user_id: userId ?? null,
     })
     .select("id")
     .single<{ id: number }>();
@@ -113,7 +115,8 @@ export async function listScreenings(
   query?: string,
   statuses?: CandidateStatus[],
   flaggedOnly?: boolean,
-  projectId?: number
+  projectId?: number,
+  userId?: string
 ): Promise<ScreeningRecord[]> {
   const supabase = getSupabaseClient();
 
@@ -129,6 +132,7 @@ export async function listScreenings(
   if (statuses && statuses.length > 0) request = request.in("status", statuses);
   if (flaggedOnly) request = request.eq("flagged", true);
   if (projectId != null) request = request.eq("project_id", projectId);
+  if (userId != null) request = request.eq("user_id", userId);
 
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
@@ -229,11 +233,13 @@ export async function deleteScreening(id: number): Promise<void> {
 }
 
 export async function getStatusCounts(
-  projectId?: number
+  projectId?: number,
+  userId?: string
 ): Promise<Partial<Record<CandidateStatus, number>>> {
   const supabase = getSupabaseClient();
   let req = supabase.from("screenings").select("status");
   if (projectId != null) req = req.eq("project_id", projectId);
+  if (userId != null) req = req.eq("user_id", userId);
   const { data, error } = await req.returns<{ status: CandidateStatus }[]>();
   if (error) throw error;
   const counts: Partial<Record<CandidateStatus, number>> = {};

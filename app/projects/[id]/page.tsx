@@ -2,6 +2,7 @@
 import * as XLSX from "xlsx";
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
+import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CredibilityChecker } from "@/components/CredibilityChecker";
 import { CredibilitySection } from "@/components/CredibilitySection";
@@ -307,7 +308,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
         <ul className="flex flex-col gap-4">
           {results.map((result, i) => (
-            <ResultCard key={result.fileName} result={result} rank={i + 1} onStatusChange={handleStatusChange} />
+            <ResultCard key={result.fileName} result={result} rank={i + 1} jdAnalysis={project.jdAnalysis} onStatusChange={handleStatusChange} />
           ))}
         </ul>
       </div>
@@ -723,6 +724,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
                 </div>
 
+                {/* Calibration feedback */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                    Calibrate
+                  </span>
+                  <CalibrationButtons screeningId={s.id} />
+                </div>
+
                 <div className="flex items-center justify-between">
                   <button type="button"
                     onClick={() => {
@@ -771,17 +780,20 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
 // ── Settings tab ───────────────────────────────────────────────────────────
 
-function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted }: {
+function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThresholdSaved }: {
   project: Project;
   onNameSaved: (name: string) => void;
   onStatusToggled: (status: "active" | "archived") => void;
   onDeleted: () => void;
+  onThresholdSaved: (threshold: number) => void;
 }) {
   const [nameValue, setNameValue] = useState(project.name);
   const [savingName, setSavingName] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [threshold, setThreshold] = useState(project.scoreThreshold ?? 45);
+  const [savingThreshold, setSavingThreshold] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   async function saveName() {
@@ -795,6 +807,18 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted }: {
       onNameSaved(nameValue.trim());
     } catch { /* non-fatal */ }
     finally { setSavingName(false); }
+  }
+
+  async function saveThreshold() {
+    setSavingThreshold(true);
+    try {
+      await fetch(`/api/projects/${project.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scoreThreshold: threshold }),
+      });
+      onThresholdSaved(threshold);
+    } catch { /* non-fatal */ }
+    finally { setSavingThreshold(false); }
   }
 
   async function toggleStatus() {
@@ -834,6 +858,39 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted }: {
             {savingName ? "Saving..." : "Save"}
           </button>
         </div>
+      </div>
+
+      {/* Score threshold */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Score threshold</p>
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              Candidates below this score are not saved to the pipeline.
+            </p>
+          </div>
+          <span className="text-lg font-bold tabular-nums text-violet-600 dark:text-violet-400">
+            {threshold}
+          </span>
+        </div>
+        <input
+          type="range" min={0} max={100} step={5}
+          value={threshold}
+          onChange={(e) => setThreshold(Number(e.target.value))}
+          className="w-full accent-violet-600"
+        />
+        <div className="flex items-center justify-between text-xs text-zinc-400">
+          <span>0 — save everything</span>
+          <span>100 — save nothing</span>
+        </div>
+        <button
+          type="button"
+          onClick={saveThreshold}
+          disabled={savingThreshold || threshold === (project.scoreThreshold ?? 45)}
+          className="self-end rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {savingThreshold ? "Saving…" : "Save threshold"}
+        </button>
       </div>
 
       {/* Status */}
@@ -1671,6 +1728,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             onNameSaved={(name) => setProject((p) => p ? { ...p, name } : p)}
             onStatusToggled={(status) => setProject((p) => p ? { ...p, status } : p)}
             onDeleted={() => window.location.href = "/projects"}
+            onThresholdSaved={(scoreThreshold) => setProject((p) => p ? { ...p, scoreThreshold } : p)}
           />
         )}
       </main>

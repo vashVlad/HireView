@@ -90,23 +90,25 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+        className="flex w-full items-center gap-3 px-4 py-3 text-left"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Credibility check
+        <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+          Credibility
+        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+            flags.length > 0
+              ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
+              : "bg-zinc-100 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400"
+          }`}>
+            {flags.length} flag{flags.length !== 1 ? "s" : ""}
           </span>
-          {flags.length > 0 && (
-            <span className="rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-amber-700 dark:bg-amber-500/20 dark:text-amber-400">
-              {flags.length} flag{flags.length !== 1 ? "s" : ""}
-            </span>
-          )}
-          <span className="rounded-full bg-zinc-100 px-1.5 py-px text-[10px] font-semibold tabular-nums text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
             {matches.length} match{matches.length !== 1 ? "es" : ""}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${className}`}>
+        <div className="ml-auto flex items-center gap-2">
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${className}`}>
             {label}
           </span>
           <svg

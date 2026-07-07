@@ -7,6 +7,7 @@ interface ProjectRow {
   job_description: string;
   jd_analysis: JDAnalysis | null;
   status: ProjectStatus;
+  score_threshold: number;
   created_at: string;
   updated_at: string;
 }
@@ -18,6 +19,7 @@ function rowToProject(row: ProjectRow): Project {
     jobDescription: row.job_description,
     jdAnalysis: row.jd_analysis,
     status: row.status,
+    scoreThreshold: row.score_threshold ?? 45,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -27,6 +29,7 @@ export async function createProject(params: {
   name: string;
   jobDescription: string;
   jdAnalysis?: JDAnalysis;
+  userId?: string;
 }): Promise<Project> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -35,6 +38,7 @@ export async function createProject(params: {
       name: params.name.trim(),
       job_description: params.jobDescription,
       jd_analysis: params.jdAnalysis ?? null,
+      user_id: params.userId ?? null,
     })
     .select()
     .single<ProjectRow>();
@@ -42,13 +46,14 @@ export async function createProject(params: {
   return rowToProject(data);
 }
 
-export async function listProjects(): Promise<Project[]> {
+export async function listProjects(userId?: string): Promise<Project[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("projects")
-    .select("id, name, job_description, jd_analysis, status, created_at, updated_at")
-    .order("created_at", { ascending: false })
-    .returns<ProjectRow[]>();
+    .select("id, name, job_description, jd_analysis, status, score_threshold, created_at, updated_at")
+    .order("created_at", { ascending: false });
+  if (userId != null) query = query.eq("user_id", userId);
+  const { data, error } = await query.returns<ProjectRow[]>();
   if (error) throw error;
   return (data ?? []).map(rowToProject);
 }
@@ -57,7 +62,7 @@ export async function getProject(id: number): Promise<Project | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("projects")
-    .select("id, name, job_description, jd_analysis, status, created_at, updated_at")
+    .select("id, name, job_description, jd_analysis, status, score_threshold, created_at, updated_at")
     .eq("id", id)
     .maybeSingle<ProjectRow>();
   if (error) throw error;
@@ -67,7 +72,7 @@ export async function getProject(id: number): Promise<Project | null> {
 
 export async function updateProject(
   id: number,
-  fields: { name?: string; jobDescription?: string; jdAnalysis?: JDAnalysis; status?: ProjectStatus }
+  fields: { name?: string; jobDescription?: string; jdAnalysis?: JDAnalysis; status?: ProjectStatus; scoreThreshold?: number }
 ): Promise<void> {
   const supabase = getSupabaseClient();
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -75,6 +80,7 @@ export async function updateProject(
   if (fields.jobDescription !== undefined) payload.job_description = fields.jobDescription;
   if (fields.jdAnalysis !== undefined) payload.jd_analysis = fields.jdAnalysis;
   if (fields.status !== undefined) payload.status = fields.status;
+  if (fields.scoreThreshold !== undefined) payload.score_threshold = Math.max(0, Math.min(100, fields.scoreThreshold));
   const { error } = await supabase.from("projects").update(payload).eq("id", id);
   if (error) throw error;
 }
@@ -85,8 +91,8 @@ export async function deleteProject(id: number): Promise<void> {
   if (error) throw error;
 }
 
-export async function getProjectSummaries(): Promise<ProjectSummary[]> {
-  const projects = await listProjects();
+export async function getProjectSummaries(userId?: string): Promise<ProjectSummary[]> {
+  const projects = await listProjects(userId);
   if (projects.length === 0) return [];
 
   const supabase = getSupabaseClient();

@@ -3,7 +3,9 @@ import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { saveScreening } from "@/lib/screenings";
+import { saveScreeningBatch } from "@/lib/screeningBatches";
 import { getProject } from "@/lib/projects";
+import { getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -20,6 +22,10 @@ function resolveMimeType(file: File): string {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = userIdFilter(user);
+
   const formData = await request.formData();
   const jobDescriptionField = formData.get("jobDescription");
   const jdFileField = formData.get("jdFile");
@@ -57,11 +63,13 @@ export async function POST(request: NextRequest) {
     .map((l) => l.trim())
     .find((l) => l.length > 0);
 
-  // Pull LinkedIn profile scoring context from the project's JD analysis if available
+  // Pull project config (LinkedIn context + per-role score threshold)
   let linkedInContext: string | undefined;
+  let scoreThreshold = 45;
   if (projectId) {
     const project = await getProject(projectId).catch(() => null);
     linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
+    scoreThreshold = project?.scoreThreshold ?? 45;
   }
 
   if (files.length === 0) {
@@ -76,7 +84,7 @@ export async function POST(request: NextRequest) {
 
   // Best-effort: a calibration library issue shouldn't block screening.
   // Scoped to the current project so examples from other projects don't bleed in.
-  const calibrationExamples = await listCalibrationExamples(projectId).catch(() => []);
+  const calibrationExamples = await listCalibrationExamples(projectId, userId).catch(() => []);
 
   // Extract text for every resume first — this is local parsing, no API
   // calls, so it's free to fully parallelize.
@@ -116,9 +124,9 @@ export async function POST(request: NextRequest) {
       );
       results.push(result);
 
-      // Only persist candidates worth revisiting. Scores under 45 are
-      // clear mismatches — saving them would pollute history without value.
-      if (result.score >= 45) {
+      // Only persist candidates above the project's score threshold.
+      // Default is 45; configurable per-project in Settings tab.
+      if (result.score >= scoreThreshold) {
         // Awaited (not fire-and-forget): Vercel can freeze the function as
         // soon as the response is sent, which would silently drop an
         // un-awaited write.
@@ -129,6 +137,7 @@ export async function POST(request: NextRequest) {
             resumeFile: resume.buffer,
             resumeMimeType: resume.mimeType,
             projectId,
+            userId,
           });
           result.id = id;
         } catch (err) {
@@ -148,6 +157,18 @@ export async function POST(request: NextRequest) {
   const CONCURRENCY = 3;
   for (let i = 0; i < parsed.length; i += CONCURRENCY) {
     await Promise.all(parsed.slice(i, i + CONCURRENCY).map(score));
+  }
+
+  // Save aggregate batch stats for analytics — includes ALL scores (even rejected ones).
+  // Fire-and-forget: a stats write failure should never block the response.
+  if (results.length > 0) {
+    const passedCount = results.filter((r) => r.score >= scoreThreshold).length;
+    saveScreeningBatch({
+      userId,
+      projectId,
+      scores: results.map((r) => r.score),
+      passedCount,
+    }).catch((err) => console.error("Failed to save screening batch:", err));
   }
 
   results.sort((a, b) => b.score - a.score);

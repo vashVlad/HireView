@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listCalibrationExamples, saveCalibrationExample } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
+import { getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CalibrationLabel } from "@/lib/types";
 
 const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
@@ -15,11 +16,15 @@ function resolveMimeType(file: File): string {
 }
 
 export async function GET(request: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = userIdFilter(user);
+
   const projectIdParam = request.nextUrl.searchParams.get("projectId");
   const projectId = projectIdParam ? parseInt(projectIdParam, 10) || undefined : undefined;
 
   try {
-    const examples = await listCalibrationExamples(projectId);
+    const examples = await listCalibrationExamples(projectId, userId);
     return NextResponse.json({ examples });
   } catch (error) {
     return NextResponse.json(
@@ -30,6 +35,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const formData = await request.formData();
   const labelField = formData.get("label");
   const noteField = formData.get("note");
@@ -63,6 +71,7 @@ export async function POST(request: NextRequest) {
       resumeFile: buffer,
       resumeMimeType: resolveMimeType(file),
       projectId,
+      userId: user.id,
     });
 
     return NextResponse.json({ example });

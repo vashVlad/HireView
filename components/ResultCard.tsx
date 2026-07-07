@@ -10,7 +10,8 @@ import { QuestionGenerator } from "./QuestionGenerator";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusSelect } from "./StatusSelect";
-import { TrajectoryRenderer } from "./TrajectoryRenderer";
+import { TrajectoryRenderer, countKeywordMatches } from "./TrajectoryRenderer";
+import type { JDAnalysis } from "@/lib/types";
 
 // ── Main ResultCard ─────────────────────────────────────────────────────────
 
@@ -18,12 +19,14 @@ export function ResultCard({
   result,
   rank,
   roleContext,
+  jdAnalysis,
   onStatusChange,
   solo = false,
 }: {
   result: CandidateResult;
   rank: number;
   roleContext?: string;
+  jdAnalysis?: JDAnalysis | null;
   onStatusChange?: (id: number, status: CandidateStatus) => void;
   solo?: boolean;
 }) {
@@ -35,6 +38,11 @@ export function ResultCard({
 
   const canCheck = result.id !== undefined;
   const trajectoryText = result.careerTrajectory ?? result.summary;
+
+  const mustSkills = jdAnalysis?.mustHaveSkills ?? [];
+  const niceSkills = jdAnalysis?.niceToHaveSkills ?? [];
+  const mustMatched = trajectoryText ? countKeywordMatches(trajectoryText, mustSkills) : 0;
+  const niceMatched = trajectoryText ? countKeywordMatches(trajectoryText, niceSkills) : 0;
 
   return (
     <li className={`animate-fade-in-up rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${solo ? "p-10" : "p-5"}`}>
@@ -58,15 +66,25 @@ export function ResultCard({
             </div>
           )}
           {(result.mustHaveScore !== undefined || result.niceToHaveScore !== undefined) && (
-            <div className="flex items-center justify-center gap-1.5">
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
               {result.mustHaveScore !== undefined && (
-                <span className={`inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 ${solo ? "text-sm" : "text-xs"}`}>
+                <span className={`inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 ${solo ? "text-sm" : "text-xs"}`}>
                   Must-have {result.mustHaveScore}
+                  {mustSkills.length > 0 && (
+                    <span className="ml-0.5 rounded-full bg-amber-100 px-1.5 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+                      {mustMatched}/{mustSkills.length} kw
+                    </span>
+                  )}
                 </span>
               )}
               {result.niceToHaveScore !== undefined && (
-                <span className={`inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400 ${solo ? "text-sm" : "text-xs"}`}>
+                <span className={`inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400 ${solo ? "text-sm" : "text-xs"}`}>
                   Nice-to-have {result.niceToHaveScore}
+                  {niceSkills.length > 0 && (
+                    <span className="ml-0.5 rounded-full bg-violet-200 px-1.5 text-violet-800 dark:bg-violet-500/30 dark:text-violet-300">
+                      {niceMatched}/{niceSkills.length} kw
+                    </span>
+                  )}
                 </span>
               )}
             </div>
@@ -82,6 +100,7 @@ export function ResultCard({
           <TrajectoryRenderer
             text={trajectoryText}
             className={solo ? "text-base" : "text-sm"}
+            highlights={mustSkills.length || niceSkills.length ? { must: mustSkills, nice: niceSkills } : undefined}
           />
         </div>
       )}

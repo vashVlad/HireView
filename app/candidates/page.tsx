@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CredibilityChecker } from "@/components/CredibilityChecker";
 import { CredibilitySection } from "@/components/CredibilitySection";
 import { InsightList } from "@/components/InsightList";
@@ -271,6 +272,14 @@ function CandidateCard({
               onBlur={(e) => handleSaveNotes(e.target.value)}
               placeholder="Add notes about this candidate..." rows={3}
               className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
+          </div>
+
+          {/* Calibration feedback */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+              Calibrate
+            </span>
+            <CalibrationButtons screeningId={s.id} />
           </div>
 
           {/* Actions */}

@@ -163,6 +163,8 @@ export interface Project {
   jobDescription: string;
   jdAnalysis: JDAnalysis | null;
   status: ProjectStatus;
+  /** Minimum score to save to pipeline history. Default 45. Range 0–100. */
+  scoreThreshold: number;
   createdAt: string;
   updatedAt: string;
 }
