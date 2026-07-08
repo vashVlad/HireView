@@ -42,6 +42,45 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 **Next:** Phase 4 Outreach Drafting — needs Phase 2 problem statement before building.
 
+## 2026-07-07 (session 3) — Access requests, keyword highlighting, invite + photo polish
+
+**Code changes:**
+- **Access request feature** — `access_requests` Supabase table; collapsible request form on login page (email + name + message); `POST /api/access-requests` saves to DB + fires Resend email to vladvashchuk2005@gmail.com (requires `RESEND_API_KEY`); GET returns pending list for admins. Team page shows amber "Pending requests" panel with Approve (auto-creates user with `HireView2026!`) / Dismiss. SiteHeader shows pulsing amber dot on Team link when count > 0.
+- **Keyword highlighting** — must-have (amber) and nice-to-have (violet) keywords highlighted in career trajectory text; score chips show `X/Y kw` match badge for fraud detection.
+- **Invite default password** — changed from `HireView2025!` to `HireView2026!` throughout; Approve action in access requests also uses `HireView2026!`.
+- **Tracker photo fix** — private Supabase bucket; photos now proxied through `GET /api/history/[id]/photo` (service role, 1h cache). Chip shows photo if uploaded; drawer has circular profile photo with camera overlay on hover.
+- **TypeScript fix** — `cookiesToSet` implicit `any` in `lib/supabase-server.ts` and `middleware.ts`.
+
+**Pending Vlad actions:**
+- Run `supabase-migration-access-requests.sql` in Supabase SQL Editor
+- Get a Resend API key (resend.com, free tier) and add `RESEND_API_KEY` to `.env.local` and Vercel env vars
+
+**Next:** Phase 5 Outreach Drafting (needs problem statement first), or tackle pending migrations.
+
+## 2026-07-07 (session 2) — Auth UX polish, analytics tracking, JD file upload
+
+**Code changes:**
+- **screening_batches table** — new aggregate table (`total_count`, `passed_count`, `scores int[]`) written fire-and-forget after each screening run. Analytics now shows 4 stat cards: Resumes Screened / Passed to Pipeline / Filtered Out / Time Saved. Historical data backfilled via SQL.
+- **Analytics route rewritten** — queries `screening_batches` exclusively; returns `passedToPipeline` and `passRate` so rejected candidates are counted without storing individual records.
+- **SiteHeader** — replaced email chip + separate sign-out with person icon → dropdown (email with green dot, Change password link, Sign out). Admin nav links (Analytics, Team) visible only to admins with a visual divider.
+- **Invite flow overhaul** — switched from `inviteUserByEmail` (hits email rate limit, requires email click) to `createUser` with `email_confirm: true` + temp password. No email sent; user is active immediately. Temp password field added to invite form, pre-filled with `HireView2025!`, role dropdown stacked above Send invite button.
+- **`/auth/set-password` page** — built for users who want to change their temp password. Linked from header dropdown.
+- **JD file upload** — "Upload file" button in New Role modal (bottom-right of textarea). Sends file to new `POST /api/extract-jd-text` which reuses `extractResumeText`. Supports PDF, DOCX, TXT.
+
+**Pending Vlad actions:** Run `supabase-migration-batches.sql`. Delete any stuck unconfirmed invite users from Supabase dashboard and re-add via Team page.
+
+**Next:** Phase 5 Outreach Drafting — needs problem statement first.
+
+## 2026-07-07 — Multi-user auth, analytics, calibration UI, configurable threshold
+
+**4 tasks for Brillio team-wide adoption:**
+- **Task 1:** `@supabase/ssr` middleware, `/login`, `user_id` on 3 tables, recruiter isolation, admin bypass, `/admin/users` page, sign-out. Needs: npm install, anon key in env, SQL migration, account setup + data migration.
+- **Task 2:** `/analytics` admin page — total screened, avg score, time saved, score distribution, daily activity, by-role/recruiter. `GET /api/analytics`.
+- **Task 3:** Thumbs up/down on expanded pipeline cards. Thumbs down → correction modal (score slider + reason). `POST /api/history/[id]/calibrate` re-downloads resume + saves as calibration_examples. Scoring logic untouched.
+- **Task 4:** `score_threshold integer DEFAULT 45` on projects. Slider in Settings tab. `screen-resumes` reads from project. SQL: `supabase-migration-threshold.sql`.
+
+**Pending Vlad actions:** See state.md — 7 steps required before deploy.
+
 ## 2026-07-06 — Interview View, card redesign, design system cleanup
 
 **New features:**

@@ -32,6 +32,7 @@ export async function PATCH(
       ...(body?.jobDescription !== undefined && { jobDescription: body.jobDescription }),
       ...(body?.jdAnalysis !== undefined && { jdAnalysis: body.jdAnalysis }),
       ...(body?.status !== undefined && { status: body.status }),
+      ...(body?.scoreThreshold !== undefined && { scoreThreshold: Number(body.scoreThreshold) }),
     });
     return NextResponse.json({ ok: true });
   } catch (err) {

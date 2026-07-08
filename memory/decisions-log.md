@@ -4,6 +4,24 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-07 — JD file upload reuses extractResumeText via a thin /api/extract-jd-text route.**
+Same PDF/DOCX/TXT extraction utility used by the resume screener. No new dependencies. "Upload file" button overlaid on the New Role textarea corner — text populates the textarea, then flows through the existing analyze path unchanged.
+
+**2026-07-07 — User creation uses createUser (not inviteUserByEmail) to avoid Supabase email rate limits.**
+`inviteUserByEmail` always sends an email, which hits Supabase free tier rate limits (2–4/hr) during testing. `createUser` with `email_confirm: true` + a temp password creates the user immediately with no email. Admin shares credentials directly. User can change password via "Change password" in the header dropdown.
+
+**2026-07-07 — Rejected candidates tracked via aggregate screening_batches table, not individual rows.**
+`screening_batches` stores one row per screening run: `scores int[]`, `total_count`, `passed_count`. Analytics can compute "Filtered Out" and score distribution across ALL resumes (including below-threshold) without filling the screenings table with records the recruiter will never act on. Historical backfill: existing screenings grouped by day+user+project (total_count = passed_count for those rows since old scores were never stored).
+
+**2026-07-07 — Calibration feedback saves to calibration_examples via resume re-download, not a new table.**
+Re-downloads the resume from Supabase Storage, re-extracts text, saves a new calibration_examples record. Keeps the entire scoring pipeline unchanged. Score correction captured as a text note in the `note` field. No new DB tables needed beyond the user_id column already added for multi-user.
+
+**2026-07-07 — score_threshold is per-project (DB column), defaults to 45. Not a global setting.**
+Hardcoded 45 replaced with `project.scoreThreshold ?? 45` in the screen-resumes route. Admins set 0–100 per role in Settings tab. Global default kept at 45 via DB column default so existing rows need no migration.
+
+**2026-07-07 — Analytics uses auth.admin.listUsers() for email lookup, not a profiles table.**
+Admin-only dashboard — using the service role key's admin API avoids building and maintaining a separate user profiles table for email lookups.
+
 **2026-07-06 — Interview View uses two separate buttons (one popup each), not one button opening multiple windows.**
 Browsers block all but the first `window.open()` per user gesture. Tried: single container with 3 iframes (popup blocker), navigate current tab + one popup (timing issues). Final design: two icon buttons on the card — one for resume, one for notes — each triggering exactly one popup. Clean, reliable, no workarounds needed.
 

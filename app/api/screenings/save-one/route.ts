@@ -1,0 +1,69 @@
+import { NextRequest, NextResponse } from "next/server";
+import { extractResumeText } from "@/lib/parseResume";
+import { saveScreening } from "@/lib/screenings";
+import { getAuthUser, userIdFilter } from "@/lib/auth";
+import type { CandidateResult } from "@/lib/types";
+
+export const maxDuration = 30;
+
+const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
+
+function resolveMimeType(file: File): string {
+  if (file.type) return file.type;
+  const ext = file.name.toLowerCase().split(".").pop() ?? "";
+  return MIME_TYPES_BY_EXTENSION[ext] ?? "application/octet-stream";
+}
+
+export async function POST(request: NextRequest) {
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = userIdFilter(user);
+
+  const formData = await request.formData();
+  const resultJsonField = formData.get("resultJson");
+  const resumeFile = formData.get("resumeFile");
+  const jobDescriptionField = formData.get("jobDescription");
+  const projectIdField = formData.get("projectId");
+  const linkedInModeField = formData.get("linkedInMode");
+
+  if (typeof resultJsonField !== "string" || !(resumeFile instanceof File) || typeof jobDescriptionField !== "string") {
+    return NextResponse.json({ error: "resultJson, resumeFile, and jobDescription are required" }, { status: 400 });
+  }
+
+  let result: CandidateResult;
+  try {
+    result = JSON.parse(resultJsonField) as CandidateResult;
+  } catch {
+    return NextResponse.json({ error: "Invalid resultJson" }, { status: 400 });
+  }
+
+  const projectId = typeof projectIdField === "string" && projectIdField.trim()
+    ? parseInt(projectIdField.trim(), 10) || undefined
+    : undefined;
+  const linkedInMode = linkedInModeField === "true";
+  const mimeType = resolveMimeType(resumeFile);
+
+  const buffer = Buffer.from(await resumeFile.arrayBuffer());
+
+  // Verify text is extractable before saving
+  try {
+    await extractResumeText(resumeFile.name, buffer);
+  } catch {
+    return NextResponse.json({ error: "Could not read the resume file" }, { status: 400 });
+  }
+
+  const { id } = await saveScreening({
+    result,
+    jobDescription: jobDescriptionField,
+    resumeFile: buffer,
+    resumeMimeType: mimeType,
+    linkedInMode,
+    projectId,
+    userId,
+  });
+
+  return NextResponse.json({ id });
+}

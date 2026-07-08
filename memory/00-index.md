@@ -2,17 +2,78 @@
 
 This folder is HireView's persistent memory. Read this first, every session, before touching code.
 
-**Read in this order:**
-1. [[state]] — what's built, what's shipped, what's next (source of truth for "where are we")
-2. [[decisions-log]] — why things are the way they are (don't re-litigate these without a reason)
-3. [[open-questions]] — unresolved items, blockers, things needing Vlad's input
-4. [[session-log]] — dated log of work sessions (append a new entry at the end of any session with real changes)
+---
 
-**Related docs outside this vault:**
-- `../CLAUDE.md` — project brief + agent instructions (this vault is referenced from there)
-- `../BLUEPRINT_Operations_Systems_Builder.md` — the cross-project methodology HireView follows
-- `../HireView-Dev-Log.docx` — full narrative build history (this vault's `state.md` and `decisions-log.md` are distilled from it)
-- `../HireView-Architecture-Redesign-Phase2-3.docx` — the locked project-centric nav redesign (shipped, see state.md)
-- `../HireView-Case-Study.docx`, `../HireView-Impact-Report.docx` — external-facing writeups, not dev state
+## READ IN THIS ORDER — EVERY SESSION, NO EXCEPTIONS
 
-**Vault format:** plain markdown, Obsidian-compatible (`[[wikilinks]]` work if opened as a vault) but not Obsidian-dependent — any editor or Claude session can read/write these files directly.
+**1. [[state]]** — what's built, what's shipped, what's pending migration. Source of truth for "where are we right now."
+
+**2. [[decisions-log]]** — why things are the way they are. Don't reverse a decision without reading why it was made.
+
+**3. [[HireView_Enterprise_Plan]]** — the single source of truth for what gets built, in what order, and why. Contains the feature gate (4 questions every feature must pass), full Phase 1-3 roadmap, UI standards, competitive position, and the Never Build list. Reference this before touching any feature.
+
+**4. [[HireView_Roadmap]]** — lean feature table with priorities, reuse notes, and logged problem statements. Cross-reference with Enterprise Plan on every decision.
+
+**5. [[BLUEPRINT_Operations_Systems_Builder]]** — the methodology governing all work. Every feature follows the 5-phase framework: Embed → Define → Design → Build → Validate. Never skip phases.
+
+**6. [[hireview-enterprise-skill]]** — product governance skill. Apply on every UI decision, every feature scoping question, and every time new ideas are introduced mid-session.
+
+**7. [[open-questions]]** — unresolved items, blockers, things needing Vlad's input. Check before starting work.
+
+**8. [[session-log]]** — dated log of work sessions. Append a new entry at the END of any session with real changes.
+
+---
+
+## CRITICAL CONSTRAINTS — apply every session
+
+- **DO NOT TOUCH:** `lib/scoreCandidate.ts`, `lib/analyzeJD.ts`, `lib/parseResume.ts`, `lib/calibrationExamples.ts`, `app/api/screen-resumes/route.ts` — validated core, build around them never through them
+- **Schema changes are additive only** — new columns and tables only, always backward-compatible defaults, never delete or rename existing columns
+- **Every feature ships with:** working empty state, working error state, mobile-tested layout
+- **Fraud signals** (duplicate detected, previously seen, known fraud pattern) must appear as colored badges on the collapsed pipeline card — never buried in expanded view
+- **Build Phase 1 in strict order:** 1.1 → 1.2 → 1.3 → 1.4 → 1.5. Complete and test each before starting next
+
+---
+
+## DOCUMENTATION — update after every session
+
+| Trigger | Update these files |
+|---|---|
+| Every build session | `session-log.md` (append), `decisions-log.md` (prepend) |
+| Every feature ships | `state.md` (move to shipped), `HireView_Impact_Report_Brillio.md` |
+| Phase 1.1 ships | `HireView_Prior_Art_Document.pdf` — add Novel Implementation C (duplicate fingerprinting) same day |
+| Any novel implementation | Email vladvashchuk2005@gmail.com with subject "HireView Prior Art Update — [date]" |
+
+---
+
+## CURRENT BUILD QUEUE
+
+**Phase 1 — Fraud Prevention (NOW)**
+- 1.1 Duplicate Resume Detection `CRITICAL` — match on skills hash, responsibility vectors, metric claims, career arc. Never on names/contact/company
+- 1.2 Recruiter Attribution `CRITICAL` — every action logged with name + timestamp
+- 1.3 Teams Architecture `CRITICAL` — Admin → Team → Projects → Users, full isolation
+- 1.4 Candidate History Alert `HIGH` — reuses fingerprints from 1.1
+- 1.5 Fraud-Aware Interview Questions `HIGH` — reuses existing interview questions + credibility checker
+
+**Phase 2 — Intelligence Layer (30 days)**
+See [[HireView_Enterprise_Plan]] for full details.
+
+**Phase 3 — Enterprise Scale (post-demo)**
+See [[HireView_Enterprise_Plan]] for full details.
+
+---
+
+## RELATED DOCS OUTSIDE THIS VAULT
+
+- `../CLAUDE.md` — project brief + agent instructions
+- `../HireView_Prior_Art_Document.pdf` — IP protection document, update when novel features ship
+- `../HireView-Dev-Log.docx` — full narrative build history
+- `../HireView-Architecture-Redesign-Phase2-3.docx` — locked nav redesign (shipped)
+- `../HireView-Case-Study.docx`, `../HireView-Impact-Report.docx` — external-facing writeups
+
+---
+
+## VAULT FORMAT
+
+Plain markdown, Obsidian-compatible (`[[wikilinks]]` work if opened as a vault) but not Obsidian-dependent. Any editor or Claude session can read/write these files directly.
+
+*Last updated: July 8, 2026*

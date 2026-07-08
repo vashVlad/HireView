@@ -11,10 +11,84 @@
  *   bullets      — subordinate, zinc-500/400
  *   summary para — softer, xs, top divider
  *
- * Display order: oldest role first → newest role last (chronological).
- * The raw trajectory string is newest-first (resume order); role groups
- * are reversed at render time so the career story reads as a progression.
+ * Display order: newest role first (resume order / Claude output order).
+ *
+ * Keyword highlights:
+ *   must-have  → amber background
+ *   nice-to-have → violet background
  */
+
+import React from "react";
+
+// ── Keyword highlighting ────────────────────────────────────────────────────
+
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Returns how many of the given keywords appear (case-insensitive) in text. */
+export function countKeywordMatches(text: string, keywords: string[]): number {
+  if (!keywords.length) return 0;
+  const lower = text.toLowerCase();
+  return keywords.filter((kw) => lower.includes(kw.toLowerCase())).length;
+}
+
+function applyHighlights(
+  text: string,
+  must: string[],
+  nice: string[]
+): React.ReactNode[] {
+  if (!must.length && !nice.length) return [text];
+
+  type HMatch = { start: number; end: number; kind: "must" | "nice" };
+  const matches: HMatch[] = [];
+
+  for (const kw of must) {
+    const re = new RegExp(escapeRegex(kw), "gi");
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      matches.push({ start: m.index, end: m.index + m[0].length, kind: "must" });
+    }
+  }
+  for (const kw of nice) {
+    const re = new RegExp(escapeRegex(kw), "gi");
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      matches.push({ start: m.index, end: m.index + m[0].length, kind: "nice" });
+    }
+  }
+
+  // Sort by start; must-have wins over nice-to-have at same position; drop overlaps
+  matches.sort((a, b) => a.start - b.start || (a.kind === "must" ? -1 : 1));
+  const kept: HMatch[] = [];
+  let cursor = 0;
+  for (const m of matches) {
+    if (m.start >= cursor) {
+      kept.push(m);
+      cursor = m.end;
+    }
+  }
+
+  const nodes: React.ReactNode[] = [];
+  let pos = 0;
+  for (const m of kept) {
+    if (m.start > pos) nodes.push(text.slice(pos, m.start));
+    const cls =
+      m.kind === "must"
+        ? "rounded bg-amber-100 px-0.5 font-medium text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
+        : "rounded bg-violet-100 px-0.5 font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-300";
+    nodes.push(
+      <mark key={m.start} className={cls}>
+        {text.slice(m.start, m.end)}
+      </mark>
+    );
+    pos = m.end;
+  }
+  if (pos < text.length) nodes.push(text.slice(pos));
+  return nodes;
+}
+
+// ── Inline parser (bold + highlights) ─────────────────────────────────────
 
 type Segment = { type: "text"; value: string } | { type: "bold"; value: string };
 
@@ -32,16 +106,30 @@ function parseInline(text: string): Segment[] {
   return segments;
 }
 
-function InlineContent({ text }: { text: string }) {
+function InlineContent({
+  text,
+  must = [],
+  nice = [],
+}: {
+  text: string;
+  must?: string[];
+  nice?: string[];
+}) {
   const segments = parseInline(text);
   return (
     <>
       {segments.map((s, i) =>
-        s.type === "bold" ? <strong key={i}>{s.value}</strong> : <span key={i}>{s.value}</span>
+        s.type === "bold" ? (
+          <strong key={i}>{applyHighlights(s.value, must, nice)}</strong>
+        ) : (
+          <span key={i}>{applyHighlights(s.value, must, nice)}</span>
+        )
       )}
     </>
   );
 }
+
+// ── Block parser ────────────────────────────────────────────────────────────
 
 type Block =
   | { kind: "header"; text: string }
@@ -99,16 +187,13 @@ function parseBlocks(raw: string): Block[] {
 /**
  * Groups blocks into role sections (each starting with a header) plus
  * an optional preamble and trailing summary paragraph.
- * Role groups are returned reversed (oldest first).
+ * Role groups are kept in original order (newest first — resume order).
  */
 function buildRenderOrder(blocks: Block[]): Block[] {
-  // Anything before the first header is a preamble
   const firstHeaderIdx = blocks.findIndex((b) => b.kind === "header");
-  if (firstHeaderIdx === -1) return blocks; // no headers — render as-is
+  if (firstHeaderIdx === -1) return blocks;
 
   const preamble = blocks.slice(0, firstHeaderIdx);
-
-  // Split from firstHeader onward into role groups + trailing summary
   const rest = blocks.slice(firstHeaderIdx);
   const groups: Block[][] = [];
   let current: Block[] = [];
@@ -119,7 +204,6 @@ function buildRenderOrder(blocks: Block[]): Block[] {
       if (current.length > 0) groups.push(current);
       current = [block];
     } else if (block.kind === "paragraph" && current.length > 0) {
-      // A paragraph after role content is the summary — stop grouping
       groups.push(current);
       current = [];
       trailingSummary = block;
@@ -130,22 +214,31 @@ function buildRenderOrder(blocks: Block[]): Block[] {
   }
   if (current.length > 0) groups.push(current);
 
-  // Reverse so oldest role renders first
-  groups.reverse();
-
-  const ordered: Block[] = [
+  // No reversal — keep newest-first (resume order)
+  return [
     ...preamble,
     ...groups.flat(),
     ...(trailingSummary ? [trailingSummary] : []),
   ];
-  return ordered;
 }
 
-export function TrajectoryRenderer({ text, className }: { text: string; className?: string }) {
+// ── Component ───────────────────────────────────────────────────────────────
+
+export function TrajectoryRenderer({
+  text,
+  className,
+  highlights,
+}: {
+  text: string;
+  className?: string;
+  highlights?: { must: string[]; nice: string[] };
+}) {
+  const must = highlights?.must ?? [];
+  const nice = highlights?.nice ?? [];
+
   const raw = parseBlocks(text);
   const blocks = buildRenderOrder(raw);
 
-  // The trailing summary is the last paragraph if it follows bullets
   const summaryBlock = (() => {
     const last = blocks[blocks.length - 1];
     if (!last || last.kind !== "paragraph") return null;
@@ -164,7 +257,7 @@ export function TrajectoryRenderer({ text, className }: { text: string; classNam
                 i > 0 ? "mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800" : ""
               }`}
             >
-              {block.text}
+              <InlineContent text={block.text} must={must} nice={nice} />
             </p>
           );
         }
@@ -176,13 +269,13 @@ export function TrajectoryRenderer({ text, className }: { text: string; classNam
                 key={i}
                 className="mt-3 border-t border-zinc-100 pt-3 text-[12px] leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"
               >
-                <InlineContent text={block.lines.join(" ")} />
+                <InlineContent text={block.lines.join(" ")} must={must} nice={nice} />
               </p>
             );
           }
           return (
             <p key={i} className={`leading-relaxed text-zinc-600 dark:text-zinc-300 ${i > 0 ? "mt-3" : ""}`}>
-              <InlineContent text={block.lines.join(" ")} />
+              <InlineContent text={block.lines.join(" ")} must={must} nice={nice} />
             </p>
           );
         }
@@ -194,7 +287,7 @@ export function TrajectoryRenderer({ text, className }: { text: string; classNam
               <li key={j} className="flex gap-2 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
                 <span className="mt-[3px] shrink-0 text-[8px] text-zinc-300 dark:text-zinc-600">▸</span>
                 <span>
-                  <InlineContent text={item} />
+                  <InlineContent text={item} must={must} nice={nice} />
                 </span>
               </li>
             ))}

@@ -3,6 +3,45 @@ import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { updateScreening } from "@/lib/screenings";
 
+/** GET /api/history/[id]/photo — proxy the photo from private Supabase Storage */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const numId = parseInt(id, 10);
+  if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const supabase = getSupabaseClient();
+  const { data: row } = await supabase
+    .from("screenings")
+    .select("photo_url")
+    .eq("id", numId)
+    .single();
+
+  const storagePath = row?.photo_url;
+  if (!storagePath) return NextResponse.json({ error: "No photo" }, { status: 404 });
+
+  const { data, error } = await supabase.storage
+    .from(RESUME_BUCKET)
+    .download(storagePath);
+
+  if (error || !data) {
+    return NextResponse.json({ error: "Photo not found" }, { status: 404 });
+  }
+
+  const buffer = Buffer.from(await data.arrayBuffer());
+  const ext = storagePath.split(".").pop() ?? "jpg";
+  const contentType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "gif" ? "image/gif" : "image/jpeg";
+
+  return new NextResponse(buffer, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "private, max-age=3600",
+    },
+  });
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -34,10 +73,10 @@ export async function POST(
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 
-  const { data: urlData } = supabase.storage.from(RESUME_BUCKET).getPublicUrl(path);
-  const photoUrl = urlData.publicUrl;
+  // Store the storage path (not a public URL) — served via GET /api/history/[id]/photo
+  const photoUrl = path;
 
   await updateScreening(numId, { photoUrl });
 
-  return NextResponse.json({ photoUrl });
+  return NextResponse.json({ photoUrl: `/api/history/${numId}/photo` });
 }

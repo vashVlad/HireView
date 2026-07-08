@@ -54,7 +54,7 @@ export interface TrackerEntry {
 export interface CredibilityRow {
   field: string;
   resume: string;
-  linkedIn: string;
+  crossRef: string;
   status: "match" | "discrepancy" | "cannot_verify";
   note?: string;
 }
@@ -110,6 +110,7 @@ export interface ScreeningRecord {
   statusUpdatedAt?: string;
   jobDescription: string;
   resumeMimeType: string;
+  linkedInMode: boolean;
   flagged: boolean;
   flagNote?: string;
   notes?: string;
@@ -163,6 +164,8 @@ export interface Project {
   jobDescription: string;
   jdAnalysis: JDAnalysis | null;
   status: ProjectStatus;
+  /** Minimum score to save to pipeline history. Default 45. Range 0–100. */
+  scoreThreshold: number;
   createdAt: string;
   updatedAt: string;
 }

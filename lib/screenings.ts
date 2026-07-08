@@ -22,6 +22,7 @@ interface ScreeningRow {
   job_description: string;
   resume_path: string;
   resume_mime_type: string;
+  linkedin_mode: boolean;
   flagged: boolean;
   flag_note: string | null;
   notes: string | null;
@@ -51,6 +52,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.status_updated_at != null && { statusUpdatedAt: row.status_updated_at }),
     jobDescription: row.job_description,
     resumeMimeType: row.resume_mime_type,
+    linkedInMode: row.linkedin_mode ?? false,
     flagged: row.flagged ?? false,
     ...(row.flag_note ? { flagNote: row.flag_note } : {}),
     ...(row.notes ? { notes: row.notes } : {}),
@@ -71,9 +73,11 @@ export async function saveScreening(params: {
   jobDescription: string;
   resumeFile: Buffer;
   resumeMimeType: string;
+  linkedInMode?: boolean;
   projectId?: number;
+  userId?: string;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, projectId } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, projectId, userId } = params;
   const supabase = getSupabaseClient();
 
   const resumePath = `${randomUUID()}/${result.fileName}`;
@@ -98,7 +102,9 @@ export async function saveScreening(params: {
       job_description: jobDescription,
       resume_path: resumePath,
       resume_mime_type: resumeMimeType,
+      linkedin_mode: linkedInMode ?? false,
       project_id: projectId ?? null,
+      user_id: userId ?? null,
     })
     .select("id")
     .single<{ id: number }>();
@@ -113,14 +119,15 @@ export async function listScreenings(
   query?: string,
   statuses?: CandidateStatus[],
   flaggedOnly?: boolean,
-  projectId?: number
+  projectId?: number,
+  userId?: string
 ): Promise<ScreeningRecord[]> {
   const supabase = getSupabaseClient();
 
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
     )
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
@@ -129,6 +136,7 @@ export async function listScreenings(
   if (statuses && statuses.length > 0) request = request.in("status", statuses);
   if (flaggedOnly) request = request.eq("flagged", true);
   if (projectId != null) request = request.eq("project_id", projectId);
+  if (userId != null) request = request.eq("user_id", userId);
 
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
@@ -141,7 +149,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
   const { data, error } = await supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
     )
     .in("id", ids)
     .returns<ScreeningRow[]>();
@@ -229,11 +237,13 @@ export async function deleteScreening(id: number): Promise<void> {
 }
 
 export async function getStatusCounts(
-  projectId?: number
+  projectId?: number,
+  userId?: string
 ): Promise<Partial<Record<CandidateStatus, number>>> {
   const supabase = getSupabaseClient();
   let req = supabase.from("screenings").select("status");
   if (projectId != null) req = req.eq("project_id", projectId);
+  if (userId != null) req = req.eq("user_id", userId);
   const { data, error } = await req.returns<{ status: CandidateStatus }[]>();
   if (error) throw error;
   const counts: Partial<Record<CandidateStatus, number>> = {};
