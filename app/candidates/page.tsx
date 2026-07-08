@@ -112,6 +112,14 @@ function CandidateCard({
           {/* Name row */}
           <div className="flex items-center gap-2">
             <span className="font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+            {s.duplicateFlag && (
+              <span
+                title="Duplicate detected — matches another candidate's content fingerprint"
+                className="shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 dark:bg-rose-500/15 dark:text-rose-400"
+              >
+                Duplicate detected
+              </span>
+            )}
             {s.linkedInMode && (
               <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
             )}

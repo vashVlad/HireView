@@ -581,6 +581,23 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 {/* Name row */}
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+                  {s.duplicateFlag && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (s.duplicateMatchId != null) setExpandedId(s.duplicateMatchId);
+                      }}
+                      title={
+                        s.duplicateMatchId != null
+                          ? `Matches ${screenings.find((c) => c.id === s.duplicateMatchId)?.candidateName ?? "another candidate"} — click to view`
+                          : "Duplicate detected"
+                      }
+                      className="shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 transition-colors hover:bg-rose-200 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25"
+                    >
+                      Duplicate detected
+                    </button>
+                  )}
                   {s.linkedInMode && (
                     <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
                   )}
