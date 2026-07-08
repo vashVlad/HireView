@@ -4,6 +4,18 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-08 — Duplicate detection (1.1) matches within the same project only, not cross-project/team-wide.**
+Teams (1.3) doesn't exist yet, so there's no defined "same team" boundary for cross-project matching — that's explicitly Feature 1.4's job once Teams ships. Project-scoped matching avoids leaking candidate identities across recruiter isolation boundaries prematurely, and matches the Enterprise Plan's own test case (both resumes uploaded to the same project).
+
+**2026-07-08 — Fingerprint extraction uses a second Claude call per saved candidate, not raw-text hashing.**
+Matching has to survive "name/company/contact swapped, everything else the same" — a literal hash or text diff of the resume would trivially fail since names/companies are exactly what differs. Claude extracts identity-scrubbed skills/responsibility/metric/career-arc fields (never name, contact, or company); skills are hashed for an exact-match signal, the rest compared with token-based Jaccard similarity at an 85% threshold. Only runs for candidates that actually get persisted (score >= project threshold), so filtered-out candidates cost nothing extra.
+
+**2026-07-08 — Duplicate detection hooks into lib/screenings.ts saveScreening, not app/api/screen-resumes/route.ts.**
+route.ts and scoreCandidate.ts are do-not-touch core files. saveScreening already receives the resume buffer, so fingerprinting + matching runs there as a best-effort step after the insert, wrapped in try/catch — a fingerprinting failure can never block or corrupt a screening save.
+
+**2026-07-08 — Duplicate flag is set bidirectionally on both matched screenings.**
+The Enterprise Plan's test case says the system flags "them" (plural). Both records get `duplicate_flag=true` and point `duplicate_match_id` at each other, so whichever card a recruiter opens first shows the badge and links to the other.
+
 **2026-07-07 — JD file upload reuses extractResumeText via a thin /api/extract-jd-text route.**
 Same PDF/DOCX/TXT extraction utility used by the resume screener. No new dependencies. "Upload file" button overlaid on the New Role textarea corner — text populates the textarea, then flows through the existing analyze path unchanged.
 

@@ -35,6 +35,10 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 - **Photo in drawer** — candidate profile photo moved from chip to drawer as circular profile photo; still displays on tracker chip.
 - **TypeScript fix** — `cookiesToSet` type annotation in `lib/supabase-server.ts` and `middleware.ts`.
 
+## What's shipped (added 2026-07-08, Phase 1.1)
+
+- **Duplicate Resume Detection** — content fingerprinting (skills hash, responsibility vectors, metric claims, career arc signature) built from a second Claude extraction call per saved candidate, deliberately never matching on name/contact/company. New `resume_fingerprints` table, `duplicate_flag`/`duplicate_match_id` on `screenings`. Red "Duplicate detected" badge on collapsed Pipeline and All Candidates cards, click-to-jump to the matching candidate. Matching scoped to same project for v1 — cross-project matching is Feature 1.4, once Teams (1.3) exists. Built on `phase-1-fraud-prevention` branch (merged from `generalize-credibility-crossref` + `main`).
+
 ## What's NOT shipped yet
 
 - **Outreach drafting (Phase 5)** — auto-draft LinkedIn messages. Repeatedly listed as next, never started.
@@ -42,7 +46,8 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 ## Deploy / migration status
 
-**Pending as of 2026-07-07 (all manual — Vlad must run these):**
+**Pending as of 2026-07-08 (all manual — Vlad must run these):**
+0. `supabase-migration-fingerprints.sql` — adds resume_fingerprints table, duplicate_flag/duplicate_match_id on screenings (Feature 1.1)
 1. `supabase-migration-interview.sql` — adds interview_questions, linkedin_pdf_path, photo_url
 2. `supabase-migration-multiuser.sql` — adds user_id to 3 tables + indexes
 3. `supabase-migration-threshold.sql` — adds score_threshold to projects

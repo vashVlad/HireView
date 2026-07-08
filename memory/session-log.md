@@ -12,6 +12,16 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-08 — Phase 1.1: Duplicate Resume Detection
+
+- New table `resume_fingerprints` (skills_hash, responsibility_vectors, metric_claims, career_arc_signature) scoped by screening_id/project_id — `supabase-migration-fingerprints.sql`. New `duplicate_flag`/`duplicate_match_id` columns on `screenings`.
+- `lib/generateFingerprint.ts` — Claude-based identity-scrubbed extraction + skills hash + token-similarity comparison (85% threshold). `lib/resumeFingerprints.ts` — save/match/mark-pair.
+- Wired into `lib/screenings.ts` `saveScreening` (best-effort, post-insert, try/catch) — `screen-resumes/route.ts` and `scoreCandidate.ts` untouched. See [[decisions-log]] for why.
+- Red "Duplicate detected" badge on the collapsed Pipeline card (click → jumps to the matching candidate) and on the All Candidates card.
+- Also had to merge `generalize-credibility-crossref` into `phase-1-fraud-prevention` first — `main`'s only merged PR had stopped short of multi-user auth, so 1.2/1.3's auth dependency wasn't there yet. See session's git history for the full branch reconciliation.
+- **Pending Vlad action:** run `supabase-migration-fingerprints.sql` in Supabase. Also run the actual success-criteria test (two swapped-identity resumes, same project) against a live environment — not something verifiable from this session without live Supabase/Anthropic credentials.
+- **What's next:** 1.2 Recruiter Attribution.
+
 ## 2026-07-01 — Memory vault created (backfilled)
 - Created this `memory/` vault (state.md, decisions-log.md, open-questions.md, session-log.md) so Claude sessions stop re-deriving project context from scratch every time, across Vlad's two machines.
 - Content backfilled from `HireView-Dev-Log.docx`, `HireView-Architecture-Redesign-Phase2-3.docx`, and `git log`. Not from a live coding session — treat `state.md` as accurate as of the last dev log entry (2026-06-30), not necessarily as of today.
