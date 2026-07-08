@@ -11,15 +11,14 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
 
   const screeningIdField = formData.get("screeningId");
-  const linkedInFile = formData.get("linkedInPdf");
-  const secondResumeFile = formData.get("secondResume");
+  const crossRefDoc = formData.get("crossRefDoc");
   const roleContext = formData.get("roleContext");
 
   if (!screeningIdField || typeof screeningIdField !== "string") {
     return NextResponse.json({ error: "screeningId is required" }, { status: 400 });
   }
-  if (!(linkedInFile instanceof File) && !(secondResumeFile instanceof File)) {
-    return NextResponse.json({ error: "Provide a LinkedIn PDF, a second resume, or both." }, { status: 400 });
+  if (!(crossRefDoc instanceof File)) {
+    return NextResponse.json({ error: "Provide a cross-reference document (PDF or Word)." }, { status: 400 });
   }
 
   const screeningId = parseInt(screeningIdField, 10);
@@ -40,45 +39,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Could not extract text from original resume" }, { status: 500 });
   }
 
-  let linkedInText: string | undefined;
-  let linkedInPdfPath: string | undefined;
-  if (linkedInFile instanceof File) {
-    try {
-      const buffer = Buffer.from(await linkedInFile.arrayBuffer());
-      linkedInText = await extractResumeText(linkedInFile.name, buffer);
+  let crossRefText: string;
+  let crossRefPath: string | undefined;
+  try {
+    const buffer = Buffer.from(await crossRefDoc.arrayBuffer());
+    crossRefText = await extractResumeText(crossRefDoc.name, buffer);
 
-      // Store the LinkedIn PDF in Supabase Storage for the Interview View toggle
-      const supabase = getSupabaseClient();
-      const path = `linkedin_pdfs/${randomUUID()}.pdf`;
-      const { error: uploadErr } = await supabase.storage
-        .from(RESUME_BUCKET)
-        .upload(path, buffer, { contentType: "application/pdf", upsert: true });
-      if (!uploadErr) linkedInPdfPath = path;
-    } catch {
-      return NextResponse.json({ error: "Could not extract text from LinkedIn PDF" }, { status: 400 });
-    }
-  }
-
-  let secondResumeText: string | undefined;
-  if (secondResumeFile instanceof File) {
-    try {
-      const buffer = Buffer.from(await secondResumeFile.arrayBuffer());
-      secondResumeText = await extractResumeText(secondResumeFile.name, buffer);
-    } catch {
-      return NextResponse.json({ error: "Could not extract text from second resume" }, { status: 400 });
-    }
+    // Store the cross-reference doc in Supabase Storage for the Interview View
+    const ext = crossRefDoc.name.split(".").pop()?.toLowerCase() ?? "pdf";
+    const contentType = ext === "docx"
+      ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      : "application/pdf";
+    const supabase = getSupabaseClient();
+    const path = `linkedin_pdfs/${randomUUID()}.${ext}`;
+    const { error: uploadErr } = await supabase.storage
+      .from(RESUME_BUCKET)
+      .upload(path, buffer, { contentType, upsert: true });
+    if (!uploadErr) crossRefPath = path;
+  } catch {
+    return NextResponse.json({ error: "Could not extract text from cross-reference document" }, { status: 400 });
   }
 
   const assessment = await assessCredibility({
     resumeText,
-    linkedInText,
-    secondResumeText,
+    crossRefText,
     roleContext: typeof roleContext === "string" ? roleContext : undefined,
   });
 
-  // Persist LinkedIn PDF path if we stored one
-  if (linkedInPdfPath) {
-    await updateScreening(screeningId, { linkedInPdfPath }).catch(() => {});
+  // Persist cross-reference doc path (reuses linkedin_pdf_path column — no schema change)
+  if (crossRefPath) {
+    await updateScreening(screeningId, { linkedInPdfPath: crossRefPath }).catch(() => {});
   }
 
   return NextResponse.json({ assessment });

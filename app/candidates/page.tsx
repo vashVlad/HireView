@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CredibilityChecker } from "@/components/CredibilityChecker";
-import { CredibilitySection } from "@/components/CredibilitySection";
+import { CalibrationButtons } from "@/components/CalibrationButtons";
+import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { InsightList } from "@/components/InsightList";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -19,9 +19,9 @@ import {
 // ── Credibility signal inline badge ───────────────────────────────────────
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
-  clean:                { label: "LinkedIn clean",         className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
-  minor_concerns:       { label: "LinkedIn minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",   icon: "⚠" },
-  significant_concerns: { label: "LinkedIn flags",          className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",       icon: "⛔" },
+  clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
+  minor_concerns:       { label: "Cross-ref minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",          icon: "⚠" },
+  significant_concerns: { label: "Cross-ref flags",         className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",              icon: "⛔" },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -75,7 +75,6 @@ function CandidateCard({
   const [noteText, setNoteText] = useState(s.notes ?? "");
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [credibility, setCredibility] = useState<CredibilityAssessment | undefined>(s.credibility);
-  const [showChecker, setShowChecker] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -113,6 +112,17 @@ function CandidateCard({
           {/* Name row */}
           <div className="flex items-center gap-2">
             <span className="font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+            {s.duplicateFlag && (
+              <span
+                title="Duplicate detected — matches another candidate's content fingerprint"
+                className="shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 dark:bg-rose-500/15 dark:text-rose-400"
+              >
+                Duplicate detected
+              </span>
+            )}
+            {s.linkedInMode && (
+              <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
+            )}
             {s.flagged && s.flagNote && (
               <span className="truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
             )}
@@ -205,7 +215,7 @@ function CandidateCard({
             {credibility && (
               <div className="mt-2.5 flex flex-col gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                  <span className="font-medium text-zinc-500 dark:text-zinc-400">LinkedIn trajectory: </span>
+                  <span className="font-medium text-zinc-500 dark:text-zinc-400">Cross-ref trajectory: </span>
                   {credibility.trajectoryNote}
                 </p>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">
@@ -222,28 +232,16 @@ function CandidateCard({
             )}
           </div>
 
-          {/* ── LinkedIn verification ─────────────────────────────────── */}
-          {credibility ? (
-            <CredibilitySection assessment={credibility} showSummary={false} />
-          ) : (
-            <div>
-              <button type="button" onClick={() => setShowChecker((p) => !p)}
-                className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${showChecker ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"}`}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" /></svg>
-                Check credibility
-              </button>
-              <div className="grid transition-[grid-template-rows] duration-300" style={{ gridTemplateRows: showChecker ? "1fr" : "0fr" }}>
-                <div className="overflow-hidden">
-                  <CredibilityChecker screeningId={s.id} onComplete={(assessment) => {
-                    setCredibility(assessment);
-                    setShowChecker(false);
-                    onCredibilityComplete(s.id, assessment);
-                    fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
-                  }} />
-                </div>
-              </div>
-            </div>
-          )}
+          {/* ── Cross-reference check ─────────────────────────────────── */}
+          <CrossReferenceChecker
+            screeningId={s.id}
+            currentAssessment={credibility}
+            onComplete={(assessment) => {
+              setCredibility(assessment);
+              onCredibilityComplete(s.id, assessment);
+              fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
+            }}
+          />
 
           {/* ── Assessment ────────────────────────────────────────────── */}
           {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
@@ -271,6 +269,14 @@ function CandidateCard({
               onBlur={(e) => handleSaveNotes(e.target.value)}
               placeholder="Add notes about this candidate..." rows={3}
               className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
+          </div>
+
+          {/* Calibration feedback */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+              Calibrate
+            </span>
+            <CalibrationButtons screeningId={s.id} />
           </div>
 
           {/* Actions */}
@@ -329,6 +335,7 @@ export default function CandidatesPage() {
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [projectFilter, setProjectFilter] = useState<number | null>(null);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
 
   useEffect(() => {
     Promise.all([
@@ -360,13 +367,20 @@ export default function CandidatesPage() {
 
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
 
-  const filtered = screenings.filter((s) => {
-    if (query && !s.candidateName.toLowerCase().includes(query.toLowerCase())) return false;
-    if (statusFilter && s.status !== statusFilter) return false;
-    if (projectFilter && s.projectId !== projectFilter) return false;
-    if (flaggedOnly && !s.flagged) return false;
-    return true;
-  });
+  const filtered = screenings
+    .filter((s) => {
+      if (query && !s.candidateName.toLowerCase().includes(query.toLowerCase())) return false;
+      if (statusFilter && s.status !== statusFilter) return false;
+      if (projectFilter && s.projectId !== projectFilter) return false;
+      if (flaggedOnly && !s.flagged) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => {
+      if (sortOrder === "desc") return b.score - a.score;
+      if (sortOrder === "asc") return a.score - b.score;
+      return 0;
+    });
 
   const flaggedCount = screenings.filter((s) => s.flagged).length;
 
@@ -435,15 +449,31 @@ export default function CandidatesPage() {
 
         {/* Filters */}
         <div className="mb-6 flex flex-col gap-3">
-          {/* Search */}
-          <div className="relative">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400">
-              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" />
-            </svg>
-            <input type="text" value={query} onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name..."
-              className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-10 pr-4 text-sm text-zinc-800 outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" />
+          {/* Search + sort row */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400">
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" />
+              </svg>
+              <input type="text" value={query} onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name..."
+                className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-10 pr-4 text-sm text-zinc-800 outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" />
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-700 dark:bg-zinc-900">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
+                <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
+              </svg>
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc")}
+                className="bg-transparent text-sm font-medium text-zinc-500 outline-none dark:text-zinc-400"
+              >
+                <option value="default">Default</option>
+                <option value="desc">Score ↓</option>
+                <option value="asc">Score ↑</option>
+              </select>
+            </div>
           </div>
 
           {/* Filter chips */}

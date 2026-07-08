@@ -2,9 +2,10 @@
 import * as XLSX from "xlsx";
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
-import { CredibilityChecker } from "@/components/CredibilityChecker";
-import { CredibilitySection } from "@/components/CredibilitySection";
+import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
 import { ResultCard } from "@/components/ResultCard";
@@ -21,9 +22,9 @@ import type {
 } from "@/lib/types";
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
-  clean:                { label: "LinkedIn clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
-  minor_concerns:       { label: "LinkedIn minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",          icon: "⚠" },
-  significant_concerns: { label: "LinkedIn flags",          className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",              icon: "⛔" },
+  clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
+  minor_concerns:       { label: "Cross-ref minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",          icon: "⚠" },
+  significant_concerns: { label: "Cross-ref flags",          className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",              icon: "⛔" },
 };
 
 type SearchMode = "wide" | "narrow";
@@ -307,7 +308,32 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
         <ul className="flex flex-col gap-4">
           {results.map((result, i) => (
-            <ResultCard key={result.fileName} result={result} rank={i + 1} onStatusChange={handleStatusChange} />
+            <ResultCard
+              key={result.fileName}
+              result={result}
+              rank={i + 1}
+              jdAnalysis={project.jdAnalysis}
+              onStatusChange={handleStatusChange}
+              onSave={result.id === undefined ? async () => {
+                const file = files.find((f) => f.name === result.fileName);
+                if (!file) throw new Error("Original file no longer available — try re-uploading");
+                const fd = new FormData();
+                fd.set("resultJson", JSON.stringify(result));
+                fd.set("resumeFile", file);
+                fd.set("jobDescription", project.jobDescription);
+                fd.set("projectId", String(project.id));
+                if (isLinkedInMode) fd.set("linkedInMode", "true");
+                const res = await fetch("/api/screenings/save-one", { method: "POST", body: fd });
+                if (!res.ok) {
+                  const body = await res.json().catch(() => null);
+                  throw new Error(body?.error ?? "Save failed");
+                }
+                const data = await res.json();
+                setResults((prev) => prev.map((r) => r.fileName === result.fileName ? { ...r, id: data.id } : r));
+                onScreeningsSaved();
+                return data.id as number;
+              } : undefined}
+            />
           ))}
         </ul>
       </div>
@@ -388,6 +414,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [screenings, setScreenings] = useState(initialScreenings);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
+  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
   const [expandedId, setExpandedIdState] = useState<number | null>(externalExpandedId ?? null);
   function setExpandedId(id: number | null) {
     setExpandedIdState(id);
@@ -405,7 +432,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [pendingFlagNote, setPendingFlagNote] = useState("");
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
-  const [showCheckerForId, setShowCheckerForId] = useState<number | null>(null);
 
   useEffect(() => {
     setScreenings(initialScreenings);
@@ -418,11 +444,18 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
   const handleStageChange = onStageChange;
 
-  const filteredScreenings = screenings.filter((s) => {
-    if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
-    if (statusFilter && s.status !== statusFilter) return false;
-    return true;
-  });
+  const filteredScreenings = screenings
+    .filter((s) => {
+      if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
+      if (statusFilter && s.status !== statusFilter) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => {
+      if (sortOrder === "desc") return b.score - a.score;
+      if (sortOrder === "asc") return a.score - b.score;
+      return 0;
+    });
 
   function getNotesText(s: ScreeningRecord) {
     return notesMap[s.id]?.text ?? s.notes ?? "";
@@ -504,7 +537,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             className="w-full rounded-xl border border-zinc-200 bg-white py-2 pl-9 pr-4 text-sm placeholder-zinc-400 focus:border-violet-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
           />
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_PILLS.map((p) => (
             <button key={String(p.value)} type="button" onClick={() => setStatusFilter(p.value)}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
@@ -515,6 +548,20 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               {p.label}
             </button>
           ))}
+          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
+              <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
+            </svg>
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc")}
+              className="bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
+            >
+              <option value="default">Default</option>
+              <option value="desc">Score ↓</option>
+              <option value="asc">Score ↑</option>
+            </select>
+          </div>
         </div>
       </div>
       {filteredScreenings.length === 0 && (
@@ -534,6 +581,26 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 {/* Name row */}
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+                  {s.duplicateFlag && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (s.duplicateMatchId != null) setExpandedId(s.duplicateMatchId);
+                      }}
+                      title={
+                        s.duplicateMatchId != null
+                          ? `Matches ${screenings.find((c) => c.id === s.duplicateMatchId)?.candidateName ?? "another candidate"} — click to view`
+                          : "Duplicate detected"
+                      }
+                      className="shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 transition-colors hover:bg-rose-200 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25"
+                    >
+                      Duplicate detected
+                    </button>
+                  )}
+                  {s.linkedInMode && (
+                    <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
+                  )}
                   {s.flagged && s.flagNote && (
                     <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
                   )}
@@ -653,7 +720,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   {credibilityMap[s.id] && (
                     <div className="mt-2.5 flex flex-col gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
                       <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                        <span className="font-medium text-zinc-500 dark:text-zinc-400">LinkedIn trajectory: </span>
+                        <span className="font-medium text-zinc-500 dark:text-zinc-400">Cross-ref trajectory: </span>
                         {credibilityMap[s.id].trajectoryNote}
                       </p>
                       <p className="text-xs text-zinc-400 dark:text-zinc-500">
@@ -670,28 +737,15 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   )}
                 </div>
 
-                {/* ── LinkedIn verification ─────────────────────────────── */}
-                {credibilityMap[s.id] ? (
-                  <CredibilitySection assessment={credibilityMap[s.id]} showSummary={false} />
-                ) : (
-                  <div>
-                    <button type="button"
-                      onClick={() => setShowCheckerForId((p) => p === s.id ? null : s.id)}
-                      className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${showCheckerForId === s.id ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"}`}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" /></svg>
-                      Check credibility
-                    </button>
-                    <div className="grid transition-[grid-template-rows] duration-300 ease-in-out" style={{ gridTemplateRows: showCheckerForId === s.id ? "1fr" : "0fr" }}>
-                      <div className="overflow-hidden">
-                        <CredibilityChecker screeningId={s.id} onComplete={(assessment) => {
-                          setCredibilityMap((prev) => ({ ...prev, [s.id]: assessment }));
-                          setShowCheckerForId(null);
-                          fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
-                        }} />
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {/* ── Cross-reference check ─────────────────────────────── */}
+                <CrossReferenceChecker
+                  screeningId={s.id}
+                  currentAssessment={credibilityMap[s.id]}
+                  onComplete={(assessment) => {
+                    setCredibilityMap((prev) => ({ ...prev, [s.id]: assessment }));
+                    fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
+                  }}
+                />
 
                 {/* ── Assessment ────────────────────────────────────────── */}
                 {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
@@ -721,6 +775,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     onBlur={(e) => saveNotes(s.id, e.target.value)}
                     placeholder="Add notes about this candidate..." rows={3}
                     className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
+                </div>
+
+                {/* Calibration feedback */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                    Calibrate
+                  </span>
+                  <CalibrationButtons screeningId={s.id} />
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -771,17 +833,22 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
 // ── Settings tab ───────────────────────────────────────────────────────────
 
-function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted }: {
+function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThresholdSaved }: {
   project: Project;
   onNameSaved: (name: string) => void;
   onStatusToggled: (status: "active" | "archived") => void;
   onDeleted: () => void;
+  onThresholdSaved: (threshold: number) => void;
 }) {
+  const router = useRouter();
   const [nameValue, setNameValue] = useState(project.name);
   const [savingName, setSavingName] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [threshold, setThreshold] = useState(project.scoreThreshold ?? 45);
+  const [savingThreshold, setSavingThreshold] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   async function saveName() {
@@ -797,17 +864,39 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted }: {
     finally { setSavingName(false); }
   }
 
-  async function toggleStatus() {
-    setTogglingStatus(true);
-    const next = project.status === "active" ? "archived" : "active";
+  async function saveThreshold() {
+    setSavingThreshold(true);
     try {
       await fetch(`/api/projects/${project.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scoreThreshold: threshold }),
+      });
+      onThresholdSaved(threshold);
+    } catch { /* non-fatal */ }
+    finally { setSavingThreshold(false); }
+  }
+
+  async function toggleStatus() {
+    setTogglingStatus(true);
+    setStatusError(null);
+    const next = project.status === "active" ? "archived" : "active";
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: next }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setStatusError(data.error ?? "Failed to update status");
+        return;
+      }
       onStatusToggled(next);
-    } catch { /* non-fatal */ }
-    finally { setTogglingStatus(false); }
+      router.refresh();
+    } catch {
+      setStatusError("Network error — please try again");
+    } finally {
+      setTogglingStatus(false);
+    }
   }
 
   async function deleteProject() {
@@ -836,18 +925,56 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted }: {
         </div>
       </div>
 
-      {/* Status */}
-      <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <div>
-          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Role status</p>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            {project.status === "active" ? "Currently active — visible in your projects list." : "Archived — hidden from the main list."}
-          </p>
+      {/* Score threshold */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Score threshold</p>
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              Candidates below this score are not saved to the pipeline.
+            </p>
+          </div>
+          <span className="text-lg font-bold tabular-nums text-violet-600 dark:text-violet-400">
+            {threshold}
+          </span>
         </div>
-        <button type="button" onClick={toggleStatus} disabled={togglingStatus}
-          className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${project.status === "active" ? "border border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
-          {togglingStatus ? "Updating..." : project.status === "active" ? "Archive role" : "Restore role"}
+        <input
+          type="range" min={0} max={100} step={5}
+          value={threshold}
+          onChange={(e) => setThreshold(Number(e.target.value))}
+          className="w-full accent-violet-600"
+        />
+        <div className="flex items-center justify-between text-xs text-zinc-400">
+          <span>0 — save everything</span>
+          <span>100 — save nothing</span>
+        </div>
+        <button
+          type="button"
+          onClick={saveThreshold}
+          disabled={savingThreshold || threshold === (project.scoreThreshold ?? 45)}
+          className="self-end rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {savingThreshold ? "Saving…" : "Save threshold"}
         </button>
+      </div>
+
+      {/* Status */}
+      <div className="flex flex-col gap-2 rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Role status</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              {project.status === "active" ? "Currently active — visible in your projects list." : "Archived — hidden from the main list."}
+            </p>
+          </div>
+          <button type="button" onClick={toggleStatus} disabled={togglingStatus}
+            className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${project.status === "active" ? "border border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
+            {togglingStatus ? "Updating..." : project.status === "active" ? "Archive role" : "Restore role"}
+          </button>
+        </div>
+        {statusError && (
+          <p className="text-xs text-rose-500 dark:text-rose-400">{statusError}</p>
+        )}
       </div>
 
       {/* Delete */}
@@ -895,12 +1022,16 @@ function DrawerBody({
   onTrackerSave,
   onViewResult,
   onScreeningFieldSaved,
+  photoUrl,
+  onPhotoUpload,
 }: {
   selected: ScreeningRecord;
   trackerEntry: FullTrackerData;
   onTrackerSave: (fields: Partial<FullTrackerData>) => void;
   onViewResult: (id: number) => void;
   onScreeningFieldSaved: (id: number, fields: Partial<ScreeningRecord>) => void;
+  photoUrl?: string;
+  onPhotoUpload: (file: File) => void;
 }) {
   const [leverUrl, setLeverUrl] = useState(selected.leverUrl ?? "");
   const [company, setCompany] = useState(trackerEntry.company ?? "");
@@ -976,8 +1107,41 @@ function DrawerBody({
     );
   }
 
+  const initials = selected.candidateName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+
   return (
     <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
+      {/* Profile photo */}
+      <label className="group relative mx-auto block h-24 w-24 cursor-pointer">
+        <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800">
+          {photoUrl ? (
+            <img src={photoUrl} alt={selected.candidateName} className="h-full w-full object-cover" />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center text-2xl font-bold text-zinc-400 dark:text-zinc-500">
+              {initials}
+            </span>
+          )}
+        </div>
+        {/* Camera overlay on hover */}
+        <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+        </div>
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) onPhotoUpload(f); e.target.value = ""; }}
+        />
+      </label>
+
       {/* View result link */}
       <button type="button" onClick={() => onViewResult(selected.id)}
         className="flex items-center gap-1.5 self-start text-xs font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300">
@@ -1139,7 +1303,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>(() =>
-    Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, s.photoUrl!]))
+    Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, `/api/history/${s.id}/photo`]))
   );
 
   async function handlePhotoUpload(screeningId: number, file: File) {
@@ -1147,8 +1311,9 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
     form.append("photo", file);
     const res = await fetch(`/api/history/${screeningId}/photo`, { method: "POST", body: form });
     if (res.ok) {
-      const { photoUrl } = await res.json();
-      setPhotoUrls((prev) => ({ ...prev, [screeningId]: photoUrl }));
+      const proxyUrl = `/api/history/${screeningId}/photo`;
+      setPhotoUrls((prev) => ({ ...prev, [screeningId]: proxyUrl }));
+      const { photoUrl } = await res.json(); // storage path, saved to DB by the route
       onScreeningFieldSaved(screeningId, { photoUrl });
     }
   }
@@ -1348,11 +1513,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                               ? "border-violet-300 bg-violet-50 shadow-md dark:border-violet-500/40 dark:bg-violet-500/10"
                               : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-600"
                           }`}>
-                          <label
-                            className="relative h-7 w-7 shrink-0 cursor-pointer overflow-hidden rounded-lg"
-                            onClick={(e) => e.stopPropagation()}
-                            title="Upload photo"
-                          >
+                          <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-lg">
                             {photoUrls[s.id] ? (
                               <img src={photoUrls[s.id]} alt={s.candidateName} className="h-full w-full object-cover" />
                             ) : (
@@ -1362,13 +1523,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                                 : "bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400"
                               }`}>{s.score}</span>
                             )}
-                            <input
-                              type="file"
-                              accept="image/jpeg,image/png,image/webp,image/gif"
-                              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                              onChange={(e) => { const f = e.target.files?.[0]; if (f) handlePhotoUpload(s.id, f); e.target.value = ""; }}
-                            />
-                          </label>
+                          </span>
                           <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor" className="shrink-0 text-zinc-300 dark:text-zinc-600">
                             <circle cx="2" cy="2" r="1.5"/><circle cx="6" cy="2" r="1.5"/>
                             <circle cx="2" cy="7" r="1.5"/><circle cx="6" cy="7" r="1.5"/>
@@ -1483,6 +1638,8 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               onTrackerSave={(fields) => onTrackerDataChange(selected.id, fields)}
               onViewResult={(id) => { setSelected(null); onViewResult(id); }}
               onScreeningFieldSaved={onScreeningFieldSaved}
+              photoUrl={photoUrls[selected.id]}
+              onPhotoUpload={(file) => handlePhotoUpload(selected.id, file)}
             />
           </div>
         </>
@@ -1671,6 +1828,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             onNameSaved={(name) => setProject((p) => p ? { ...p, name } : p)}
             onStatusToggled={(status) => setProject((p) => p ? { ...p, status } : p)}
             onDeleted={() => window.location.href = "/projects"}
+            onThresholdSaved={(scoreThreshold) => setProject((p) => p ? { ...p, scoreThreshold } : p)}
           />
         )}
       </main>

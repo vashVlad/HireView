@@ -86,8 +86,31 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [analysis, setAnalysis] = useState<JDAnalysis | null>(null);
   const [roleName, setRoleName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setExtracting(true);
+    setError(null);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch("/api/extract-jd-text", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to extract text");
+      setJd(data.text);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to read file");
+    } finally {
+      setExtracting(false);
+      // reset so same file can be re-uploaded
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   // auto-focus textarea on open
   useEffect(() => { textareaRef.current?.focus(); }, []);
@@ -168,10 +191,32 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         {/* Step: input */}
         {(step === "input" || step === "analyzing") && (
           <div className="flex flex-col gap-4">
-            <textarea ref={textareaRef} value={jd} onChange={(e) => setJd(e.target.value)}
-              placeholder="Paste job description here..."
-              rows={10}
-              className="w-full resize-none rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/60 dark:focus:bg-zinc-900" />
+            <div className="relative">
+              <textarea ref={textareaRef} value={jd} onChange={(e) => setJd(e.target.value)}
+                placeholder="Paste job description here..."
+                rows={10}
+                className="w-full resize-none rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/60 dark:focus:bg-zinc-900" />
+              {/* File upload */}
+              <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={handleFileUpload} />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={extracting}
+                title="Upload a PDF, Word, or text file"
+                className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-500 shadow-sm transition-colors hover:border-violet-300 hover:text-violet-600 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:border-violet-500 dark:hover:text-violet-400"
+              >
+                {extracting ? (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-violet-500" />
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                )}
+                {extracting ? "Reading…" : "Upload file"}
+              </button>
+            </div>
             {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">{error}</p>}
             <button type="button" onClick={handleAnalyze}
               disabled={!jd.trim() || step === "analyzing"}

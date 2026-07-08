@@ -70,6 +70,22 @@ export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
       </label>
 
       {files.length > 0 && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+            {files.length} resume{files.length !== 1 ? "s" : ""}{" "}
+            <span className="font-normal text-zinc-400 dark:text-zinc-500">queued to screen</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => onFilesChange([])}
+            className="text-xs text-zinc-400 transition-colors hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+
+      {files.length > 0 && (
         <ul className="flex flex-col gap-2">
           {files.map((file) => (
             <li
