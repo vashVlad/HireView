@@ -1,5 +1,8 @@
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
+import { extractResumeText } from "./parseResume";
+import { generateFingerprint } from "./generateFingerprint";
+import { saveFingerprint, findDuplicateMatch, markDuplicatePair } from "./resumeFingerprints";
 import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
   Recommendation, ScreeningRecord, TrackerEntry, TrackerStage,
@@ -32,6 +35,8 @@ interface ScreeningRow {
   linkedin_pdf_path: string | null;
   interview_questions: string[] | null;
   project_id: number | null;
+  duplicate_flag: boolean | null;
+  duplicate_match_id: number | null;
   created_at: string;
 }
 
@@ -62,6 +67,8 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.linkedin_pdf_path ? { linkedInPdfPath: row.linkedin_pdf_path } : {}),
     ...(row.interview_questions ? { interviewQuestions: row.interview_questions } : {}),
     ...(row.project_id != null ? { projectId: row.project_id } : {}),
+    duplicateFlag: row.duplicate_flag ?? false,
+    ...(row.duplicate_match_id != null ? { duplicateMatchId: row.duplicate_match_id } : {}),
     createdAt: row.created_at,
   };
 }
@@ -110,7 +117,28 @@ export async function saveScreening(params: {
     .single<{ id: number }>();
   if (insert.error) throw insert.error;
 
-  return { id: insert.data.id };
+  const screeningId = insert.data.id;
+
+  // Best-effort: fingerprinting/duplicate-detection failures must never block
+  // a screening from being saved. Runs after the insert so a failure here
+  // can't lose the screening itself.
+  try {
+    const resumeText = await extractResumeText(result.fileName, resumeFile);
+    const fingerprint = await generateFingerprint(resumeText);
+    await saveFingerprint({ screeningId, projectId, fingerprint });
+    const match = await findDuplicateMatch({
+      projectId,
+      excludeScreeningId: screeningId,
+      fingerprint,
+    });
+    if (match) {
+      await markDuplicatePair(screeningId, match.screeningId);
+    }
+  } catch (err) {
+    console.error("Duplicate fingerprinting failed (screening still saved):", err);
+  }
+
+  return { id: screeningId };
 }
 
 // ── List ───────────────────────────────────────────────────────────────────
@@ -127,7 +155,7 @@ export async function listScreenings(
   let request = supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, created_at"
     )
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
@@ -149,7 +177,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
   const { data, error } = await supabase
     .from("screenings")
     .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, created_at"
+      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, created_at"
     )
     .in("id", ids)
     .returns<ScreeningRow[]>();

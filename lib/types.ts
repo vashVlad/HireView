@@ -120,6 +120,8 @@ export interface ScreeningRecord {
   linkedInPdfPath?: string;
   interviewQuestions?: string[];
   projectId?: number;
+  duplicateFlag: boolean;
+  duplicateMatchId?: number;
   createdAt: string;
 }
 
