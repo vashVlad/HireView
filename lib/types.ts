@@ -110,6 +110,7 @@ export interface ScreeningRecord {
   statusUpdatedAt?: string;
   jobDescription: string;
   resumeMimeType: string;
+  linkedInMode: boolean;
   flagged: boolean;
   flagNote?: string;
   notes?: string;

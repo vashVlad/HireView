@@ -112,6 +112,9 @@ function CandidateCard({
           {/* Name row */}
           <div className="flex items-center gap-2">
             <span className="font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+            {s.linkedInMode && (
+              <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
+            )}
             {s.flagged && s.flagNote && (
               <span className="truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
             )}

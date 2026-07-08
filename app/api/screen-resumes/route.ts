@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
             jobDescription,
             resumeFile: resume.buffer,
             resumeMimeType: resume.mimeType,
+            linkedInMode: linkedInModeOverride,
             projectId,
             userId,
           });

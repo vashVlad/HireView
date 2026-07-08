@@ -20,6 +20,7 @@ export function ResultCard({
   roleContext,
   jdAnalysis,
   onStatusChange,
+  onSave,
   solo = false,
 }: {
   result: CandidateResult;
@@ -27,14 +28,33 @@ export function ResultCard({
   roleContext?: string;
   jdAnalysis?: JDAnalysis | null;
   onStatusChange?: (id: number, status: CandidateStatus) => void;
+  onSave?: () => Promise<number>;
   solo?: boolean;
 }) {
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
     result.credibility ?? null
   );
   const [showQuestion, setShowQuestion] = useState(false);
+  const [savedId, setSavedId] = useState<number | undefined>(result.id);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const canCheck = result.id !== undefined;
+  const canCheck = savedId !== undefined;
+
+  async function handleSave() {
+    if (!onSave || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const id = await onSave();
+      setSavedId(id);
+      result.id = id; // mutate so status change handler works
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
   const trajectoryText = result.careerTrajectory ?? result.summary;
 
   const mustSkills = jdAnalysis?.mustHaveSkills ?? [];
@@ -55,11 +75,11 @@ export function ResultCard({
             </h3>
             <RecommendationBadge recommendation={result.recommendation} />
           </div>
-          {result.id !== undefined && result.status !== undefined && onStatusChange && (
+          {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
               <StatusSelect
                 status={result.status}
-                onChange={(status) => onStatusChange(result.id!, status)}
+                onChange={(status) => onStatusChange(savedId, status)}
               />
             </div>
           )}
@@ -103,18 +123,38 @@ export function ResultCard({
         </div>
       )}
 
+      {/* Unsaved banner */}
+      {savedId === undefined && onSave && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-800/50">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Score below threshold — not saved to pipeline
+          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            {saveError && <span className="text-xs text-rose-500">{saveError}</span>}
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+            >
+              {saving ? "Saving…" : "Save anyway"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Full-width sections below the header row */}
       <div className={`flex flex-col ${solo ? "mt-6 gap-4" : "mt-4 gap-3"}`}>
         <InsightList label="Strengths" items={result.strengths} variant="positive" />
-        <InsightList label="Concerns" items={result.concerns} variant="warning" screeningId={result.id} />
+        <InsightList label="Concerns" items={result.concerns} variant="warning" screeningId={savedId} />
         {canCheck && (
           <CrossReferenceChecker
-            screeningId={result.id!}
+            screeningId={savedId!}
             roleContext={roleContext}
             currentAssessment={credibility ?? undefined}
             onComplete={(assessment) => {
               setCredibility(assessment);
-              fetch(`/api/history/${result.id}`, {
+              fetch(`/api/history/${savedId}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ credibility: assessment }),
@@ -145,7 +185,7 @@ export function ResultCard({
               style={{ gridTemplateRows: showQuestion ? "1fr" : "0fr" }}
             >
               <div className="overflow-hidden">
-                <QuestionGenerator screeningId={result.id!} />
+                <QuestionGenerator screeningId={savedId!} />
               </div>
             </div>
           </>

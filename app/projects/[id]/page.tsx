@@ -308,7 +308,32 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
         <ul className="flex flex-col gap-4">
           {results.map((result, i) => (
-            <ResultCard key={result.fileName} result={result} rank={i + 1} jdAnalysis={project.jdAnalysis} onStatusChange={handleStatusChange} />
+            <ResultCard
+              key={result.fileName}
+              result={result}
+              rank={i + 1}
+              jdAnalysis={project.jdAnalysis}
+              onStatusChange={handleStatusChange}
+              onSave={result.id === undefined ? async () => {
+                const file = files.find((f) => f.name === result.fileName);
+                if (!file) throw new Error("Original file no longer available — try re-uploading");
+                const fd = new FormData();
+                fd.set("resultJson", JSON.stringify(result));
+                fd.set("resumeFile", file);
+                fd.set("jobDescription", project.jobDescription);
+                fd.set("projectId", String(project.id));
+                if (isLinkedInMode) fd.set("linkedInMode", "true");
+                const res = await fetch("/api/screenings/save-one", { method: "POST", body: fd });
+                if (!res.ok) {
+                  const body = await res.json().catch(() => null);
+                  throw new Error(body?.error ?? "Save failed");
+                }
+                const data = await res.json();
+                setResults((prev) => prev.map((r) => r.fileName === result.fileName ? { ...r, id: data.id } : r));
+                onScreeningsSaved();
+                return data.id as number;
+              } : undefined}
+            />
           ))}
         </ul>
       </div>
@@ -556,6 +581,9 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 {/* Name row */}
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="truncate font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+                  {s.linkedInMode && (
+                    <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
+                  )}
                   {s.flagged && s.flagNote && (
                     <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
                   )}
