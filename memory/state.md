@@ -37,7 +37,7 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 ## What's shipped (added 2026-07-08, Phase 1.1)
 
-- **Duplicate Resume Detection** — content fingerprinting (skills hash, responsibility vectors, metric claims, career arc signature) built from a second Claude extraction call per saved candidate, deliberately never matching on name/contact/company. New `resume_fingerprints` table, `duplicate_flag`/`duplicate_match_id` on `screenings`. Red "Duplicate detected" badge on collapsed Pipeline and All Candidates cards, click-to-jump to the matching candidate. Matching scoped to same project for v1 — cross-project matching is Feature 1.4, once Teams (1.3) exists. Built on `phase-1-fraud-prevention` branch (merged from `generalize-credibility-crossref` + `main`).
+- **Duplicate Resume Detection (Phase 1.1 — merged to main)** — content fingerprinting (skills hash, responsibility vectors, metric claims, career arc signature) built from a second Claude extraction call per saved candidate, deliberately never matching on name/contact/company. New `resume_fingerprints` table, `duplicate_flag`/`duplicate_match_id` on `screenings`. Red "Duplicate detected" badge on collapsed Pipeline and All Candidates cards, click-to-jump to the matching candidate. Matching scoped to same project for v1 — cross-project matching is Feature 1.4, once Teams (1.3) exists. Built on `phase-1-fraud-prevention` (merged from `generalize-credibility-crossref` + `main`), verified with swapped-identity test resumes, PR #2 merged into `main` 2026-07-08.
 
 ## What's NOT shipped yet
 

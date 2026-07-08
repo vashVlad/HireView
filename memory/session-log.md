@@ -19,8 +19,9 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 - Wired into `lib/screenings.ts` `saveScreening` (best-effort, post-insert, try/catch) — `screen-resumes/route.ts` and `scoreCandidate.ts` untouched. See [[decisions-log]] for why.
 - Red "Duplicate detected" badge on the collapsed Pipeline card (click → jumps to the matching candidate) and on the All Candidates card.
 - Also had to merge `generalize-credibility-crossref` into `phase-1-fraud-prevention` first — `main`'s only merged PR had stopped short of multi-user auth, so 1.2/1.3's auth dependency wasn't there yet. See session's git history for the full branch reconciliation.
-- **Pending Vlad action:** run `supabase-migration-fingerprints.sql` in Supabase. Also run the actual success-criteria test (two swapped-identity resumes, same project) against a live environment — not something verifiable from this session without live Supabase/Anthropic credentials.
-- **What's next:** 1.2 Recruiter Attribution.
+- Migration run in Supabase, success-criteria test passed (two swapped-identity `.docx` test resumes, same project — both flagged as duplicates, badge linked correctly).
+- PR #2 "Phase 1 fraud prevention" opened, review-required branch protection on `main` briefly relaxed to allow self-merge (solo project, no second reviewer), merged 2026-07-08.
+- **What's next:** 1.2 Recruiter Attribution — not started, awaiting go-ahead.
 
 ## 2026-07-01 — Memory vault created (backfilled)
 - Created this `memory/` vault (state.md, decisions-log.md, open-questions.md, session-log.md) so Claude sessions stop re-deriving project context from scratch every time, across Vlad's two machines.
