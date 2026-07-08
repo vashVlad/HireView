@@ -54,7 +54,7 @@ export interface TrackerEntry {
 export interface CredibilityRow {
   field: string;
   resume: string;
-  linkedIn: string;
+  crossRef: string;
   status: "match" | "discrepancy" | "cannot_verify";
   note?: string;
 }

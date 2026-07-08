@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
-import { CredibilityChecker } from "@/components/CredibilityChecker";
-import { CredibilitySection } from "@/components/CredibilitySection";
+import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { InsightList } from "@/components/InsightList";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -20,9 +19,9 @@ import {
 // ── Credibility signal inline badge ───────────────────────────────────────
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
-  clean:                { label: "LinkedIn clean",         className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
-  minor_concerns:       { label: "LinkedIn minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",   icon: "⚠" },
-  significant_concerns: { label: "LinkedIn flags",          className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",       icon: "⛔" },
+  clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
+  minor_concerns:       { label: "Cross-ref minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",          icon: "⚠" },
+  significant_concerns: { label: "Cross-ref flags",         className: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400",              icon: "⛔" },
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -76,7 +75,6 @@ function CandidateCard({
   const [noteText, setNoteText] = useState(s.notes ?? "");
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [credibility, setCredibility] = useState<CredibilityAssessment | undefined>(s.credibility);
-  const [showChecker, setShowChecker] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -206,7 +204,7 @@ function CandidateCard({
             {credibility && (
               <div className="mt-2.5 flex flex-col gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                  <span className="font-medium text-zinc-500 dark:text-zinc-400">LinkedIn trajectory: </span>
+                  <span className="font-medium text-zinc-500 dark:text-zinc-400">Cross-ref trajectory: </span>
                   {credibility.trajectoryNote}
                 </p>
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">
@@ -223,28 +221,16 @@ function CandidateCard({
             )}
           </div>
 
-          {/* ── LinkedIn verification ─────────────────────────────────── */}
-          {credibility ? (
-            <CredibilitySection assessment={credibility} showSummary={false} />
-          ) : (
-            <div>
-              <button type="button" onClick={() => setShowChecker((p) => !p)}
-                className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${showChecker ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"}`}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" strokeLinecap="round" /></svg>
-                Check credibility
-              </button>
-              <div className="grid transition-[grid-template-rows] duration-300" style={{ gridTemplateRows: showChecker ? "1fr" : "0fr" }}>
-                <div className="overflow-hidden">
-                  <CredibilityChecker screeningId={s.id} onComplete={(assessment) => {
-                    setCredibility(assessment);
-                    setShowChecker(false);
-                    onCredibilityComplete(s.id, assessment);
-                    fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
-                  }} />
-                </div>
-              </div>
-            </div>
-          )}
+          {/* ── Cross-reference check ─────────────────────────────────── */}
+          <CrossReferenceChecker
+            screeningId={s.id}
+            currentAssessment={credibility}
+            onComplete={(assessment) => {
+              setCredibility(assessment);
+              onCredibilityComplete(s.id, assessment);
+              fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
+            }}
+          />
 
           {/* ── Assessment ────────────────────────────────────────────── */}
           {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
