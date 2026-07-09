@@ -54,17 +54,28 @@ function formatStatusDate(iso: string) {
 }
 
 function formatActionText(a: ScreeningAction, candidateName: string): string {
-  const who = a.userEmail;
   switch (a.actionType) {
-    case "created": return `${who} screened ${candidateName}`;
-    case "status_change": return `${who} moved ${candidateName} to ${CANDIDATE_STATUS_LABELS[a.toValue as CandidateStatus] ?? a.toValue}`;
-    case "stage_change": return `${who} moved ${candidateName} to ${a.toValue} stage`;
-    case "flagged": return `${who} flagged ${candidateName}`;
-    case "unflagged": return `${who} removed the flag from ${candidateName}`;
-    case "note": return `${who} added a note on ${candidateName}`;
-    case "credibility_check": return `${who} ran a credibility check on ${candidateName}`;
-    default: return `${who} updated ${candidateName}`;
+    case "created": return `screened ${candidateName}`;
+    case "status_change": return `moved ${candidateName} to ${CANDIDATE_STATUS_LABELS[a.toValue as CandidateStatus] ?? a.toValue}`;
+    case "stage_change": return `moved ${candidateName} to ${a.toValue} stage`;
+    case "flagged": return `flagged ${candidateName}`;
+    case "unflagged": return `removed the flag from ${candidateName}`;
+    case "note": return `added a note on ${candidateName}`;
+    case "credibility_check": return `ran a credibility check on ${candidateName}`;
+    default: return `updated ${candidateName}`;
   }
+}
+
+const AVATAR_COLORS = ["bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500", "bg-cyan-500", "bg-indigo-500"];
+
+function avatarColor(email: string): string {
+  let hash = 0;
+  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function avatarInitial(email: string): string {
+  return email.trim().charAt(0).toUpperCase() || "?";
 }
 
 // ── Filters tab ────────────────────────────────────────────────────────────
@@ -812,10 +823,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   ) : (actionsMap[s.id] as ScreeningAction[]).length === 0 ? (
                     <p className="text-xs text-zinc-400 dark:text-zinc-500">No activity recorded yet.</p>
                   ) : (
-                    <ul className="flex flex-col gap-1">
+                    <ul className="flex flex-col gap-1.5">
                       {(actionsMap[s.id] as ScreeningAction[]).map((a) => (
-                        <li key={a.id} className="text-xs text-zinc-500 dark:text-zinc-400">
-                          {formatActionText(a, s.candidateName)} on {formatDate(a.createdAt)}
+                        <li key={a.id} className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(a.userEmail)}`}>
+                            {avatarInitial(a.userEmail)}
+                          </span>
+                          <span>
+                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">{a.userEmail}</span>{" "}
+                            {formatActionText(a, s.candidateName)} on {formatDate(a.createdAt)}
+                          </span>
                         </li>
                       ))}
                     </ul>
