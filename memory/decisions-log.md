@@ -4,6 +4,9 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-09 — `phase-1-3-teams-architecture` retired after this merge; one branch per feature from now on.**
+That branch ended up carrying five unrelated changes (Teams, Candidate History Alert, Fraud-Aware Interview Questions, the docs/migrations repo reorg, and FunnelView) because each new task was told to fold into "the existing open PR" to respect the don't-merge-without-review rule, rather than getting its own branch and getting merged promptly. Right rule, wrong implementation — bundling unrelated diffs makes review harder, not easier. Going forward: every new HireView task branches fresh off main; an already-open PR is a signal to merge it, not a place to keep stacking. Saved as a durable cross-session rule ([[feedback_git_branching]] in the global memory vault).
+
 **2026-07-09 — FunnelView is admin-only and org-wide, deliberately not team-scoped.**
 Matches the existing `/analytics` precedent exactly (admin sees everything regardless of team, no new role, no `teamIdsFilter`). The Enterprise Plan/Roadmap both confirm this explicitly ("does not require Teams"). Keeps FunnelView unblocked by Teams and consistent with the one other admin dashboard that already exists.
 
