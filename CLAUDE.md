@@ -10,7 +10,7 @@ state). Check `memory/open-questions.md` for anything that needs Vlad's input be
 At the end of any session where real changes were made (code, decisions, or new open questions),
 append a short entry to `memory/session-log.md` and update `memory/state.md` and
 `memory/decisions-log.md` in place if the change affects them. Keep entries short — this is a
-handoff note for the next session, not a full changelog (that's what `HireView-Dev-Log.docx` is for).
+handoff note for the next session, not a full changelog (that's what `docs/HireView-Dev-Log.docx` is for).
 
 ## What is HireView?
 

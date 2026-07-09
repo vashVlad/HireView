@@ -56,7 +56,16 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 - **Live-tested and confirmed working 2026-07-09**, after debugging an app-wide outage (see decisions-log — `SCREENING_COLUMNS` referenced the new columns before the migration ran) and a real `getProject()` bug (missing `team_id` in its select, fixed). Confirmed: same resume into two projects in the same team correctly shows "Previously seen"; when the matched record already had a same-project `duplicate_flag`, it correctly escalated both sides to "Known fraud pattern" instead. Same-project resubmission correctly stays on 1.1's "Duplicate detected" and does not also trigger 1.4's banner (they're deliberately separate signals).
 - **Follow-up UI addition, same session:** Projects page (`app/projects/page.tsx`) now groups project cards by team when more than one team is represented (admin viewing multiple teams, or a recruiter in 2+ teams) — single-team views are unaffected, no header shown. `ProjectSummary.teamName` added, resolved server-side in `getProjectSummaries`. Team member chips (colored initials, email on hover) added to each group header via new `GET /api/teams`.
 - **Fixed same session:** admin-run screenings weren't showing in the Activity timeline (`saveScreening` was using `userIdFilter()`'s admin-is-undefined result for attribution) — now re-resolves the true session user via `getAuthUser()` for that log call, without touching `screen-resumes/route.ts`.
-- **Committed** via Claude Code from Vlad's machine: `ab916ce` on top of `b33f2b1`, same branch `phase-1-3-teams-architecture`, pushed. PR description updated to cover 1.3 + 1.4 + the two fixes + team chips. Not merged — awaiting Vlad's review.
+- **Merged to main, confirmed 2026-07-09.** Committed via Claude Code as `b33f2b1` (1.3), `ab916ce` (1.4 + fixes + team chips), `f9d62f8` (1.5) — each merged into main as its own PR (#4, #5, #6) by Vlad via the compare-URL flow (`gh` was never on PATH in that environment). GitHub PR list confirmed: 0 open, 6 closed/merged total (including #1–#3 for earlier features). Phase 1 (Fraud Prevention, 1.1–1.5) is fully in main.
+
+## What's built, pending live test (2026-07-09, FunnelView)
+
+- **FunnelView — Manager Visibility.** Admin-only, isolated module: `lib/funnelview/data.ts` (`getFunnelData()`, own direct Supabase queries, no reuse of `SCREENING_COLUMNS`), `lib/funnelview/types.ts`, `app/api/funnelview/route.ts` (admin-gated, same pattern as `/api/analytics`), `app/funnelview/page.tsx`. Nav link added to `SiteHeader.tsx` admin section.
+- **Funnel:** Total Screened (from `screening_batches.total_count`, org-wide) → Passed Threshold (count of `screenings` rows) → Reached Out (status ≠ `new_applicant`) → TA → L1 → L2 → In-Person → Offer, each showing count + conversion % from the immediately preceding stage. Archived/rejected candidates reported as a separate count (not folded into the cumulative bars), attributed to whichever stage they last reached via `previous_stage`.
+- **Source split:** inbound (`linkedin_mode = false`, applied via job board) vs outbound (`linkedin_mode = true`, sourced via LinkedIn) — confirmed this mapping by reading the actual UI copy in `app/projects/[id]/page.tsx` ("Screen LinkedIn profiles" toggle) rather than assuming.
+- **Candidate table:** name, role, current stage (+ previous if different), source badge, recruiter (colored initial avatar + email, reusing `lib/avatarColor.ts`). Filterable by role, archived/rejected hidden by default with a toggle.
+- No new schema, no new tables, no CSV export, no new role, org-wide not team-scoped (see decisions-log). Zero entanglement with `lib/screenings.ts` or the do-not-touch files.
+- **Not yet live-tested** — this session's sandbox can only verify via direct file re-reads (bash/tsc access to this repo has been unreliable all session), not by running the app. Needs a real pass: confirm the funnel numbers match actual pipeline state, confirm 403 for non-admin, confirm mobile layout.
 
 ## What's NOT shipped yet
 
@@ -65,10 +74,15 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 ## Deploy / migration status
 
-**Pending as of 2026-07-09 (Vlad must run this):**
-- `supabase-migration-history-alert.sql` — adds team_id to resume_fingerprints, history_alert_type/history_alert_match_id to screenings (Feature 1.4)
+**Pending:** none known as of 2026-07-09.
 
-**Already applied** (cleaned up 2026-07-09 — this list had accumulated years of already-run migrations still marked "pending"; removing entries only when there's a direct confirmation in session-log.md, not just assumption): `supabase-migration-teams.sql` (Feature 1.3, confirmed by Vlad same session), `supabase-migration-screening-actions.sql` (Feature 1.2, confirmed live-tested), `supabase-migration-fingerprints.sql` (Feature 1.1, confirmed live-tested), `supabase-migration-interview.sql`, `supabase-migration-multiuser.sql`, `supabase-migration-threshold.sql`, `supabase-migration-batches.sql` — all implied done since the features they back (interview view, multi-user auth, configurable threshold, analytics) are in daily use and this session's own testing depended on auth/team features working.
+**Already applied** (cleaned up 2026-07-09 — this list had accumulated years of already-run migrations still marked "pending"; removing entries only when there's a direct confirmation in session-log.md, not just assumption): `supabase-migration-history-alert.sql` (Feature 1.4, confirmed run — resolved the 2026-07-09 app-wide outage, then live-tested successfully), `supabase-migration-teams.sql` (Feature 1.3, confirmed by Vlad same session), `supabase-migration-screening-actions.sql` (Feature 1.2, confirmed live-tested), `supabase-migration-fingerprints.sql` (Feature 1.1, confirmed live-tested), `supabase-migration-interview.sql`, `supabase-migration-multiuser.sql`, `supabase-migration-threshold.sql`, `supabase-migration-batches.sql` — all implied done since the features they back (interview view, multi-user auth, configurable threshold, analytics) are in daily use and this session's own testing depended on auth/team features working.
+
+**Still unconfirmed:** the two `team_id` straggler-backfill queries (screenings, resume_fingerprints) given to Vlad during the 2026-07-09 outage — see open-questions.md.
+
+## Repo layout note (2026-07-09)
+
+Narrative `.docx` docs moved from repo root to `docs/`. `HireView_Prior_Art_Document.pdf` also moved into `docs/` (was previously in `memory/`, which is meant for session-continuity files, not narrative/external documents). All `supabase-migration-*.sql` files moved from repo root to `supabase/migrations/` (no renaming, just relocated). Root now only holds `CLAUDE.md`, `README.md`, `AGENTS.md`, and standard project config. Not yet committed — see open-questions.md.
 
 ## Stack
 

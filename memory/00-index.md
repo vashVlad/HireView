@@ -54,12 +54,12 @@ This folder is HireView's persistent memory. Read this first, every session, bef
 - 1.2 Recruiter Attribution `CRITICAL` — every action logged with name + timestamp — **shipped 2026-07-09, merged to main**
 - 1.3 Teams Architecture `CRITICAL` — Admin → Team → Projects → Users, full isolation — **shipped 2026-07-09, committed (b33f2b1), PR open on phase-1-3-teams-architecture, not yet merged**
 - 1.4 Candidate History Alert `HIGH` — reuses fingerprints from 1.1 — **shipped 2026-07-09, committed (ab916ce on phase-1-3-teams-architecture, on top of b33f2b1), PR updated, not yet merged**
-- 1.5 Fraud-Aware Interview Questions `HIGH` — reuses existing interview questions + credibility checker — **shipped 2026-07-09, live-tested, not yet committed to git**
+- 1.5 Fraud-Aware Interview Questions `HIGH` — reuses existing interview questions + credibility checker — **shipped 2026-07-09, committed (f9d62f8), PR description updated, not yet merged**
 
-**Phase 1 is fully complete (2026-07-09).** All of 1.1–1.5 shipped and live-tested. FunnelView below is unblocked.
+**Phase 1 is fully complete and merged to main (2026-07-09).** All of 1.1–1.5 shipped, live-tested, and merged via PRs #1–#6 (confirmed on GitHub: 0 open, 6 closed, all merged). FunnelView is unblocked and ready to start.
 
 **FunnelView — Manager Visibility (after Phase 1, before Phase 2)**
-Admin-only, isolated module inside HireView (`app/funnelview/`, `lib/funnelview/`), live data, no CSV/external tools. See [[HireView_Roadmap]] and [[HireView_Enterprise_Plan]] for full details. **Gated on Phase 1 being fully complete — do not start until 1.2–1.5 ship.**
+Admin-only, isolated module inside HireView (`app/funnelview/`, `lib/funnelview/`), live data, no CSV/external tools. See [[HireView_Roadmap]] and [[HireView_Enterprise_Plan]] for full details. **Code complete, 2026-07-09 — not yet live-tested or committed.** See [[state]] and [[session-log]].
 
 **Phase 2 — Intelligence Layer (30 days)**
 See [[HireView_Enterprise_Plan]] for full details.
@@ -72,10 +72,11 @@ See [[HireView_Enterprise_Plan]] for full details.
 ## RELATED DOCS OUTSIDE THIS VAULT
 
 - `../CLAUDE.md` — project brief + agent instructions
-- `../HireView_Prior_Art_Document.pdf` — IP protection document, update when novel features ship
-- `../HireView-Dev-Log.docx` — full narrative build history
-- `../HireView-Architecture-Redesign-Phase2-3.docx` — locked nav redesign (shipped)
-- `../HireView-Case-Study.docx`, `../HireView-Impact-Report.docx` — external-facing writeups
+- `../docs/HireView_Prior_Art_Document.pdf` — IP protection document, update when novel features ship
+- `../docs/HireView-Dev-Log.docx` — full narrative build history
+- `../docs/HireView-Architecture-Redesign-Phase2-3.docx` — locked nav redesign (shipped)
+- `../docs/HireView-Case-Study.docx`, `../docs/HireView-Impact-Report.docx` — external-facing writeups
+- `../supabase/migrations/` — all `supabase-migration-*.sql` files (moved out of repo root 2026-07-09, no rename)
 
 ---
 
@@ -83,4 +84,4 @@ See [[HireView_Enterprise_Plan]] for full details.
 
 Plain markdown, Obsidian-compatible (`[[wikilinks]]` work if opened as a vault) but not Obsidian-dependent. Any editor or Claude session can read/write these files directly.
 
-*Last updated: July 8, 2026*
+*Last updated: July 9, 2026 (reorg: docx files + Prior Art PDF → docs/, SQL migrations → supabase/migrations/)*

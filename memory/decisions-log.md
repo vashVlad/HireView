@@ -4,6 +4,15 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-09 — FunnelView is admin-only and org-wide, deliberately not team-scoped.**
+Matches the existing `/analytics` precedent exactly (admin sees everything regardless of team, no new role, no `teamIdsFilter`). The Enterprise Plan/Roadmap both confirm this explicitly ("does not require Teams"). Keeps FunnelView unblocked by Teams and consistent with the one other admin dashboard that already exists.
+
+**2026-07-09 — `lib/funnelview/data.ts` runs its own direct Supabase queries, does not import or extend `lib/screenings.ts`/`SCREENING_COLUMNS`.**
+FunnelView needs `user_id`, `linkedin_mode`, and `previous_status` on screenings — none of which are in the shared `SCREENING_COLUMNS` select every other candidate list depends on. Given this session's earlier incident (adding columns to that shared select broke candidate visibility app-wide before its migration ran), the safer and architecturally cleaner choice is a fully isolated query in `lib/funnelview/`, matching the module's own stated design goal ("no entanglement with core scoring files"). Zero risk to any existing page.
+
+**2026-07-09 — A rejected/archived candidate's funnel "high-water mark" is `previous_stage`, not their current Reject stage.**
+`Reject` is a terminal branch, not a step in the linear TA→L1→L2→In-Person→Offer progression — counting it as "further along" than Offer would be wrong. `furthestStage()` in `lib/funnelview/data.ts` falls back to `previous_stage` (already tracked via the Postgres trigger from the 2026-07-08 entry below) whenever current stage is `Reject`, so the funnel bars credit candidates for the real progress they made before being rejected. Archived/rejected candidates are reported as a separate count, not folded into the cumulative stage bars, so they don't distort conversion percentages between stages.
+
 **2026-07-09 — Phase 1.5 fraud-aware questions: fraudSignals is an optional param on the existing generateInterviewQuestions, not a second function or a new route.**
 No new table, no schema change — this feature is pure prompt composition over data 1.1/1.4/credibility-checker already produce (`duplicate_flag`, `history_alert_type`, `credibility.rows` discrepancies). The route computes a `FraudSignals` object for every candidate but only passes it into the prompt when `hasFraudSignal()` is true, so a clean candidate's prompt is byte-for-byte what it was before this feature existed — no conditional drift for the common case.
 
