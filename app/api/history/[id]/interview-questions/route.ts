@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseClient } from "@/lib/supabase";
-import { generateInterviewQuestions } from "@/lib/generateInterviewQuestions";
+import { generateInterviewQuestions, hasFraudSignal, type FraudSignals } from "@/lib/generateInterviewQuestions";
 import { updateScreening } from "@/lib/screenings";
+import type { CredibilityAssessment } from "@/lib/types";
 
 export const maxDuration = 30;
 
@@ -18,7 +19,7 @@ export async function GET(
   // Fetch the screening record
   const { data: row, error } = await supabase
     .from("screenings")
-    .select("candidate_name, career_trajectory, summary, concerns, job_description, interview_questions")
+    .select("candidate_name, career_trajectory, summary, concerns, job_description, interview_questions, duplicate_flag, history_alert_type, credibility")
     .eq("id", numId)
     .single<{
       candidate_name: string;
@@ -27,6 +28,9 @@ export async function GET(
       concerns: string[];
       job_description: string;
       interview_questions: string[] | null;
+      duplicate_flag: boolean | null;
+      history_alert_type: "previously_seen" | "known_fraud_pattern" | null;
+      credibility: CredibilityAssessment | null;
     }>();
 
   if (error || !row) {
@@ -38,6 +42,17 @@ export async function GET(
     return NextResponse.json({ questions: row.interview_questions, cached: true });
   }
 
+  // Phase 1.5 — computed for every candidate, but only passed through to the
+  // prompt when something's actually flagged (hasFraudSignal below); a clean
+  // candidate gets the exact same prompt as before this feature existed.
+  const fraudSignals: FraudSignals = {
+    duplicateFlag: row.duplicate_flag ?? false,
+    ...(row.history_alert_type != null ? { historyAlertType: row.history_alert_type } : {}),
+    credibilityDiscrepancies: (row.credibility?.rows ?? [])
+      .filter((r) => r.status === "discrepancy")
+      .map((r) => `${r.field} — resume says "${r.resume}", cross-reference says "${r.crossRef}"`),
+  };
+
   // Generate and cache
   try {
     const questions = await generateInterviewQuestions({
@@ -45,6 +60,7 @@ export async function GET(
       careerTrajectory: row.career_trajectory ?? row.summary,
       concerns: row.concerns ?? [],
       jobDescription: row.job_description,
+      ...(hasFraudSignal(fraudSignals) ? { fraudSignals } : {}),
     });
 
     await updateScreening(numId, { interviewQuestions: questions });

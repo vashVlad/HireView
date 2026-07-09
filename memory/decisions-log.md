@@ -4,6 +4,9 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-09 — Phase 1.5 fraud-aware questions: fraudSignals is an optional param on the existing generateInterviewQuestions, not a second function or a new route.**
+No new table, no schema change — this feature is pure prompt composition over data 1.1/1.4/credibility-checker already produce (`duplicate_flag`, `history_alert_type`, `credibility.rows` discrepancies). The route computes a `FraudSignals` object for every candidate but only passes it into the prompt when `hasFraudSignal()` is true, so a clean candidate's prompt is byte-for-byte what it was before this feature existed — no conditional drift for the common case.
+
 **2026-07-09 — "Who ran the screening" wasn't showing for admin-run screenings — fixed by re-resolving the session user inside saveScreening, not by touching screen-resumes/route.ts.**
 `userIdFilter()` (used by `screen-resumes/route.ts` for an unrelated purpose — scoping the calibration-examples lookup) returns `undefined` for admin by design, since it was built as a query filter ("admin sees everything, no filter needed"). That `undefined` was also getting passed into `saveScreening` and used as the attribution actor for the "created" action, silently dropping admin's own screenings from the Activity timeline. Since `screen-resumes/route.ts` is do-not-touch, the fix lives entirely inside `saveScreening` (`lib/screenings.ts`): it now calls `getAuthUser()` itself to resolve the true acting user for the `logAction` call specifically, leaving the `userId` param's existing role (screenings.user_id, team lookup) untouched. Safe because both callers of `saveScreening` already require an authenticated session before reaching this point.
 
