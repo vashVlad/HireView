@@ -170,6 +170,7 @@ export interface Project {
   status: ProjectStatus;
   /** Minimum score to save to pipeline history. Default 45. Range 0–100. */
   scoreThreshold: number;
+  teamId?: number;
   createdAt: string;
   updatedAt: string;
 }

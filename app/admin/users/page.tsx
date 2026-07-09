@@ -21,6 +21,13 @@ interface AccessRequest {
   status: string;
 }
 
+interface TeamRow {
+  id: number;
+  name: string;
+  createdAt: string;
+  members: { userId: string; email: string | null }[];
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +44,14 @@ export default function UsersPage() {
   const [requestsLoading, setRequestsLoading] = useState(true);
   const [approvingId, setApprovingId] = useState<number | null>(null);
   const [approveResult, setApproveResult] = useState<Record<number, string>>({});
+
+  // Teams
+  const [teams, setTeams] = useState<TeamRow[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(true);
+  const [newTeamName, setNewTeamName] = useState("");
+  const [creatingTeam, setCreatingTeam] = useState(false);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const [addMemberSelection, setAddMemberSelection] = useState<Record<number, string>>({});
 
   async function fetchUsers() {
     setLoading(true);
@@ -62,10 +77,81 @@ export default function UsersPage() {
     setRequestsLoading(false);
   }
 
+  async function fetchTeams() {
+    setTeamsLoading(true);
+    const res = await fetch("/api/admin/teams");
+    if (res.ok) {
+      const data = await res.json();
+      setTeams(data.teams ?? []);
+    }
+    setTeamsLoading(false);
+  }
+
   useEffect(() => {
     fetchUsers();
     fetchRequests();
+    fetchTeams();
   }, []);
+
+  async function handleCreateTeam(e: React.FormEvent) {
+    e.preventDefault();
+    setTeamError(null);
+    setCreatingTeam(true);
+    const res = await fetch("/api/admin/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newTeamName }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setTeamError(data.error ?? "Failed to create team");
+    } else {
+      setNewTeamName("");
+      fetchTeams();
+    }
+    setCreatingTeam(false);
+  }
+
+  async function handleAddMember(teamId: number) {
+    const userId = addMemberSelection[teamId];
+    if (!userId) return;
+    const addedUser = users.find((u) => u.id === userId);
+
+    // Optimistic update — the chip and the "available to add" dropdown
+    // reflect the change instantly instead of waiting on a round trip.
+    // fetchTeams() below still runs to reconcile with server truth.
+    setTeams((prev) =>
+      prev.map((t) =>
+        t.id === teamId && !t.members.some((m) => m.userId === userId)
+          ? { ...t, members: [...t.members, { userId, email: addedUser?.email ?? null }] }
+          : t
+      )
+    );
+    setAddMemberSelection((prev) => ({ ...prev, [teamId]: "" }));
+
+    await fetch(`/api/admin/teams/${teamId}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    fetchTeams();
+  }
+
+  async function handleRemoveMember(teamId: number, userId: string) {
+    // Optimistic update, same reasoning as handleAddMember.
+    setTeams((prev) =>
+      prev.map((t) =>
+        t.id === teamId ? { ...t, members: t.members.filter((m) => m.userId !== userId) } : t
+      )
+    );
+
+    await fetch(`/api/admin/teams/${teamId}/members`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    fetchTeams();
+  }
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
@@ -341,6 +427,104 @@ export default function UsersPage() {
               ))}
             </ul>
           )}
+        </div>
+
+        {/* Teams */}
+        <div className="mt-8 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
+            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              Teams{teams.length > 0 && ` (${teams.length})`}
+            </h2>
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Recruiters see only projects and candidates belonging to their team. Admins see everything.
+            </p>
+          </div>
+
+          {teamsLoading ? (
+            <div className="px-6 py-8 text-center text-sm text-zinc-400">Loading…</div>
+          ) : teams.length === 0 ? (
+            <div className="px-6 py-8 text-center text-sm text-zinc-400">No teams yet.</div>
+          ) : (
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {teams.map((team) => {
+                const memberIds = new Set(team.members.map((m) => m.userId));
+                const available = users.filter((u) => !memberIds.has(u.id));
+                return (
+                  <li key={team.id} className="px-6 py-4">
+                    <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{team.name}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {team.members.length === 0 ? (
+                        <span className="text-xs text-zinc-400">No members</span>
+                      ) : (
+                        team.members.map((m) => (
+                          <span
+                            key={m.userId}
+                            className="flex items-center gap-1.5 rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                          >
+                            {m.email ?? m.userId}
+                            <button
+                              onClick={() => handleRemoveMember(team.id, m.userId)}
+                              className="text-zinc-400 hover:text-rose-500"
+                              aria-label={`Remove ${m.email ?? "member"} from ${team.name}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    {available.length > 0 && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <select
+                          value={addMemberSelection[team.id] ?? ""}
+                          onChange={(e) =>
+                            setAddMemberSelection((prev) => ({ ...prev, [team.id]: e.target.value }))
+                          }
+                          className="rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1.5 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                        >
+                          <option value="">Add member…</option>
+                          {available.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.email}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => handleAddMember(team.id)}
+                          disabled={!addMemberSelection[team.id]}
+                          className="rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-200 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <form onSubmit={handleCreateTeam} className="flex items-end gap-3 border-t border-zinc-100 px-6 py-4 dark:border-zinc-800">
+            <div className="flex flex-1 flex-col gap-1.5">
+              <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">New team name</label>
+              <input
+                type="text"
+                required
+                value={newTeamName}
+                onChange={(e) => setNewTeamName(e.target.value)}
+                placeholder="e.g. West Coast Team"
+                className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 focus:border-violet-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={creatingTeam}
+              className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-50"
+            >
+              {creatingTeam ? "Creating…" : "Create team"}
+            </button>
+          </form>
+          {teamError && <p className="px-6 pb-4 text-sm text-rose-500">{teamError}</p>}
         </div>
       </div>
     </div>

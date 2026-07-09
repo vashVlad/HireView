@@ -12,6 +12,17 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-09 (session 3) — Phase 1.3: Teams Architecture (code complete, not yet migrated/tested/committed)
+
+- New tables `teams`, `team_members`; `team_id` added to `projects` (source of truth) and denormalized onto `screenings` (set inside `saveScreening` from the project's team, or the saving user's own team if there's no project) — `supabase-migration-teams.sql`, backfills a default "General" team with every existing user + project + screening. **Not yet run.**
+- `lib/teams.ts` — team CRUD, `getUserTeamIds`, `getPrimaryTeamId`. New `teamIdsFilter()` added to `lib/auth.ts` alongside (not replacing) `userIdFilter` — `screen-resumes/route.ts` is do-not-touch and calls `userIdFilter` synchronously, so it had to stay untouched; all new team-scoping logic lives in editable files instead (`lib/projects.ts`, `lib/screenings.ts`, `/api/projects`, `/api/history`).
+- `/api/projects` GET and `/api/history` GET now filter by team membership instead of individual `user_id`. New projects auto-assign to the creator's own team, no team-selector UI yet (deferred — everyone's on one team today, so there's nothing to choose between; see decisions-log).
+- Team management UI added to the existing `/admin/users` page (nav-labeled "Team") — new "Teams" section: create team, add/remove members. New `/api/admin/teams` + `/api/admin/teams/[id]/members` routes.
+- **This is a real isolation-model change, not just additive:** recruiters on the same team now see each other's projects/candidates, replacing today's strict per-user isolation. Flagged prominently in state.md and open-questions.md — the migration's "General" team backfill puts Teti and Vlad together by default, so this needs a decision before running, not a silent run.
+- **Not committed.** This sandbox's `git` couldn't resolve `HEAD` (missing commit object in `.git/objects` despite a valid-looking ref) and `tsc` read multiple files truncated mid-line — both look like a shell/mount-layer artifact (Read/Edit tools showed the same files as complete and correct), but it means no branch, commit, or PR happened this session. Vlad needs to review the diff and handle git from his own machine.
+- **Update, same session:** Vlad ran the migration, confirmed the General-team question (kept as-is), and live-tested successfully. One follow-up: add/remove member on the Teams UI now updates optimistically (`app/admin/users/page.tsx`) instead of waiting on a refetch — felt non-immediate otherwise. 1.3 is functionally done; still needs a real commit/PR since this sandbox's git stayed broken all session (see open-questions.md) — handed to Vlad as a Claude Code prompt instead.
+- **What's next:** once committed, 1.4 Candidate History Alert.
+
 ## 2026-07-08 (session 2) — Phase 1.2: Recruiter Attribution
 
 - New table `screening_actions` (screening_id, user_id, action_type, from_value, to_value, created_at) — append-only, full history, unlike previous_status/previous_stage which only hold the latest transition. `supabase-migration-screening-actions.sql`.

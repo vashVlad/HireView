@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStatusCounts, listScreenings } from "@/lib/screenings";
-import { getAuthUser, userIdFilter } from "@/lib/auth";
+import { getAuthUser, teamIdsFilter } from "@/lib/auth";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const userId = userIdFilter(user);
+  const teamIds = await teamIdsFilter(user);
 
   const query = request.nextUrl.searchParams.get("q") ?? undefined;
   const statusParam = request.nextUrl.searchParams.get("status");
@@ -20,8 +20,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const [screenings, statusCounts] = await Promise.all([
-      listScreenings(query, statuses, flaggedOnly, projectId, userId),
-      getStatusCounts(projectId, userId),
+      listScreenings(query, statuses, flaggedOnly, projectId, teamIds),
+      getStatusCounts(projectId, teamIds),
     ]);
     return NextResponse.json({ screenings, statusCounts });
   } catch (err) {

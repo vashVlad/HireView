@@ -4,6 +4,21 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-09 — Team management UI (add/remove member) updates optimistically, not via wait-then-refetch.**
+Vlad flagged after live-testing that adding a member to a new team didn't feel immediate. `handleAddMember`/`handleRemoveMember` now update local `teams` state synchronously before the network call resolves, then still call `fetchTeams()` afterward to reconcile with server truth. Apply this pattern to future admin-UI actions in HireView (toggles, list add/remove) rather than defaulting to fetch-then-refetch.
+
+**2026-07-09 — Team-based isolation added via a new `teamIdsFilter()`, `userIdFilter()` left untouched rather than converted.**
+`userIdFilter()` is synchronous and `screen-resumes/route.ts` (do-not-touch) calls it without awaiting. Team lookups require a DB query, so making `userIdFilter` async would silently break that call site with no way to fix it. Added a separate async `teamIdsFilter()` instead; the two now coexist — `userIdFilter` still backs per-recruiter attribution on save (unchanged), `teamIdsFilter` backs the new team-scoped list views (`/api/projects`, `/api/history`).
+
+**2026-07-09 — team_id denormalized onto `screenings` from the project, not joined at query time.**
+Screenings don't have their own team concept — a project does. Rather than join through `project_id` on every list query, `saveScreening` resolves and stores `team_id` once at save time (from the project, or from the saving user's own team if there's no project). Matches the existing pattern of denormalizing `user_id` onto screenings despite `projects` also having it.
+
+**2026-07-09 — New Role modal gets no team-selector UI yet; new projects auto-assign to the creator's first team.**
+The Enterprise Plan's spec calls for "new project creation requires team selection," but every current user belongs to exactly one team (there's only "General" until Vlad creates a second one), so a dropdown would have nothing to choose between. Deferred until someone actually has 2+ team memberships — auto-assign covers the real Phase 1.3 success criteria (two teams, one recruiter each) without adding UI for a choice that doesn't exist yet.
+
+**2026-07-09 — Teams management UI added to the existing `/admin/users` page, not a new route.**
+The page is already nav-labeled "Team" and is the established home for admin-only user/access management. A second admin nav item for team-vs-user administration would fragment a workflow that's naturally one screen for a two-person org.
+
 **2026-07-08 — Recruiter attribution logged via app-level threading, not a DB trigger (unlike previous_status/previous_stage).**
 A trigger can't know which HireView user made a change — the app talks to Supabase via a single service-role client, so the DB only ever sees that role, never the acting recruiter. `actorUserId` is threaded through `updateScreening`/`updateScreeningStatus`/`updateScreeningFlag`/`updateScreeningNotes`/`updateScreeningCredibility`/`upsertTrackerEntry` as an optional trailing param (backward compatible — existing calls without it still compile), sourced from `getAuthUser()` in the two API routes that handle recruiter-driven changes (`history/[id]`, `tracker/[screeningId]`). System-generated updates (career trajectory regen, interview questions, photo URL, LinkedIn PDF path) don't pass a userId and so don't appear in the timeline — only actual recruiter actions do.
 
