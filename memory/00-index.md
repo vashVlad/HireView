@@ -51,7 +51,7 @@ This folder is HireView's persistent memory. Read this first, every session, bef
 
 **Phase 1 — Fraud Prevention (NOW)**
 - 1.1 Duplicate Resume Detection `CRITICAL` — match on skills hash, responsibility vectors, metric claims, career arc. Never on names/contact/company — **shipped 2026-07-08, merged to main (PR #2)**
-- 1.2 Recruiter Attribution `CRITICAL` — every action logged with name + timestamp — **not started**
+- 1.2 Recruiter Attribution `CRITICAL` — every action logged with name + timestamp — **shipped 2026-07-09, merged to main**
 - 1.3 Teams Architecture `CRITICAL` — Admin → Team → Projects → Users, full isolation — **not started**
 - 1.4 Candidate History Alert `HIGH` — reuses fingerprints from 1.1 — **not started**
 - 1.5 Fraud-Aware Interview Questions `HIGH` — reuses existing interview questions + credibility checker — **not started**

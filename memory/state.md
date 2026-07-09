@@ -39,9 +39,9 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 - **Duplicate Resume Detection (Phase 1.1 — merged to main)** — content fingerprinting (skills hash, responsibility vectors, metric claims, career arc signature) built from a second Claude extraction call per saved candidate, deliberately never matching on name/contact/company. New `resume_fingerprints` table, `duplicate_flag`/`duplicate_match_id` on `screenings`. Red "Duplicate detected" badge on collapsed Pipeline and All Candidates cards, click-to-jump to the matching candidate. Matching scoped to same project for v1 — cross-project matching is Feature 1.4, once Teams (1.3) exists. Built on `phase-1-fraud-prevention` (merged from `generalize-credibility-crossref` + `main`), verified with swapped-identity test resumes, PR #2 merged into `main` 2026-07-08.
 
-## What's shipped (added 2026-07-08, Phase 1.2 — pending Vlad's test)
+## What's shipped (added 2026-07-08/09, Phase 1.2 — merged to main)
 
-- **Recruiter Attribution** — full append-only action history (`screening_actions` table) logging status changes, tracker stage moves, flags, notes, and credibility checks with who and when. Threaded through `updateScreening`'s wrapper functions and `upsertTrackerEntry` via an optional `actorUserId` param, sourced from `getAuthUser()` in the two API routes that handle recruiter-driven changes. "Activity" section on the expanded Pipeline card shows the timeline as plain sentences ("vlad@... screened John on Jul 7"). Not yet committed, migrated, or tested against a live environment.
+- **Recruiter Attribution** — full append-only action history (`screening_actions` table) logging status changes, tracker stage moves, flags, notes, and credibility checks with who and when. Threaded through `updateScreening`'s wrapper functions and `upsertTrackerEntry` via an optional `actorUserId` param, sourced from `getAuthUser()` in the two API routes that handle recruiter-driven changes. "Activity" section on the expanded Pipeline card shows the timeline with a colored initial avatar + bold email + plain-language description ("V moved Shiraz Amin to Recruiter Screen on Jul 9, 2026"). Migration run, live-tested (status change + flag), PR merged to main.
 
 ## What's NOT shipped yet
 
