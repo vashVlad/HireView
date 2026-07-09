@@ -43,6 +43,13 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 - **Recruiter Attribution** — full append-only action history (`screening_actions` table) logging status changes, tracker stage moves, flags, notes, and credibility checks with who and when. Threaded through `updateScreening`'s wrapper functions and `upsertTrackerEntry` via an optional `actorUserId` param, sourced from `getAuthUser()` in the two API routes that handle recruiter-driven changes. "Activity" section on the expanded Pipeline card shows the timeline with a colored initial avatar + bold email + plain-language description ("V moved Shiraz Amin to Recruiter Screen on Jul 9, 2026"). Migration run, live-tested (status change + flag), PR merged to main.
 
+## What's shipped (added 2026-07-09, Phase 1.3 — code complete + migrated + live-tested, not yet committed)
+
+- **Teams Architecture** — `teams` + `team_members` tables. `team_id` added to `projects` (source of truth) and denormalized onto `screenings` (from the project, at save time) so list queries filter with `.in("team_id", ...)` instead of a join. `lib/teams.ts` (create team, list with members, add/remove member, `getUserTeamIds`/`getPrimaryTeamId`). New `teamIdsFilter()` in `lib/auth.ts` — added alongside `userIdFilter` (not replacing it — `userIdFilter` stays exactly as-is because `screen-resumes/route.ts`, a do-not-touch file, depends on its sync signature). `/api/projects` GET and `/api/history` GET now scope by team instead of by individual `user_id`. New projects auto-assign to the creator's own team (no selector UI yet — deferred until someone actually belongs to 2+ teams, see decisions-log). Team management UI added to `/admin/users` (new "Teams" section: create team, add/remove members) — new `/api/admin/teams` + `/api/admin/teams/[id]/members` routes.
+- **Real behavior change, not just additive:** this replaces per-user screening isolation with per-team isolation. Recruiters on the same team now see each other's projects and candidates, not just their own. Migration ran 2026-07-09; Vlad confirmed keeping the default "General" team as-is (both him and Teti share it for now — deliberate, not an oversight).
+- Migrated and live-tested by Vlad: two teams created, add/remove member on the Teams UI confirmed working. One polish fix during testing — add/remove now updates the UI optimistically instead of waiting on a refetch (see decisions-log).
+- **Not yet committed** — this session's sandbox git was broken (see open-questions.md); handed off as a Claude Code prompt for Vlad to commit/PR from his own machine.
+
 ## What's NOT shipped yet
 
 - **Outreach drafting (Phase 5)** — auto-draft LinkedIn messages. Repeatedly listed as next, never started.
@@ -50,7 +57,8 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 ## Deploy / migration status
 
-**Pending as of 2026-07-08 (all manual — Vlad must run these):**
+**Pending as of 2026-07-09 (all manual — Vlad must run these):**
+-2. `supabase-migration-teams.sql` — adds teams/team_members tables, team_id on projects/screenings, backfills "General" team (Feature 1.3). **Read the note above first** — this changes Teti/Vlad's shared visibility the moment it runs.
 -1. `supabase-migration-screening-actions.sql` — adds screening_actions table (Feature 1.2)
 0. `supabase-migration-fingerprints.sql` — adds resume_fingerprints table, duplicate_flag/duplicate_match_id on screenings (Feature 1.1)
 1. `supabase-migration-interview.sql` — adds interview_questions, linkedin_pdf_path, photo_url

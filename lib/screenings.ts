@@ -4,6 +4,8 @@ import { extractResumeText } from "./parseResume";
 import { generateFingerprint } from "./generateFingerprint";
 import { saveFingerprint, findDuplicateMatch, markDuplicatePair } from "./resumeFingerprints";
 import { logAction } from "./screeningActions";
+import { getProject } from "./projects";
+import { getPrimaryTeamId } from "./teams";
 import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
   Recommendation, ScreeningRecord, TrackerEntry, TrackerStage,
@@ -90,6 +92,22 @@ export async function saveScreening(params: {
   const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, projectId, userId } = params;
   const supabase = getSupabaseClient();
 
+  // Denormalize team_id from the project (source of truth) so list queries
+  // can filter with a plain .eq/.in instead of a join. Falls back to the
+  // saving user's own primary team for the rare screening with no project.
+  // Best-effort: a lookup failure must never block the save itself.
+  let teamId: number | null = null;
+  try {
+    if (projectId != null) {
+      const project = await getProject(projectId);
+      teamId = project?.teamId ?? null;
+    } else if (userId) {
+      teamId = await getPrimaryTeamId(userId);
+    }
+  } catch (err) {
+    console.error("Team lookup failed for screening (saved without team_id):", err);
+  }
+
   const resumePath = `${randomUUID()}/${result.fileName}`;
   const upload = await supabase.storage
     .from(RESUME_BUCKET)
@@ -115,6 +133,7 @@ export async function saveScreening(params: {
       linkedin_mode: linkedInMode ?? false,
       project_id: projectId ?? null,
       user_id: userId ?? null,
+      team_id: teamId,
     })
     .select("id")
     .single<{ id: number }>();
@@ -149,13 +168,18 @@ export async function saveScreening(params: {
 
 // ── List ───────────────────────────────────────────────────────────────────
 
+/**
+ * teamIds: undefined = no filter (admin, sees all). Empty array = recruiter
+ * with no team membership, short-circuits to [] without hitting the DB.
+ */
 export async function listScreenings(
   query?: string,
   statuses?: CandidateStatus[],
   flaggedOnly?: boolean,
   projectId?: number,
-  userId?: string
+  teamIds?: number[]
 ): Promise<ScreeningRecord[]> {
+  if (teamIds != null && teamIds.length === 0) return [];
   const supabase = getSupabaseClient();
 
   let request = supabase
@@ -170,7 +194,7 @@ export async function listScreenings(
   if (statuses && statuses.length > 0) request = request.in("status", statuses);
   if (flaggedOnly) request = request.eq("flagged", true);
   if (projectId != null) request = request.eq("project_id", projectId);
-  if (userId != null) request = request.eq("user_id", userId);
+  if (teamIds != null) request = request.in("team_id", teamIds);
 
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
@@ -309,12 +333,13 @@ export async function deleteScreening(id: number): Promise<void> {
 
 export async function getStatusCounts(
   projectId?: number,
-  userId?: string
+  teamIds?: number[]
 ): Promise<Partial<Record<CandidateStatus, number>>> {
+  if (teamIds != null && teamIds.length === 0) return {};
   const supabase = getSupabaseClient();
   let req = supabase.from("screenings").select("status");
   if (projectId != null) req = req.eq("project_id", projectId);
-  if (userId != null) req = req.eq("user_id", userId);
+  if (teamIds != null) req = req.in("team_id", teamIds);
   const { data, error } = await req.returns<{ status: CandidateStatus }[]>();
   if (error) throw error;
   const counts: Partial<Record<CandidateStatus, number>> = {};

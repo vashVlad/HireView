@@ -8,6 +8,7 @@ interface ProjectRow {
   jd_analysis: JDAnalysis | null;
   status: ProjectStatus;
   score_threshold: number;
+  team_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -20,6 +21,7 @@ function rowToProject(row: ProjectRow): Project {
     jdAnalysis: row.jd_analysis,
     status: row.status,
     scoreThreshold: row.score_threshold ?? 45,
+    ...(row.team_id != null ? { teamId: row.team_id } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -30,6 +32,7 @@ export async function createProject(params: {
   jobDescription: string;
   jdAnalysis?: JDAnalysis;
   userId?: string;
+  teamId?: number | null;
 }): Promise<Project> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -39,6 +42,7 @@ export async function createProject(params: {
       job_description: params.jobDescription,
       jd_analysis: params.jdAnalysis ?? null,
       user_id: params.userId ?? null,
+      team_id: params.teamId ?? null,
     })
     .select()
     .single<ProjectRow>();
@@ -46,13 +50,19 @@ export async function createProject(params: {
   return rowToProject(data);
 }
 
-export async function listProjects(userId?: string): Promise<Project[]> {
+/**
+ * teamIds: undefined = no filter (admin, sees all). Empty array = recruiter
+ * with no team membership, short-circuits to [] without hitting the DB
+ * (an `.in(col, [])` filter is not a reliable "match nothing" across drivers).
+ */
+export async function listProjects(teamIds?: number[]): Promise<Project[]> {
+  if (teamIds != null && teamIds.length === 0) return [];
   const supabase = getSupabaseClient();
   let query = supabase
     .from("projects")
-    .select("id, name, job_description, jd_analysis, status, score_threshold, created_at, updated_at")
+    .select("id, name, job_description, jd_analysis, status, score_threshold, team_id, created_at, updated_at")
     .order("created_at", { ascending: false });
-  if (userId != null) query = query.eq("user_id", userId);
+  if (teamIds != null) query = query.in("team_id", teamIds);
   const { data, error } = await query.returns<ProjectRow[]>();
   if (error) throw error;
   return (data ?? []).map(rowToProject);
@@ -91,8 +101,8 @@ export async function deleteProject(id: number): Promise<void> {
   if (error) throw error;
 }
 
-export async function getProjectSummaries(userId?: string): Promise<ProjectSummary[]> {
-  const projects = await listProjects(userId);
+export async function getProjectSummaries(teamIds?: number[]): Promise<ProjectSummary[]> {
+  const projects = await listProjects(teamIds);
   if (projects.length === 0) return [];
 
   const supabase = getSupabaseClient();
