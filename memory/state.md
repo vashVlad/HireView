@@ -48,7 +48,13 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 - **Teams Architecture** — `teams` + `team_members` tables. `team_id` added to `projects` (source of truth) and denormalized onto `screenings` (from the project, at save time) so list queries filter with `.in("team_id", ...)` instead of a join. `lib/teams.ts` (create team, list with members, add/remove member, `getUserTeamIds`/`getPrimaryTeamId`). New `teamIdsFilter()` in `lib/auth.ts` — added alongside `userIdFilter` (not replacing it — `userIdFilter` stays exactly as-is because `screen-resumes/route.ts`, a do-not-touch file, depends on its sync signature). `/api/projects` GET and `/api/history` GET now scope by team instead of by individual `user_id`. New projects auto-assign to the creator's own team (no selector UI yet — deferred until someone actually belongs to 2+ teams, see decisions-log). Team management UI added to `/admin/users` (new "Teams" section: create team, add/remove members) — new `/api/admin/teams` + `/api/admin/teams/[id]/members` routes.
 - **Real behavior change, not just additive:** this replaces per-user screening isolation with per-team isolation. Recruiters on the same team now see each other's projects and candidates, not just their own. Migration ran 2026-07-09; Vlad confirmed keeping the default "General" team as-is (both him and Teti share it for now — deliberate, not an oversight).
 - Migrated and live-tested by Vlad: two teams created, add/remove member on the Teams UI confirmed working. One polish fix during testing — add/remove now updates the UI optimistically instead of waiting on a refetch (see decisions-log).
-- **Not yet committed** — this session's sandbox git was broken (see open-questions.md); handed off as a Claude Code prompt for Vlad to commit/PR from his own machine.
+- Committed via Claude Code from Vlad's own machine (this session's sandbox git stayed broken all along — see open-questions.md): commit `b33f2b1` "feat: add Teams architecture (Phase 1.3)" on branch `phase-1-3-teams-architecture`, pushed to origin. PR not opened via `gh` (not on PATH in that environment either) — compare-URL fallback given instead: `https://github.com/vashVlad/HireView/compare/main...phase-1-3-teams-architecture?expand=1`. Not yet merged — awaiting Vlad's review.
+
+## What's built, pending migration + live test (2026-07-09, Phase 1.4)
+
+- **Candidate History Alert** — extends Phase 1.1's fingerprint matching across projects within the same team (the boundary 1.3 defined). Two new banners on the collapsed card, distinct from 1.1's existing same-project "Duplicate detected" (untouched): yellow "Previously seen" (this content pattern applied to another project before, no prior fraud signal) and red "Known fraud pattern" (the matched record, or this one, already carries a same-project `duplicate_flag` or was already flagged — escalation propagates through the match chain). New `history_alert_type`/`history_alert_match_id` columns on `screenings`, `team_id` denormalized onto `resume_fingerprints`. New `findCrossProjectMatch`/`markHistoryAlertPair`/`getScreeningFraudSignals` in `lib/resumeFingerprints.ts`, wired into `saveScreening`'s existing best-effort fingerprinting block. Both banners link to the matched candidate's project (resolved server-side via `enrichHistoryAlerts` — the match is usually not in the current page's already-loaded list, unlike 1.1's same-project case). Migration: `supabase-migration-history-alert.sql`, not yet run.
+- **Live-tested and confirmed working 2026-07-09**, after debugging an app-wide outage (see decisions-log — `SCREENING_COLUMNS` referenced the new columns before the migration ran) and a real `getProject()` bug (missing `team_id` in its select, fixed). Confirmed: same resume into two projects in the same team correctly shows "Previously seen"; when the matched record already had a same-project `duplicate_flag`, it correctly escalated both sides to "Known fraud pattern" instead. Same-project resubmission correctly stays on 1.1's "Duplicate detected" and does not also trigger 1.4's banner (they're deliberately separate signals).
+- **Follow-up UI addition, same session:** Projects page (`app/projects/page.tsx`) now groups project cards by team when more than one team is represented (admin viewing multiple teams, or a recruiter in 2+ teams) — single-team views are unaffected, no header shown. `ProjectSummary.teamName` added, resolved server-side in `getProjectSummaries`.
 
 ## What's NOT shipped yet
 
@@ -57,19 +63,10 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 ## Deploy / migration status
 
-**Pending as of 2026-07-09 (all manual — Vlad must run these):**
--2. `supabase-migration-teams.sql` — adds teams/team_members tables, team_id on projects/screenings, backfills "General" team (Feature 1.3). **Read the note above first** — this changes Teti/Vlad's shared visibility the moment it runs.
--1. `supabase-migration-screening-actions.sql` — adds screening_actions table (Feature 1.2)
-0. `supabase-migration-fingerprints.sql` — adds resume_fingerprints table, duplicate_flag/duplicate_match_id on screenings (Feature 1.1)
-1. `supabase-migration-interview.sql` — adds interview_questions, linkedin_pdf_path, photo_url
-2. `supabase-migration-multiuser.sql` — adds user_id to 3 tables + indexes
-3. `supabase-migration-threshold.sql` — adds score_threshold to projects
-4. `supabase-migration-batches.sql` — creates screening_batches table
-5. `npm install` from `C:\Portfolio\HireView` (adds @supabase/ssr)
-6. Add `NEXT_PUBLIC_SUPABASE_ANON_KEY` to `.env.local` AND Vercel env vars (get from Supabase Dashboard → Settings → API → anon public)
-7. `UPDATE screenings SET interview_questions = NULL;` — forces regeneration with tighter prompt
-8. Create admin account in Supabase Auth → set `app_metadata: {"role":"admin"}` → run data migration (assign existing records to your user_id)
-9. Delete any stuck unconfirmed users from Supabase Auth dashboard and re-add via Team page
+**Pending as of 2026-07-09 (Vlad must run this):**
+- `supabase-migration-history-alert.sql` — adds team_id to resume_fingerprints, history_alert_type/history_alert_match_id to screenings (Feature 1.4)
+
+**Already applied** (cleaned up 2026-07-09 — this list had accumulated years of already-run migrations still marked "pending"; removing entries only when there's a direct confirmation in session-log.md, not just assumption): `supabase-migration-teams.sql` (Feature 1.3, confirmed by Vlad same session), `supabase-migration-screening-actions.sql` (Feature 1.2, confirmed live-tested), `supabase-migration-fingerprints.sql` (Feature 1.1, confirmed live-tested), `supabase-migration-interview.sql`, `supabase-migration-multiuser.sql`, `supabase-migration-threshold.sql`, `supabase-migration-batches.sql` — all implied done since the features they back (interview view, multi-user auth, configurable threshold, analytics) are in daily use and this session's own testing depended on auth/team features working.
 
 ## Stack
 

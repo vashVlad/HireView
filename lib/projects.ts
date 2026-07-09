@@ -72,7 +72,7 @@ export async function getProject(id: number): Promise<Project | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("projects")
-    .select("id, name, job_description, jd_analysis, status, score_threshold, created_at, updated_at")
+    .select("id, name, job_description, jd_analysis, status, score_threshold, team_id, created_at, updated_at")
     .eq("id", id)
     .maybeSingle<ProjectRow>();
   if (error) throw error;
@@ -134,9 +134,17 @@ export async function getProjectSummaries(teamIds?: number[]): Promise<ProjectSu
       interviewCounts.set(row.project_id, (interviewCounts.get(row.project_id) ?? 0) + 1);
   }
 
+  const teamIdsPresent = [...new Set(projects.map((p) => p.teamId).filter((t): t is number => t != null))];
+  let teamNameById = new Map<number, string>();
+  if (teamIdsPresent.length > 0) {
+    const { data: teams } = await supabase.from("teams").select("id, name").in("id", teamIdsPresent).returns<{ id: number; name: string }[]>();
+    teamNameById = new Map((teams ?? []).map((t) => [t.id, t.name]));
+  }
+
   return projects.map((p) => ({
     ...p,
     screeningCount: screeningCounts.get(p.id) ?? 0,
     interviewCount: interviewCounts.get(p.id) ?? 0,
+    ...(p.teamId != null && teamNameById.has(p.teamId) ? { teamName: teamNameById.get(p.teamId) } : {}),
   }));
 }

@@ -120,6 +120,26 @@ function CandidateCard({
                 Duplicate detected
               </span>
             )}
+            {s.historyAlertType && (
+              <Link
+                href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
+                onClick={(e) => e.stopPropagation()}
+                title={
+                  s.historyAlertMatchCandidateName && s.historyAlertMatchProjectName
+                    ? `Matches ${s.historyAlertMatchCandidateName} in ${s.historyAlertMatchProjectName}`
+                    : s.historyAlertType === "known_fraud_pattern"
+                    ? "Known fraud pattern — matches a flagged candidate in another project"
+                    : "Previously seen in another project"
+                }
+                className={
+                  s.historyAlertType === "known_fraud_pattern"
+                    ? "shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 transition-colors hover:bg-rose-200 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25"
+                    : "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-400 dark:hover:bg-amber-500/25"
+                }
+              >
+                {s.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
+              </Link>
+            )}
             {s.linkedInMode && (
               <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
             )}

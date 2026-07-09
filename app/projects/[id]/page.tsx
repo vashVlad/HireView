@@ -21,6 +21,7 @@ import type {
   JDAnalysis, Project, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
+import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
   clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
@@ -64,18 +65,6 @@ function formatActionText(a: ScreeningAction, candidateName: string): string {
     case "credibility_check": return `ran a credibility check on ${candidateName}`;
     default: return `updated ${candidateName}`;
   }
-}
-
-const AVATAR_COLORS = ["bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500", "bg-cyan-500", "bg-indigo-500"];
-
-function avatarColor(email: string): string {
-  let hash = 0;
-  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
-}
-
-function avatarInitial(email: string): string {
-  return email.trim().charAt(0).toUpperCase() || "?";
 }
 
 // ── Filters tab ────────────────────────────────────────────────────────────
@@ -635,6 +624,26 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     >
                       Duplicate detected
                     </button>
+                  )}
+                  {s.historyAlertType && (
+                    <Link
+                      href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
+                      onClick={(e) => e.stopPropagation()}
+                      title={
+                        s.historyAlertMatchCandidateName && s.historyAlertMatchProjectName
+                          ? `Matches ${s.historyAlertMatchCandidateName} in ${s.historyAlertMatchProjectName}`
+                          : s.historyAlertType === "known_fraud_pattern"
+                          ? "Known fraud pattern — matches a flagged candidate in another project"
+                          : "Previously seen in another project"
+                      }
+                      className={
+                        s.historyAlertType === "known_fraud_pattern"
+                          ? "shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 transition-colors hover:bg-rose-200 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25"
+                          : "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-400 dark:hover:bg-amber-500/25"
+                      }
+                    >
+                      {s.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
+                    </Link>
                   )}
                   {s.linkedInMode && (
                     <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>

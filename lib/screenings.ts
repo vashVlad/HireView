@@ -2,10 +2,18 @@ import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
 import { extractResumeText } from "./parseResume";
 import { generateFingerprint } from "./generateFingerprint";
-import { saveFingerprint, findDuplicateMatch, markDuplicatePair } from "./resumeFingerprints";
+import {
+  saveFingerprint,
+  findDuplicateMatch,
+  markDuplicatePair,
+  findCrossProjectMatch,
+  markHistoryAlertPair,
+  getScreeningFraudSignals,
+} from "./resumeFingerprints";
 import { logAction } from "./screeningActions";
 import { getProject } from "./projects";
 import { getPrimaryTeamId } from "./teams";
+import { getAuthUser } from "./auth";
 import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
   Recommendation, ScreeningRecord, TrackerEntry, TrackerStage,
@@ -40,6 +48,8 @@ interface ScreeningRow {
   project_id: number | null;
   duplicate_flag: boolean | null;
   duplicate_match_id: number | null;
+  history_alert_type: string | null;
+  history_alert_match_id: number | null;
   previous_status: CandidateStatus | null;
   created_at: string;
 }
@@ -73,6 +83,10 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.project_id != null ? { projectId: row.project_id } : {}),
     duplicateFlag: row.duplicate_flag ?? false,
     ...(row.duplicate_match_id != null ? { duplicateMatchId: row.duplicate_match_id } : {}),
+    ...(row.history_alert_type === "previously_seen" || row.history_alert_type === "known_fraud_pattern"
+      ? { historyAlertType: row.history_alert_type }
+      : {}),
+    ...(row.history_alert_match_id != null ? { historyAlertMatchId: row.history_alert_match_id } : {}),
     ...(row.previous_status != null ? { previousStatus: row.previous_status } : {}),
     createdAt: row.created_at,
   };
@@ -142,15 +156,26 @@ export async function saveScreening(params: {
   const screeningId = insert.data.id;
 
   // Best-effort, non-throwing (logAction swallows its own errors).
-  await logAction({ screeningId, userId, actionType: "created" });
+  //
+  // Attribution needs the TRUE acting user, not the `userId` param above —
+  // that comes from callers via userIdFilter(), which deliberately returns
+  // undefined for admin (it was built as a query-scoping helper: "admin sees
+  // everything, no filter needed"). Reusing it for attribution silently
+  // dropped admin-run screenings from the Activity timeline. Re-resolving
+  // the session user here fixes that without touching screen-resumes/route.ts
+  // (do-not-touch) — both callers of saveScreening already require an
+  // authenticated user before reaching this point, so this always succeeds.
+  const actingUser = await getAuthUser().catch(() => null);
+  await logAction({ screeningId, userId: actingUser?.id ?? userId, actionType: "created" });
 
   // Best-effort: fingerprinting/duplicate-detection failures must never block
   // a screening from being saved. Runs after the insert so a failure here
   // can't lose the screening itself.
+  let becameDuplicate = false;
   try {
     const resumeText = await extractResumeText(result.fileName, resumeFile);
     const fingerprint = await generateFingerprint(resumeText);
-    await saveFingerprint({ screeningId, projectId, fingerprint });
+    await saveFingerprint({ screeningId, projectId, teamId, fingerprint });
     const match = await findDuplicateMatch({
       projectId,
       excludeScreeningId: screeningId,
@@ -158,6 +183,28 @@ export async function saveScreening(params: {
     });
     if (match) {
       await markDuplicatePair(screeningId, match.screeningId);
+      becameDuplicate = true;
+    }
+
+    // Phase 1.4 — Candidate History Alert. Same fingerprint, different project,
+    // same team: a resubmission signal distinct from same-project duplication
+    // above. Only meaningful with both a project and a team to scope "cross
+    // project" against — skip silently otherwise (e.g. no project assigned).
+    if (projectId != null && teamId != null) {
+      const crossMatch = await findCrossProjectMatch({
+        teamId,
+        excludeProjectId: projectId,
+        excludeScreeningId: screeningId,
+        fingerprint,
+      });
+      if (crossMatch) {
+        const matchedSignals = await getScreeningFraudSignals(crossMatch.screeningId);
+        const alertType =
+          becameDuplicate || matchedSignals.duplicateFlag || matchedSignals.historyAlertType === "known_fraud_pattern"
+            ? "known_fraud_pattern"
+            : "previously_seen";
+        await markHistoryAlertPair(screeningId, crossMatch.screeningId, alertType);
+      }
     }
   } catch (err) {
     console.error("Duplicate fingerprinting failed (screening still saved):", err);
@@ -167,6 +214,52 @@ export async function saveScreening(params: {
 }
 
 // ── List ───────────────────────────────────────────────────────────────────
+
+const SCREENING_COLUMNS =
+  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, previous_status, created_at";
+
+/**
+ * Fills in the matched candidate's name and project (name + id) for any
+ * record carrying a Phase 1.4 history alert, so the UI can render "previously
+ * seen in <project>" and link to it — the match is very often in a project
+ * that isn't otherwise loaded on the current page (unlike same-project
+ * duplicates, which the page's own screening list already contains).
+ */
+async function enrichHistoryAlerts(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  const matchIds = [...new Set(records.map((r) => r.historyAlertMatchId).filter((id): id is number => id != null))];
+  if (matchIds.length === 0) return records;
+
+  const supabase = getSupabaseClient();
+  const { data: matched, error } = await supabase
+    .from("screenings")
+    .select("id, candidate_name, project_id")
+    .in("id", matchIds)
+    .returns<{ id: number; candidate_name: string; project_id: number | null }[]>();
+  if (error || !matched) return records; // best-effort — alert flag itself still renders without the link
+
+  const projectIds = [...new Set(matched.map((m) => m.project_id).filter((id): id is number => id != null))];
+  const { data: projects } = await supabase
+    .from("projects")
+    .select("id, name")
+    .in("id", projectIds)
+    .returns<{ id: number; name: string }[]>();
+  const projectNameById = new Map((projects ?? []).map((p) => [p.id, p.name]));
+  const matchedById = new Map(matched.map((m) => [m.id, m]));
+
+  return records.map((r) => {
+    if (r.historyAlertMatchId == null) return r;
+    const m = matchedById.get(r.historyAlertMatchId);
+    if (!m) return r;
+    return {
+      ...r,
+      historyAlertMatchCandidateName: m.candidate_name,
+      ...(m.project_id != null ? { historyAlertMatchProjectId: m.project_id } : {}),
+      ...(m.project_id != null && projectNameById.has(m.project_id)
+        ? { historyAlertMatchProjectName: projectNameById.get(m.project_id) }
+        : {}),
+    };
+  });
+}
 
 /**
  * teamIds: undefined = no filter (admin, sees all). Empty array = recruiter
@@ -184,9 +277,7 @@ export async function listScreenings(
 
   let request = supabase
     .from("screenings")
-    .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, previous_status, created_at"
-    )
+    .select(SCREENING_COLUMNS)
     .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
     .limit(200);
 
@@ -199,20 +290,18 @@ export async function listScreenings(
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
 
-  return (data ?? []).map(rowToRecord);
+  return enrichHistoryAlerts((data ?? []).map(rowToRecord));
 }
 
 export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("screenings")
-    .select(
-      "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, previous_status, created_at"
-    )
+    .select(SCREENING_COLUMNS)
     .in("id", ids)
     .returns<ScreeningRow[]>();
   if (error) throw error;
-  return (data ?? []).map(rowToRecord);
+  return enrichHistoryAlerts((data ?? []).map(rowToRecord));
 }
 
 // ── Get resume ─────────────────────────────────────────────────────────────
