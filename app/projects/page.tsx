@@ -4,6 +4,18 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
 import type { JDAnalysis, ProjectSummary } from "@/lib/types";
+import { avatarColor, avatarInitial } from "@/lib/avatarColor";
+
+interface TeamMember {
+  userId: string;
+  email: string | null;
+}
+
+interface TeamInfo {
+  id: number;
+  name: string;
+  members: TeamMember[];
+}
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -294,17 +306,93 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
+// ── Team grouping ──────────────────────────────────────────────────────────
+
+/** Groups projects by team, preserving first-seen team order; untagged projects go last under "Unassigned." */
+function groupByTeam(items: ProjectSummary[]): { key: string; label: string; items: ProjectSummary[] }[] {
+  const groups = new Map<string, { key: string; label: string; items: ProjectSummary[] }>();
+  for (const p of items) {
+    const key = p.teamId != null ? String(p.teamId) : "unassigned";
+    const label = p.teamId != null ? p.teamName ?? `Team ${p.teamId}` : "Unassigned";
+    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+    groups.get(key)!.items.push(p);
+  }
+  return [...groups.values()];
+}
+
+function TeamMemberChips({ members }: { members: TeamMember[] }) {
+  if (members.length === 0) return null;
+  return (
+    <span className="flex items-center -space-x-1.5">
+      {members.map((m) => {
+        const label = m.email ?? m.userId;
+        return (
+          <span
+            key={m.userId}
+            title={label}
+            className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-white ring-2 ring-white dark:ring-zinc-950 ${avatarColor(label)}`}
+          >
+            {avatarInitial(label)}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function TeamGroupedGrid({ items, dimmed, teamsById }: { items: ProjectSummary[]; dimmed?: boolean; teamsById: Map<number, TeamInfo> }) {
+  const groups = groupByTeam(items);
+  // Single-team view (the common case) skips the header — nothing to disambiguate yet.
+  if (groups.length <= 1) {
+    return (
+      <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 ${dimmed ? "opacity-60" : ""}`}>
+        {items.map((p) => <ProjectCard key={p.id} project={p} />)}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-6">
+      {groups.map((g) => {
+        const teamId = g.key === "unassigned" ? null : Number(g.key);
+        const members = teamId != null ? teamsById.get(teamId)?.members ?? [] : [];
+        return (
+          <div key={g.key} className="flex flex-col gap-3">
+            <div className="flex items-center gap-2.5">
+              <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                {g.label}
+                <span className="font-normal normal-case text-zinc-300 dark:text-zinc-600">· {g.items.length}</span>
+              </h4>
+              <TeamMemberChips members={members} />
+            </div>
+            <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 ${dimmed ? "opacity-60" : ""}`}>
+              {g.items.map((p) => <ProjectCard key={p.id} project={p} />)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [teamsById, setTeamsById] = useState<Map<number, TeamInfo>>(new Map());
   const [loading, setLoading] = useState(true);
   const [showNewRole, setShowNewRole] = useState(false);
 
   useEffect(() => {
-    fetch("/api/projects")
-      .then((r) => r.json())
-      .then((data) => setProjects(data.projects ?? []))
+    Promise.all([
+      fetch("/api/projects").then((r) => r.json()),
+      fetch("/api/teams").then((r) => r.json()),
+    ])
+      .then(([projectsData, teamsData]) => {
+        setProjects(projectsData.projects ?? []);
+        const teams: TeamInfo[] = teamsData.teams ?? [];
+        setTeamsById(new Map(teams.map((t) => [t.id, t])));
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
@@ -363,11 +451,7 @@ export default function ProjectsPage() {
               </button>
             </div>
 
-            {active.length > 0 && (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {active.map((p) => <ProjectCard key={p.id} project={p} />)}
-              </div>
-            )}
+            {active.length > 0 && <TeamGroupedGrid items={active} teamsById={teamsById} />}
 
             {active.length === 0 && (
               <p className="text-sm text-zinc-400 dark:text-zinc-500">No active roles. All roles have been archived.</p>
@@ -376,9 +460,7 @@ export default function ProjectsPage() {
             {archived.length > 0 && (
               <div className="flex flex-col gap-4">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Archived</h3>
-                <div className="grid grid-cols-1 gap-4 opacity-60 sm:grid-cols-2 lg:grid-cols-3">
-                  {archived.map((p) => <ProjectCard key={p.id} project={p} />)}
-                </div>
+                <TeamGroupedGrid items={archived} dimmed teamsById={teamsById} />
               </div>
             )}
           </div>

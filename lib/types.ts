@@ -122,6 +122,12 @@ export interface ScreeningRecord {
   projectId?: number;
   duplicateFlag: boolean;
   duplicateMatchId?: number;
+  /** Phase 1.4 — cross-project fingerprint match within the same team. */
+  historyAlertType?: "previously_seen" | "known_fraud_pattern";
+  historyAlertMatchId?: number;
+  historyAlertMatchProjectId?: number;
+  historyAlertMatchProjectName?: string;
+  historyAlertMatchCandidateName?: string;
   previousStatus?: CandidateStatus;
   createdAt: string;
 }
@@ -178,6 +184,7 @@ export interface Project {
 export interface ProjectSummary extends Project {
   screeningCount: number;
   interviewCount: number;
+  teamName?: string;
 }
 
 export interface FilterConfig {
