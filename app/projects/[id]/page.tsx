@@ -15,11 +15,12 @@ import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusSelect } from "@/components/StatusSelect";
 import { TrackerStageSelect } from "@/components/TrackerStageSelect";
-import { TRACKER_STAGES } from "@/lib/types";
+import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, CredibilitySignal, FullTrackerData,
   JDAnalysis, Project, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
+import type { ScreeningAction } from "@/lib/screeningActions";
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
   clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
@@ -50,6 +51,31 @@ function formatStatusDate(iso: string) {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatActionText(a: ScreeningAction, candidateName: string): string {
+  switch (a.actionType) {
+    case "created": return `screened ${candidateName}`;
+    case "status_change": return `moved ${candidateName} to ${CANDIDATE_STATUS_LABELS[a.toValue as CandidateStatus] ?? a.toValue}`;
+    case "stage_change": return `moved ${candidateName} to ${a.toValue} stage`;
+    case "flagged": return `flagged ${candidateName}`;
+    case "unflagged": return `removed the flag from ${candidateName}`;
+    case "note": return `added a note on ${candidateName}`;
+    case "credibility_check": return `ran a credibility check on ${candidateName}`;
+    default: return `updated ${candidateName}`;
+  }
+}
+
+const AVATAR_COLORS = ["bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500", "bg-cyan-500", "bg-indigo-500"];
+
+function avatarColor(email: string): string {
+  let hash = 0;
+  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function avatarInitial(email: string): string {
+  return email.trim().charAt(0).toUpperCase() || "?";
 }
 
 // ── Filters tab ────────────────────────────────────────────────────────────
@@ -432,6 +458,18 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [pendingFlagNote, setPendingFlagNote] = useState("");
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
+  const [actionsMap, setActionsMap] = useState<Record<number, ScreeningAction[] | "loading">>({});
+
+  // Lazy-load the attribution timeline the first time a card is expanded.
+  useEffect(() => {
+    if (expandedId == null || actionsMap[expandedId] !== undefined) return;
+    const id = expandedId;
+    setActionsMap((prev) => ({ ...prev, [id]: "loading" }));
+    fetch(`/api/history/${id}/actions`)
+      .then((res) => res.json())
+      .then((data) => setActionsMap((prev) => ({ ...prev, [id]: data.actions ?? [] })))
+      .catch(() => setActionsMap((prev) => ({ ...prev, [id]: [] })));
+  }, [expandedId, actionsMap]);
 
   useEffect(() => {
     setScreenings(initialScreenings);
@@ -775,6 +813,30 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     onBlur={(e) => saveNotes(s.id, e.target.value)}
                     placeholder="Add notes about this candidate..." rows={3}
                     className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
+                </div>
+
+                {/* ── Attribution timeline ──────────────────────────────── */}
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Activity</p>
+                  {actionsMap[s.id] === undefined || actionsMap[s.id] === "loading" ? (
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500">Loading…</p>
+                  ) : (actionsMap[s.id] as ScreeningAction[]).length === 0 ? (
+                    <p className="text-xs text-zinc-400 dark:text-zinc-500">No activity recorded yet.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-1.5">
+                      {(actionsMap[s.id] as ScreeningAction[]).map((a) => (
+                        <li key={a.id} className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(a.userEmail)}`}>
+                            {avatarInitial(a.userEmail)}
+                          </span>
+                          <span>
+                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">{a.userEmail}</span>{" "}
+                            {formatActionText(a, s.candidateName)} on {formatDate(a.createdAt)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 {/* Calibration feedback */}

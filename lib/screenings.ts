@@ -3,6 +3,7 @@ import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
 import { extractResumeText } from "./parseResume";
 import { generateFingerprint } from "./generateFingerprint";
 import { saveFingerprint, findDuplicateMatch, markDuplicatePair } from "./resumeFingerprints";
+import { logAction } from "./screeningActions";
 import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
   Recommendation, ScreeningRecord, TrackerEntry, TrackerStage,
@@ -121,6 +122,9 @@ export async function saveScreening(params: {
 
   const screeningId = insert.data.id;
 
+  // Best-effort, non-throwing (logAction swallows its own errors).
+  await logAction({ screeningId, userId, actionType: "created" });
+
   // Best-effort: fingerprinting/duplicate-detection failures must never block
   // a screening from being saved. Runs after the insert so a failure here
   // can't lose the screening itself.
@@ -222,7 +226,8 @@ export async function updateScreening(
     photoUrl?: string;
     linkedInPdfPath?: string;
     interviewQuestions?: string[];
-  }
+  },
+  actorUserId?: string
 ): Promise<void> {
   const supabase = getSupabaseClient();
   const update: Record<string, unknown> = {};
@@ -237,19 +242,55 @@ export async function updateScreening(
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   if (fields.interviewQuestions !== undefined) update.interview_questions = fields.interviewQuestions;
   if (Object.keys(update).length === 0) return;
+
+  // Attribution needs the "before" value for status/flagged — everything else
+  // (notes, credibility) is logged as an event without a value diff, since
+  // diffing free text or a whole credibility object isn't useful in a timeline.
+  let before: { status: CandidateStatus; flagged: boolean } | null = null;
+  if (actorUserId && (fields.status !== undefined || fields.flagged !== undefined)) {
+    const { data } = await supabase
+      .from("screenings")
+      .select("status, flagged")
+      .eq("id", id)
+      .maybeSingle<{ status: CandidateStatus; flagged: boolean }>();
+    before = data;
+  }
+
   const { error } = await supabase.from("screenings").update(update).eq("id", id);
   if (error) throw error;
+
+  if (actorUserId) {
+    if (fields.status !== undefined) {
+      await logAction({ screeningId: id, userId: actorUserId, actionType: "status_change", fromValue: before?.status ?? null, toValue: fields.status });
+    }
+    if (fields.flagged !== undefined) {
+      await logAction({
+        screeningId: id,
+        userId: actorUserId,
+        actionType: fields.flagged ? "flagged" : "unflagged",
+        fromValue: before?.flagged != null ? String(before.flagged) : null,
+        toValue: String(fields.flagged),
+      });
+    }
+    if (fields.notes !== undefined) {
+      await logAction({ screeningId: id, userId: actorUserId, actionType: "note" });
+    }
+    if (fields.credibility !== undefined) {
+      await logAction({ screeningId: id, userId: actorUserId, actionType: "credibility_check" });
+    }
+  }
 }
 
-export async function updateScreeningNotes(id: number, notes: string): Promise<void> {
-  return updateScreening(id, { notes });
+export async function updateScreeningNotes(id: number, notes: string, actorUserId?: string): Promise<void> {
+  return updateScreening(id, { notes }, actorUserId);
 }
 
 export async function updateScreeningCredibility(
   id: number,
-  credibility: CredibilityAssessment
+  credibility: CredibilityAssessment,
+  actorUserId?: string
 ): Promise<void> {
-  return updateScreening(id, { credibility });
+  return updateScreening(id, { credibility }, actorUserId);
 }
 
 export async function deleteScreening(id: number): Promise<void> {
@@ -287,9 +328,21 @@ export async function getStatusCounts(
 
 export async function upsertTrackerEntry(
   screeningId: number,
-  fields: Partial<Omit<TrackerEntry, "screeningId" | "createdAt">>
+  fields: Partial<Omit<TrackerEntry, "screeningId" | "createdAt">>,
+  actorUserId?: string
 ): Promise<void> {
   const supabase = getSupabaseClient();
+
+  let beforeStage: TrackerStage | null = null;
+  if (actorUserId && fields.stage !== undefined) {
+    const { data } = await supabase
+      .from("tracker")
+      .select("stage")
+      .eq("screening_id", screeningId)
+      .maybeSingle<{ stage: TrackerStage | null }>();
+    beforeStage = data?.stage ?? null;
+  }
+
   const { error } = await supabase.from("tracker").upsert(
     {
       screening_id: screeningId,
@@ -311,6 +364,16 @@ export async function upsertTrackerEntry(
     { onConflict: "screening_id" }
   );
   if (error) throw error;
+
+  if (actorUserId && fields.stage !== undefined) {
+    await logAction({
+      screeningId,
+      userId: actorUserId,
+      actionType: "stage_change",
+      fromValue: beforeStage,
+      toValue: fields.stage,
+    });
+  }
 }
 
 export async function getTrackerStages(
@@ -361,10 +424,10 @@ export async function getFullTrackerEntries(
   return map;
 }
 
-export async function updateScreeningStatus(id: number, status: CandidateStatus): Promise<void> {
-  return updateScreening(id, { status });
+export async function updateScreeningStatus(id: number, status: CandidateStatus, actorUserId?: string): Promise<void> {
+  return updateScreening(id, { status }, actorUserId);
 }
 
-export async function updateScreeningFlag(id: number, flagged: boolean, flagNote?: string): Promise<void> {
-  return updateScreening(id, { flagged, ...(flagNote !== undefined && { flagNote }) });
+export async function updateScreeningFlag(id: number, flagged: boolean, flagNote?: string, actorUserId?: string): Promise<void> {
+  return updateScreening(id, { flagged, ...(flagNote !== undefined && { flagNote }) }, actorUserId);
 }

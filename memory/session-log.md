@@ -12,6 +12,16 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-08 (session 2) — Phase 1.2: Recruiter Attribution
+
+- New table `screening_actions` (screening_id, user_id, action_type, from_value, to_value, created_at) — append-only, full history, unlike previous_status/previous_stage which only hold the latest transition. `supabase-migration-screening-actions.sql`.
+- `lib/screeningActions.ts` — `logAction()` (best-effort, non-throwing), `getActionTimeline()` (fetches + resolves recruiter emails).
+- `actorUserId` threaded through `updateScreening` and its wrappers (`updateScreeningStatus`, `updateScreeningFlag`, `updateScreeningNotes`, `updateScreeningCredibility`) and `upsertTrackerEntry`, as an optional trailing param — sourced from `getAuthUser()` in `app/api/history/[id]/route.ts` and `app/api/tracker/[screeningId]/route.ts`. System-generated updates (trajectory regen, interview questions, photo, LinkedIn PDF) don't pass a userId, so they don't show up as recruiter actions.
+- New `GET /api/history/[id]/actions` route, consumed lazily by the expanded Pipeline card — new "Activity" section renders each action as a sentence: "vlad@... screened John on Jul 7."
+- `screen-resumes/route.ts`, `scoreCandidate.ts`, and the other do-not-touch files were not modified.
+- **Pending Vlad action:** run `supabase-migration-screening-actions.sql` in Supabase, then test success criteria (open a candidate card, confirm the activity timeline shows names + timestamps for status/stage/flag/note/credibility changes).
+- **What's next:** 1.3 Teams Architecture.
+
 ## 2026-07-08 — Phase 1.1: Duplicate Resume Detection
 
 - New table `resume_fingerprints` (skills_hash, responsibility_vectors, metric_claims, career_arc_signature) scoped by screening_id/project_id — `supabase-migration-fingerprints.sql`. New `duplicate_flag`/`duplicate_match_id` columns on `screenings`.
