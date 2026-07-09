@@ -122,6 +122,7 @@ export interface ScreeningRecord {
   projectId?: number;
   duplicateFlag: boolean;
   duplicateMatchId?: number;
+  previousStatus?: CandidateStatus;
   createdAt: string;
 }
 
@@ -140,6 +141,7 @@ export interface FullTrackerData {
   onHoldReason?: string;
   scheduled?: boolean;
   interviewDate?: string;
+  previousStage?: TrackerStage;
 }
 
 // ── Calibration ───────────────────────────────────────────────────────────────

@@ -4,6 +4,9 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-08 — previous_status/previous_stage tracked via DB trigger, not app-code, and status/stage were not renamed.**
+FunnelView (separate standalone dashboard, reads a HireView CSV export) needs "where did this candidate come from" data, which HireView never recorded — status/stage get overwritten in place, no history. Considered renaming `status`→`current_status` + adding `previous_status`, but `status` is referenced throughout the app (types, queries, every screening/tracker component) and the additive-only schema rule forbids renaming existing columns. Instead added `previous_status`/`previous_stage` columns kept in sync by a Postgres BEFORE UPDATE trigger — captures every change regardless of which code path makes it, not just ones going through a specific app function. This is a lightweight stopgap, not full Feature 1.2 (Recruiter Attribution) — no who-changed-it data, just before/after value. Existing rows have NULL previous_status/previous_stage until their next change; no backfill possible since prior values were never recorded.
+
 **2026-07-08 — Duplicate detection (1.1) matches within the same project only, not cross-project/team-wide.**
 Teams (1.3) doesn't exist yet, so there's no defined "same team" boundary for cross-project matching — that's explicitly Feature 1.4's job once Teams ships. Project-scoped matching avoids leaking candidate identities across recruiter isolation boundaries prematurely, and matches the Enterprise Plan's own test case (both resumes uploaded to the same project).
 
