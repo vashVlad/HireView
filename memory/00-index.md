@@ -53,8 +53,10 @@ This folder is HireView's persistent memory. Read this first, every session, bef
 - 1.1 Duplicate Resume Detection `CRITICAL` — match on skills hash, responsibility vectors, metric claims, career arc. Never on names/contact/company — **shipped 2026-07-08, merged to main (PR #2)**
 - 1.2 Recruiter Attribution `CRITICAL` — every action logged with name + timestamp — **shipped 2026-07-09, merged to main**
 - 1.3 Teams Architecture `CRITICAL` — Admin → Team → Projects → Users, full isolation — **shipped 2026-07-09, committed (b33f2b1), PR open on phase-1-3-teams-architecture, not yet merged**
-- 1.4 Candidate History Alert `HIGH` — reuses fingerprints from 1.1 — **shipped 2026-07-09 (migrated + live-tested + team chips/attribution follow-ups confirmed), not yet committed to git**
-- 1.5 Fraud-Aware Interview Questions `HIGH` — reuses existing interview questions + credibility checker — **not started**
+- 1.4 Candidate History Alert `HIGH` — reuses fingerprints from 1.1 — **shipped 2026-07-09, committed (ab916ce on phase-1-3-teams-architecture, on top of b33f2b1), PR updated, not yet merged**
+- 1.5 Fraud-Aware Interview Questions `HIGH` — reuses existing interview questions + credibility checker — **shipped 2026-07-09, live-tested, not yet committed to git**
+
+**Phase 1 is fully complete (2026-07-09).** All of 1.1–1.5 shipped and live-tested. FunnelView below is unblocked.
 
 **FunnelView — Manager Visibility (after Phase 1, before Phase 2)**
 Admin-only, isolated module inside HireView (`app/funnelview/`, `lib/funnelview/`), live data, no CSV/external tools. See [[HireView_Roadmap]] and [[HireView_Enterprise_Plan]] for full details. **Gated on Phase 1 being fully complete — do not start until 1.2–1.5 ship.**

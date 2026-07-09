@@ -18,23 +18,48 @@ const QUESTIONS_TOOL = {
   },
 };
 
+export interface FraudSignals {
+  duplicateFlag: boolean;
+  historyAlertType?: "previously_seen" | "known_fraud_pattern";
+  credibilityDiscrepancies: string[];
+}
+
+/** True if there's anything worth asking about — callers should omit fraudSignals entirely otherwise. */
+export function hasFraudSignal(s: FraudSignals): boolean {
+  return s.duplicateFlag || s.historyAlertType != null || s.credibilityDiscrepancies.length > 0;
+}
+
+function buildFraudBlock(s: FraudSignals): string {
+  const lines: string[] = [];
+  if (s.duplicateFlag) lines.push("- This resume's content matches another candidate submitted to the same role — possible identity-swap fraud.");
+  if (s.historyAlertType === "known_fraud_pattern") lines.push("- This content pattern has a confirmed fraud history in another role.");
+  else if (s.historyAlertType === "previously_seen") lines.push("- This content pattern was previously submitted to a different role.");
+  for (const d of s.credibilityDiscrepancies) lines.push(`- Credibility check discrepancy: ${d}`);
+  return lines.join("\n");
+}
+
 export async function generateInterviewQuestions(params: {
   candidateName: string;
   careerTrajectory: string;
   concerns: string[];
   jobDescription: string;
+  fraudSignals?: FraudSignals;
 }): Promise<string[]> {
-  const { candidateName, careerTrajectory, concerns, jobDescription } = params;
+  const { candidateName, careerTrajectory, concerns, jobDescription, fraudSignals } = params;
 
   const concernsBlock = concerns.length > 0
     ? `\nCONCERNS FLAGGED DURING SCREENING:\n${concerns.map((c) => `- ${c}`).join("\n")}`
+    : "";
+
+  const fraudInstructions = fraudSignals
+    ? `\n\nThis candidate has fraud/credibility signals flagged. At least 2 of the questions must directly probe these specific issues — ask exactly what needs clarifying, don't soften it:\n${buildFraudBlock(fraudSignals)}\n\nThe remaining questions can cover standard role-fit topics below.`
     : "";
 
   const userContent = `You are a recruiting assistant preparing a recruiter for a call with ${candidateName}.
 
 Write 3–5 short, direct interview questions for this candidate. Each question must be under 15 words. No preamble, no "Can you walk me through..." framing — just the direct question. Reference actual companies, transitions, or signals from their background.
 
-Cover: gaps or short stints, unclear transitions, domain changes, anything inflated, and one question to validate their strongest signal.
+Cover: gaps or short stints, unclear transitions, domain changes, anything inflated, and one question to validate their strongest signal.${fraudInstructions}
 
 JOB DESCRIPTION (role being hired for):
 ${jobDescription.slice(0, 800)}
