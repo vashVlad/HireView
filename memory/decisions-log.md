@@ -4,6 +4,12 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-08 — Recruiter attribution logged via app-level threading, not a DB trigger (unlike previous_status/previous_stage).**
+A trigger can't know which HireView user made a change — the app talks to Supabase via a single service-role client, so the DB only ever sees that role, never the acting recruiter. `actorUserId` is threaded through `updateScreening`/`updateScreeningStatus`/`updateScreeningFlag`/`updateScreeningNotes`/`updateScreeningCredibility`/`upsertTrackerEntry` as an optional trailing param (backward compatible — existing calls without it still compile), sourced from `getAuthUser()` in the two API routes that handle recruiter-driven changes (`history/[id]`, `tracker/[screeningId]`). System-generated updates (career trajectory regen, interview questions, photo URL, LinkedIn PDF path) don't pass a userId and so don't appear in the timeline — only actual recruiter actions do.
+
+**2026-07-08 — screening_actions is a full append-only history; previous_status/previous_stage only ever hold the latest transition.**
+The two serve different purposes: previous_status/previous_stage (Feature 1.1-era stopgap) are enough for FunnelView's "where did this candidate come from right now" need, but can't reconstruct a full timeline since they get overwritten on every change. screening_actions logs one row per action instead, so the whole history — every status change, stage move, flag, note, credibility check, all with who and when — is reconstructable.
+
 **2026-07-08 — FunnelView built inside HireView as isolated module, not separate repo.**
 Data already lives in HireView — exporting to CSV and re-uploading to a separate tool adds overhead with no benefit at this stage. Isolated module (`app/funnelview/` + `lib/funnelview/`) ships fast now and has a clean extraction seam if other departments need a standalone version later. Admin-only access slots into existing gate — no new role needed. `previous_status`/`previous_stage` tracking already implemented via Postgres trigger. Gated on Phase 1 (1.1→1.5) being fully complete before build starts — as of this entry, only 1.1 has shipped.
 

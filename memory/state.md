@@ -39,6 +39,10 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 
 - **Duplicate Resume Detection (Phase 1.1 — merged to main)** — content fingerprinting (skills hash, responsibility vectors, metric claims, career arc signature) built from a second Claude extraction call per saved candidate, deliberately never matching on name/contact/company. New `resume_fingerprints` table, `duplicate_flag`/`duplicate_match_id` on `screenings`. Red "Duplicate detected" badge on collapsed Pipeline and All Candidates cards, click-to-jump to the matching candidate. Matching scoped to same project for v1 — cross-project matching is Feature 1.4, once Teams (1.3) exists. Built on `phase-1-fraud-prevention` (merged from `generalize-credibility-crossref` + `main`), verified with swapped-identity test resumes, PR #2 merged into `main` 2026-07-08.
 
+## What's shipped (added 2026-07-08, Phase 1.2 — pending Vlad's test)
+
+- **Recruiter Attribution** — full append-only action history (`screening_actions` table) logging status changes, tracker stage moves, flags, notes, and credibility checks with who and when. Threaded through `updateScreening`'s wrapper functions and `upsertTrackerEntry` via an optional `actorUserId` param, sourced from `getAuthUser()` in the two API routes that handle recruiter-driven changes. "Activity" section on the expanded Pipeline card shows the timeline as plain sentences ("vlad@... screened John on Jul 7"). Not yet committed, migrated, or tested against a live environment.
+
 ## What's NOT shipped yet
 
 - **Outreach drafting (Phase 5)** — auto-draft LinkedIn messages. Repeatedly listed as next, never started.
@@ -47,6 +51,7 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 ## Deploy / migration status
 
 **Pending as of 2026-07-08 (all manual — Vlad must run these):**
+-1. `supabase-migration-screening-actions.sql` — adds screening_actions table (Feature 1.2)
 0. `supabase-migration-fingerprints.sql` — adds resume_fingerprints table, duplicate_flag/duplicate_match_id on screenings (Feature 1.1)
 1. `supabase-migration-interview.sql` — adds interview_questions, linkedin_pdf_path, photo_url
 2. `supabase-migration-multiuser.sql` — adds user_id to 3 tables + indexes
