@@ -13,6 +13,7 @@ const NAV_ITEMS = [
 
 const ADMIN_NAV_ITEMS = [
   { href: "/analytics", label: "Analytics" },
+  { href: "/funnelview", label: "FunnelView" },
   { href: "/admin/users", label: "Team" },
 ] as const;
 
