@@ -4,6 +4,9 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-08 — FunnelView built inside HireView as isolated module, not separate repo.**
+Data already lives in HireView — exporting to CSV and re-uploading to a separate tool adds overhead with no benefit at this stage. Isolated module (`app/funnelview/` + `lib/funnelview/`) ships fast now and has a clean extraction seam if other departments need a standalone version later. Admin-only access slots into existing gate — no new role needed. `previous_status`/`previous_stage` tracking already implemented via Postgres trigger. Gated on Phase 1 (1.1→1.5) being fully complete before build starts — as of this entry, only 1.1 has shipped.
+
 **2026-07-08 — previous_status/previous_stage tracked via DB trigger, not app-code, and status/stage were not renamed.**
 FunnelView (separate standalone dashboard, reads a HireView CSV export) needs "where did this candidate come from" data, which HireView never recorded — status/stage get overwritten in place, no history. Considered renaming `status`→`current_status` + adding `previous_status`, but `status` is referenced throughout the app (types, queries, every screening/tracker component) and the additive-only schema rule forbids renaming existing columns. Instead added `previous_status`/`previous_stage` columns kept in sync by a Postgres BEFORE UPDATE trigger — captures every change regardless of which code path makes it, not just ones going through a specific app function. This is a lightweight stopgap, not full Feature 1.2 (Recruiter Attribution) — no who-changed-it data, just before/after value. Existing rows have NULL previous_status/previous_stage until their next change; no backfill possible since prior values were never recorded.
 

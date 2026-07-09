@@ -56,6 +56,19 @@ Reuses: existing interview questions feature, existing credibility checker.
 
 ---
 
+## FUNNELVIEW — MANAGER VISIBILITY (after Phase 1, before Phase 2)
+*Give the hiring manager direct funnel visibility without recruiter mediation.*
+
+Formerly logged as Phase 3.3 "Role-Based Analytics" under Phase 3 (post-demo), assumed to depend on Teams (1.3). That dependency is soft, not hard: v1 is admin-gated the same way Team/Statistics already are — no team-scoping needed yet, so no need to wait for Teams or "post-demo." Moved here since there's a live stakeholder need now and nothing else blocks it once 1.5 ships.
+
+**Scope:** Admin-only view inside HireView showing the full candidate funnel — Screened → Passed Threshold → Reached Out → TA → L1 → L2 → Offer → Archived — with conversion rate between each stage, inbound/outbound source split (via `linkedin_mode`), current + previous stage per candidate, recruiter attribution.
+
+**Architecture:** Isolated module — `app/funnelview/` (UI) + `lib/funnelview/` (data access, maps `screenings`/`tracker` rows into one clean funnel-record shape). No entanglement with core scoring files. The mapping layer is a deliberate seam: if this is ever needed by other departments as a standalone product, that same shape becomes a CSV/API contract and the module extracts cleanly with minimal rework.
+
+**Reuses:** `screenings`/`tracker` tables, `previous_status`/`previous_stage` (already shipped), existing `isAdmin` auth pattern. Does not require Teams (1.3).
+
+---
+
 ## PHASE 2 — INTELLIGENCE LAYER (30 DAYS)
 *Make HireView smarter than any recruiter working alone.*
 
@@ -85,10 +98,11 @@ Reuses: existing Credibility Checker — extend with LinkedIn-specific prompting
 
 **3.1 Proxy Interview Detection** — identity verification across interview → onboarding gap. Long-term play.
 **3.2 ATS/Reval Integration** — accept candidate submissions from external tools, run through fraud layer.
-**3.3 Role-Based Analytics** — director sees team-wide signals; recruiter sees only their pipeline.
 **3.4 Candidate Social Graph** — LinkedIn mutual connections and activity as fraud signals.
 
-All Phase 3 features reuse Teams architecture (1.3) and Credibility Checker.
+(3.3 Role-Based Analytics moved to FunnelView, above — no longer gated on Teams.)
+
+Remaining Phase 3 features reuse Teams architecture (1.3) and Credibility Checker.
 
 ---
 
@@ -151,6 +165,7 @@ All Phase 3 features reuse Teams architecture (1.3) and Credibility Checker.
 3. Reval integration opportunity → Phase 3.2
 4. Smart unified candidate view → Phase 2.3
 5. Fraud-aware interview questions → Phase 1.5
+6. Single view of all duplicate-flagged candidates → Phase 2.3 (logged 2026-07-08, surfaced during Phase 1.1 use)
 
 ---
 

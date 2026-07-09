@@ -23,6 +23,23 @@ HireView is not an ATS. It is the verification layer that makes any sourcing too
 
 **Reuse:** Credibility Checker (already built) feeds into 1.5. Existing multi-user auth feeds into 1.3. Existing interview questions feature feeds into 1.5.
 
+**Gate:** Phase 1 (1.1 → 1.5) must be fully complete and merged to main before FunnelView build starts. As of 2026-07-08: only 1.1 shipped.
+
+---
+
+## FUNNELVIEW — MANAGER VISIBILITY (after Phase 1, before Phase 2)
+*Give the hiring manager the complete candidate funnel in real time, without recruiter mediation.*
+
+Isolated module inside HireView, not a separate project — `app/funnelview/` (routes/UI), `lib/funnelview/` (data layer, maps `screenings`/`tracker` into one clean funnel-record shape). Admin-only, same gate as Team/Statistics — no new role. Live HireView data, no CSV export/import, no external tool, no Lever/LinkedIn connection.
+
+**Funnel:** Total Screened → Passed HireView Threshold → Reached Out (Active/Rejected) → TA → L1 → L2 → Offer → Archived/Rejected (with last stage reached). Split by source at every stage: Inbound (LinkedIn toggle OFF) vs Outbound (LinkedIn toggle ON). Per candidate: name, source, current stage, previous stage, recruiter who screened, conversion rate between stages.
+
+**Reuses:** `screenings`/`tracker` tables, `previous_status`/`previous_stage` (Postgres trigger, already merged to main), existing `isAdmin` gate.
+
+**What not to build:** CSV export/import flow, a new hiring-manager role, any Lever/LinkedIn/external connection, anything duplicating existing `/analytics`.
+
+**Extraction seam:** the `lib/funnelview/` mapping layer is deliberately clean so this can become a standalone app for other departments later, without being built as one now.
+
 ---
 
 ## PHASE 2 — INTELLIGENCE LAYER (NEXT 30 DAYS)
@@ -69,6 +86,7 @@ Phase 1 features 1.1 → 1.2 → 1.3 → 1.4 in that order. 1.5 added after 1.4 
 3. Reval integration opportunity (Phase 3.2)
 4. Smart unified candidate view (Phase 2.3)
 5. Fraud-aware interview questions (Phase 1.5)
+6. Recruiter wants a single place to view all duplicate-flagged candidates together, not just per-candidate badges scattered across pipelines (Phase 2.3 — logged 2026-07-08, surfaced during Phase 1.1 use)
 
 ## Competitive Position
 | Competitor | Their Strength | Their Gap | HireView Advantage |
