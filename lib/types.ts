@@ -94,6 +94,39 @@ export interface ScreenResumesError {
   error: string;
 }
 
+// ── Pre-screen duplicate check ───────────────────────────────────────────────
+// See app/api/screen-resumes/check-existing/route.ts — runs before any file
+// reaches the scoring route, so an exact re-upload never costs a Claude call.
+
+export interface CheckExistingResult {
+  fileName: string;
+  status: "new" | "duplicate" | "possible_update";
+  existing?: {
+    id: number;
+    candidateName: string;
+    fileName: string;
+    score: number;
+    mustHaveScore?: number;
+    niceToHaveScore?: number;
+    summary: string;
+    strengths: string[];
+    concerns: string[];
+    careerTrajectory?: string;
+    recommendation: Recommendation | null;
+  };
+}
+
+/**
+ * A candidate already saved in the project, keyed by normalized name — the
+ * only thing hashResumeText/normalizeFileName can't catch (two genuinely
+ * different resume files that turn out to name the same person). Compared
+ * client-side AFTER scoring, since candidate name doesn't exist before it.
+ */
+export interface ExistingCandidateRef {
+  id: number;
+  candidateName: string;
+}
+
 export interface ScreeningRecord {
   id: number;
   candidateName: string;
@@ -128,6 +161,13 @@ export interface ScreeningRecord {
   historyAlertMatchProjectId?: number;
   historyAlertMatchProjectName?: string;
   historyAlertMatchCandidateName?: string;
+  /**
+   * Same-project candidate-name match — a different resume file for a
+   * candidate with the same name already exists in this project, but the
+   * content doesn't match closely enough for duplicateFlag (Phase 1.1) to
+   * have caught it. Informational, not a fraud signal.
+   */
+  nameMatchId?: number;
   previousStatus?: CandidateStatus;
   createdAt: string;
 }

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
 import { extractResumeText } from "./parseResume";
 import { generateFingerprint } from "./generateFingerprint";
+import { hashResumeText, normalizeCandidateName } from "./resumeContentHash";
 import {
   saveFingerprint,
   findDuplicateMatch,
@@ -50,6 +51,7 @@ interface ScreeningRow {
   duplicate_match_id: number | null;
   history_alert_type: string | null;
   history_alert_match_id: number | null;
+  name_match_id: number | null;
   previous_status: CandidateStatus | null;
   created_at: string;
 }
@@ -87,9 +89,45 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
       ? { historyAlertType: row.history_alert_type }
       : {}),
     ...(row.history_alert_match_id != null ? { historyAlertMatchId: row.history_alert_match_id } : {}),
+    ...(row.name_match_id != null ? { nameMatchId: row.name_match_id } : {}),
     ...(row.previous_status != null ? { previousStatus: row.previous_status } : {}),
     createdAt: row.created_at,
   };
+}
+
+// ── Name match (same-project, free) ─────────────────────────────────────────
+//
+// Neither the content hash nor the fraud-pattern fingerprint catches "two
+// genuinely different resume files that happen to name the same candidate
+// in this project" — a resume screener persona vs. a research-focused one,
+// for example. Pure candidate_name comparison, no Claude call, informational
+// only (never implies fraud the way duplicateFlag/historyAlertType do).
+
+async function findNameMatchInProject(params: {
+  projectId: number;
+  candidateName: string;
+  excludeScreeningId: number;
+}): Promise<number | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("id, candidate_name")
+    .eq("project_id", params.projectId)
+    .neq("id", params.excludeScreeningId)
+    .returns<{ id: number; candidate_name: string }[]>();
+  if (error || !data) return null;
+
+  const target = normalizeCandidateName(params.candidateName);
+  const match = data.find((row) => normalizeCandidateName(row.candidate_name) === target);
+  return match?.id ?? null;
+}
+
+async function markNameMatchPair(idA: number, idB: number): Promise<void> {
+  const supabase = getSupabaseClient();
+  await Promise.all([
+    supabase.from("screenings").update({ name_match_id: idB }).eq("id", idA),
+    supabase.from("screenings").update({ name_match_id: idA }).eq("id", idB),
+  ]);
 }
 
 // ── Save ───────────────────────────────────────────────────────────────────
@@ -174,6 +212,15 @@ export async function saveScreening(params: {
   let becameDuplicate = false;
   try {
     const resumeText = await extractResumeText(result.fileName, resumeFile);
+
+    // Cheap exact-match dedupe signal for the pre-screen duplicate check
+    // (app/api/screen-resumes/check-existing) — independent of the fingerprint
+    // below, stored even if fingerprint matching fails downstream.
+    await supabase
+      .from("screenings")
+      .update({ resume_content_hash: hashResumeText(resumeText) })
+      .eq("id", screeningId);
+
     const fingerprint = await generateFingerprint(resumeText);
     await saveFingerprint({ screeningId, projectId, teamId, fingerprint });
     const match = await findDuplicateMatch({
@@ -184,6 +231,20 @@ export async function saveScreening(params: {
     if (match) {
       await markDuplicatePair(screeningId, match.screeningId);
       becameDuplicate = true;
+    }
+
+    // Free candidate-name check — skipped when this save already became a
+    // content duplicate (that pairing already implies a name match too;
+    // showing both badges pointing at the same candidate is just noise).
+    if (projectId != null && !becameDuplicate) {
+      const nameMatchId = await findNameMatchInProject({
+        projectId,
+        candidateName: result.candidateName,
+        excludeScreeningId: screeningId,
+      });
+      if (nameMatchId != null) {
+        await markNameMatchPair(screeningId, nameMatchId);
+      }
     }
 
     // Phase 1.4 — Candidate History Alert. Same fingerprint, different project,
@@ -216,7 +277,7 @@ export async function saveScreening(params: {
 // ── List ───────────────────────────────────────────────────────────────────
 
 const SCREENING_COLUMNS =
-  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, previous_status, created_at";
+  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, created_at";
 
 /**
  * Fills in the matched candidate's name and project (name + id) for any

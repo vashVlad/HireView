@@ -9,6 +9,13 @@ interface CrossReferenceCheckerProps {
   roleContext?: string;
   currentAssessment?: CredibilityAssessment;
   onComplete: (assessment: CredibilityAssessment) => void;
+  /**
+   * Pre-fills the cross-reference slot instead of requiring a manual pick —
+   * used when the "document" to compare against is a file already in hand
+   * (e.g. a fresh upload that matched an existing candidate by filename).
+   * Still requires the recruiter to click "Run credibility check" themselves.
+   */
+  initialFile?: File | null;
 }
 
 type CheckState = "idle" | "checking" | "error";
@@ -64,8 +71,8 @@ function FileSlot({
   );
 }
 
-export function CrossReferenceChecker({ screeningId, roleContext, currentAssessment, onComplete }: CrossReferenceCheckerProps) {
-  const [file, setFile] = useState<File | null>(null);
+export function CrossReferenceChecker({ screeningId, roleContext, currentAssessment, onComplete, initialFile }: CrossReferenceCheckerProps) {
+  const [file, setFile] = useState<File | null>(initialFile ?? null);
   const [checkState, setCheckState] = useState<CheckState>("idle");
   const [error, setError] = useState<string | null>(null);
 

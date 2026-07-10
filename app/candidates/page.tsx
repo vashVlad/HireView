@@ -140,6 +140,14 @@ function CandidateCard({
                 {s.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
+            {s.nameMatchId != null && (
+              <span
+                title="A different resume file for this candidate already exists in the same project"
+                className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-600 dark:bg-zinc-500/15 dark:text-zinc-400"
+              >
+                Name match
+              </span>
+            )}
             {s.linkedInMode && (
               <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
             )}

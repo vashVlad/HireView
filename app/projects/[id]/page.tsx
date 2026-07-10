@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import Link from "next/link";
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AlreadyScreenedCard } from "@/components/AlreadyScreenedCard";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
@@ -17,10 +18,11 @@ import { StatusSelect } from "@/components/StatusSelect";
 import { TrackerStageSelect } from "@/components/TrackerStageSelect";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
-  CandidateResult, CandidateStatus, CredibilityAssessment, CredibilitySignal, FullTrackerData,
-  JDAnalysis, Project, ScreenResumesError, ScreeningRecord, TrackerStage,
+  CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
+  ExistingCandidateRef, FullTrackerData, JDAnalysis, Project, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
+import { normalizeCandidateName } from "@/lib/resumeContentHash";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
@@ -245,6 +247,21 @@ function ScreenTab({ project, onScreeningsSaved }: {
   const [results, setResults] = useState<CandidateResult[]>([]);
   const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  // Files that matched an existing screening in this project via the free
+  // pre-check (app/api/screen-resumes/check-existing) — set aside before
+  // ever reaching the scoring route, keyed by the original File so a
+  // "Re-screen anyway" can still send it through on demand.
+  const [existingMatches, setExistingMatches] = useState<
+    { match: CheckExistingResult; file: File }[]
+  >([]);
+  // Candidates already saved in this project, by normalized name — the one
+  // signal hash/filename matching can't catch (two different resume files
+  // for the same person). Populated during the pre-check, compared against
+  // AFTER scoring since candidate name doesn't exist before then.
+  const [existingCandidates, setExistingCandidates] = useState<ExistingCandidateRef[]>([]);
+  // fileName -> matched existing candidate, purely informational (scoring
+  // already happened by the time a name match is knowable).
+  const [nameMatches, setNameMatches] = useState<Map<string, ExistingCandidateRef>>(new Map());
   const [isLinkedInMode, setIsLinkedInMode] = useState(false);
   // undefined = not checked yet, 0 = checked and there's nothing to suggest against.
   const [otherActiveCount, setOtherActiveCount] = useState<number | undefined>(undefined);
@@ -275,32 +292,121 @@ function ScreenTab({ project, onScreeningsSaved }: {
     } catch { /* non-fatal */ }
   }
 
-  async function handleSubmit() {
-    if (files.length === 0) return;
-    setFormError(null);
-    setScreenView("loading");
-
+  // Sends exactly the files given to the real scoring route, unchanged from
+  // how it's always been called — this function is the only thing that
+  // decides which files reach it, so /api/screen-resumes and scoreCandidate
+  // stay completely untouched either way.
+  async function scoreFiles(filesToScore: File[]): Promise<{ results: CandidateResult[]; errors: ScreenResumesError[] }> {
     const formData = new FormData();
     formData.set("jobDescription", project.jobDescription);
     formData.set("roleContext", project.name);
     formData.set("projectId", String(project.id));
     if (isLinkedInMode) formData.set("linkedInMode", "true");
-    files.forEach((f) => formData.append("resumes", f));
+    filesToScore.forEach((f) => formData.append("resumes", f));
+
+    const res = await fetch("/api/screen-resumes", { method: "POST", body: formData });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error ?? "Something went wrong while screening resumes.");
+    }
+    const data = await res.json();
+    return {
+      results: Array.isArray(data.results) ? data.results : [],
+      errors: Array.isArray(data.errors) ? data.errors : [],
+    };
+  }
+
+  async function handleSubmit() {
+    if (files.length === 0) return;
+    setFormError(null);
+    setScreenView("loading");
 
     try {
-      const res = await fetch("/api/screen-resumes", { method: "POST", body: formData });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? "Something went wrong while screening resumes.");
+      // Free pre-check first — anything that already exists in this project
+      // never reaches the scoring route at all, so it never costs a Claude call.
+      const checkFormData = new FormData();
+      checkFormData.set("projectId", String(project.id));
+      files.forEach((f) => checkFormData.append("resumes", f));
+
+      let classifications: CheckExistingResult[] = [];
+      let candidates: ExistingCandidateRef[] = [];
+      try {
+        const checkRes = await fetch("/api/screen-resumes/check-existing", { method: "POST", body: checkFormData });
+        if (checkRes.ok) {
+          const checkData = await checkRes.json();
+          classifications = Array.isArray(checkData.results) ? checkData.results : [];
+          candidates = Array.isArray(checkData.existingCandidates) ? checkData.existingCandidates : [];
+        }
+      } catch {
+        // Best-effort — if the pre-check itself fails, fall through and
+        // score everything normally rather than blocking the batch on it.
       }
-      const data = await res.json();
-      setResults(Array.isArray(data.results) ? data.results : []);
-      setFileErrors(Array.isArray(data.errors) ? data.errors : []);
+
+      const byFileName = new Map(classifications.map((c) => [c.fileName, c]));
+      const newFiles: File[] = [];
+      const matched: { match: CheckExistingResult; file: File }[] = [];
+      for (const f of files) {
+        const c = byFileName.get(f.name);
+        if (c && c.existing && (c.status === "duplicate" || c.status === "possible_update")) {
+          matched.push({ match: c, file: f });
+        } else {
+          newFiles.push(f);
+        }
+      }
+
+      const { results: scored, errors } = newFiles.length > 0
+        ? await scoreFiles(newFiles)
+        : { results: [], errors: [] };
+
+      setResults(scored);
+      setFileErrors(errors);
+      setExistingMatches(matched);
+      setExistingCandidates(candidates);
+      setNameMatches(findNameMatches(scored, candidates));
       setScreenView("results");
-      onScreeningsSaved();
+      if (scored.length > 0) onScreeningsSaved();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Unknown error");
       setScreenView("form");
+    }
+  }
+
+  // Neither the hash nor filename pre-check can catch "two different resume
+  // files that turn out to be the same candidate" — the name only exists
+  // once scoring is done. Purely informational by the time this runs: the
+  // Claude call already happened, this just surfaces it instead of leaving
+  // two silent, unlinked cards. Checks against candidates already saved in
+  // the project AND against siblings scored in the same batch.
+  function findNameMatches(scored: CandidateResult[], baseline: ExistingCandidateRef[]): Map<string, ExistingCandidateRef> {
+    const byNormalizedName = new Map(baseline.map((c) => [normalizeCandidateName(c.candidateName), c]));
+    const matches = new Map<string, ExistingCandidateRef>();
+    for (const r of scored) {
+      const key = normalizeCandidateName(r.candidateName);
+      const existing = byNormalizedName.get(key);
+      if (existing) {
+        matches.set(r.fileName, existing);
+      } else {
+        // First time seeing this name in the batch — register it so a later
+        // sibling with the same name (but a different file) gets flagged too.
+        byNormalizedName.set(key, { id: r.id ?? -1, candidateName: r.candidateName });
+      }
+    }
+    return matches;
+  }
+
+  // A recruiter overriding a "duplicate"/"possible_update" card — forces a
+  // real score for that one file and folds it into the normal results list.
+  async function handleForceRescore(file: File) {
+    setExistingMatches((prev) => prev.filter((m) => m.file !== file));
+    try {
+      const { results: scored, errors } = await scoreFiles([file]);
+      const merged = [...results, ...scored].sort((a, b) => b.score - a.score);
+      setResults(merged);
+      setNameMatches(findNameMatches(merged, existingCandidates));
+      if (errors.length > 0) setFileErrors((prev) => [...prev, ...errors]);
+      if (scored.length > 0) onScreeningsSaved();
+    } catch (err) {
+      setFileErrors((prev) => [...prev, { fileName: file.name, error: err instanceof Error ? err.message : "Re-screen failed" }]);
     }
   }
 
@@ -309,6 +415,9 @@ function ScreenTab({ project, onScreeningsSaved }: {
     setResults([]);
     setFileErrors([]);
     setFiles([]);
+    setExistingMatches([]);
+    setExistingCandidates([]);
+    setNameMatches(new Map());
   }
 
   if (screenView === "results") {
@@ -319,6 +428,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
             <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Screening results</h3>
             <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
               {results.length} candidate{results.length !== 1 ? "s" : ""} ranked by fit
+              {existingMatches.length > 0 && ` · ${existingMatches.length} already screened, skipped`}
               {fileErrors.length > 0 && ` · ${fileErrors.length} file${fileErrors.length !== 1 ? "s" : ""} failed`}
             </p>
           </div>
@@ -346,6 +456,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
               rank={i + 1}
               jdAnalysis={project.jdAnalysis}
               onStatusChange={handleStatusChange}
+              nameMatch={nameMatches.get(result.fileName)}
               onSave={result.id === undefined ? async () => {
                 const file = files.find((f) => f.name === result.fileName);
                 if (!file) throw new Error("Original file no longer available — try re-uploading");
@@ -425,6 +536,17 @@ function ScreenTab({ project, onScreeningsSaved }: {
               } : undefined}
             />
           ))}
+          {existingMatches.map(({ match, file }) => (
+            <AlreadyScreenedCard
+              key={match.fileName}
+              fileName={match.fileName}
+              status={match.status as "duplicate" | "possible_update"}
+              existing={match.existing!}
+              file={file}
+              roleContext={project.name}
+              onForceRescore={handleForceRescore}
+            />
+          ))}
         </ul>
       </div>
     );
@@ -492,12 +614,14 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
 // ── Pipeline tab ───────────────────────────────────────────────────────────
 
-function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onStageChange, onStatusChange, expandedId: externalExpandedId, onExpandedChange }: {
+function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onStageChange, onStatusChange, onDeleted, expandedId: externalExpandedId, onExpandedChange }: {
   screenings: ScreeningRecord[];
   projectId: number;
   stagesMap: Record<number, TrackerStage>;
   onStageChange: (id: number, stage: TrackerStage) => void;
   onStatusChange?: (id: number, status: CandidateStatus) => void;
+  /** Propagates a delete up to the parent's own screenings state — this component's `screenings` is a local fork seeded from the initial prop, so without this the parent's tab-count and header-count badges (both derived from its own `screenings.length`) stay stale until a full reload. */
+  onDeleted?: (id: number) => void;
   expandedId?: number | null;
   onExpandedChange?: (id: number | null) => void;
 }) {
@@ -591,6 +715,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       if (!res.ok) throw new Error();
       setScreenings((prev) => prev.filter((s) => s.id !== id));
       setExpandedId(expandedId === id ? null : expandedId);
+      onDeleted?.(id);
     } catch { /* show nothing */ }
     finally {
       setDeletingId(null);
@@ -719,6 +844,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     >
                       {s.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
                     </Link>
+                  )}
+                  {s.nameMatchId != null && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setExpandedId(s.nameMatchId ?? null); }}
+                      title={`A different resume file for ${screenings.find((c) => c.id === s.nameMatchId)?.candidateName ?? "this candidate"} already exists in this project — click to view`}
+                      className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-500/15 dark:text-zinc-400 dark:hover:bg-zinc-500/25"
+                    >
+                      Name match
+                    </button>
                   )}
                   {s.linkedInMode && (
                     <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
@@ -1953,6 +2088,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               const now = new Date().toISOString();
               setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: now } : s));
             }}
+            onDeleted={(id) => setScreenings((prev) => prev.filter((s) => s.id !== id))}
             expandedId={expandedId}
             onExpandedChange={setExpandedId}
           />
