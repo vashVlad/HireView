@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, isAdmin } from "@/lib/auth";
 import { getSupabaseClient } from "@/lib/supabase";
+import { getAuthUsers } from "@/lib/recruiters";
 
 type BatchRow = {
   created_at: string;
@@ -34,10 +35,10 @@ export async function GET(request: NextRequest) {
 
   // ── Run queries in parallel ────────────────────────────────────────────────
 
-  const [batchesRes, projectsRes, usersRes] = await Promise.all([
+  const [batchesRes, projectsRes, authUsers] = await Promise.all([
     batchQuery.returns<BatchRow[]>(),
     supabase.from("projects").select("id, name").returns<{ id: number; name: string }[]>(),
-    supabase.auth.admin.listUsers(),
+    getAuthUsers(),
   ]);
 
   if (batchesRes.error) {
@@ -46,7 +47,6 @@ export async function GET(request: NextRequest) {
 
   const batches = batchesRes.data ?? [];
   const projects = projectsRes.data ?? [];
-  const authUsers = usersRes.data?.users ?? [];
 
   // ── Flatten all scores (includes rejected candidates) ─────────────────────
 
