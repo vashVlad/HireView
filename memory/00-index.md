@@ -59,7 +59,7 @@ This folder is HireView's persistent memory. Read this first, every session, bef
 **Phase 1 is fully complete and merged to main (2026-07-09).** All of 1.1–1.5 shipped, live-tested, and merged via PRs #1–#6 (confirmed on GitHub: 0 open, 6 closed, all merged). FunnelView is unblocked and ready to start.
 
 **FunnelView — Manager Visibility (after Phase 1, before Phase 2)**
-Admin-only, isolated module inside HireView (`app/funnelview/`, `lib/funnelview/`), live data, no CSV/external tools. See [[HireView_Roadmap]] and [[HireView_Enterprise_Plan]] for full details. **Committed (`88b1d02`) and pushed, 2026-07-09 — build/typecheck clean, not yet live-tested or merged to main.** See [[state]] and [[session-log]].
+Admin-only, isolated module inside HireView (`app/funnelview/`, `lib/funnelview/`), live data, no CSV/external tools. See [[HireView_Roadmap]] and [[HireView_Enterprise_Plan]] for full details. **Merged to main, 2026-07-09 (`34182e0`) — build/typecheck clean, not yet live-tested.** See [[state]] and [[session-log]].
 
 **Phase 2 — Intelligence Layer (30 days)**
 See [[HireView_Enterprise_Plan]] for full details.
