@@ -9,12 +9,15 @@ export interface FunnelCandidate {
   recruiterId: string | null;
   recruiterEmail: string | null;
   source: "inbound" | "outbound";
+  score: number;
   status: CandidateStatus;
   previousStatus: CandidateStatus | null;
   trackerStage: TrackerStage | null;
   previousTrackerStage: TrackerStage | null;
   /** Furthest tracker stage reached, even if since rejected — falls back to trackerStage, then previousTrackerStage if the current stage is Reject. */
   furthestStage: TrackerStage | null;
+  /** True if either Feature 1.1 (same-project duplicate) or 1.4 (cross-project history alert) has flagged this candidate. */
+  hasFraudFlag: boolean;
   createdAt: string;
 }
 

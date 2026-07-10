@@ -101,10 +101,6 @@ SPOTLIGHTS: ✓ Open to work  ✓ Past applicants
 - Since LinkedIn Recruiter's API is enterprise-only, this is a standalone tracker
 - Should be fast to update
 
-### Phase 3 — Outreach Drafting
-- Auto-draft personalized LinkedIn messages or emails based on resume highlights
-- Triggered after candidates are selected from Phase 1
-
 ### Future Ideas (backlog)
 - **Interview question generator** — tailored questions based on JD + specific candidate resume
 - **Scorecard builder** — weighted criteria from JD for consistent candidate evaluation

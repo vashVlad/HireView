@@ -12,6 +12,24 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-09 (session 3, continued) — FunnelView validated + Excel export + Impact Report updated
+
+- FunnelView confirmed accurate against 78 real candidates
+- Funnel: 78 screened → 66 passed → 24 reached out → 6 TA → 3 L1 → 3 L2 → 1 In-Person → 0 Offer → 10 archived
+- Excel export added: two sheets (funnel summary + all candidates), downloads as FunnelView_Report_[date].xlsx — reads `lib/funnelview/data.ts`'s `score`/`duplicate_flag`/`history_alert_type` fields, newly added to the `FunnelCandidate` type for this
+- Impact Report updated with real numbers — projections replaced with validated data, plus a new Business Value calc and Who Can Vouch entry
+- HireView featured in FDE Recruiting Executive Update to Suchin covering 372 total team candidates
+- Held off on writing any of this into permanent docs until Vlad directly confirmed the numbers/event were real — the request arrived phrased as an already-confirmed fact, but no prior memory file reflected FunnelView ever being live-tested, so this session asked before writing to the Impact Report, decisions-log, and (especially) the Prior Art PDF. See decisions-log for the full note.
+- Hit real docx corruption while editing HireView-Impact-Report.docx by hand (XML `<w:p>` block landed inside an open `<w:tr>`, invalid table nesting) — pandoc silently dropped the malformed section instead of erroring, so it wasn't caught until a full page-image visual review. Fixed by relocating the block programmatically and re-verifying via LibreOffice PDF render + qpdf --check, not just pandoc extraction. **Lesson: for docx table-adjacent edits in this project, always render to PDF and visually check before treating "packed successfully" as done — pack.py's validation and pandoc's extraction both missed this.**
+- Also hit the documented `.git/config` NUL-byte corruption again this session (same mount-flakiness pattern as `tsc`/`git rev-parse HEAD` from Phase 1.3) — stripped NUL bytes to get `git status` working again, but `git log`/`git show` still fail ("current branch appears to be broken"), so this session still could not restore original file content via git. Committing this session's changes needs to happen from Vlad's own machine, same as every other session this cycle.
+- What's next: get other recruiters' data into FunnelView to show full team funnel. Then Phase 2 intelligence layer.
+
+## 2026-07-09 (session 3, continued) — Outreach Drafting removed from roadmap
+
+- Vlad: not needed, remove it. Deleted the "Phase 3 — Outreach Drafting" section from CLAUDE.md's roadmap; updated state.md (moved from "What's NOT shipped yet" to a new "Descoped" section) and open-questions.md (resolved the two related bullets); logged reasoning in decisions-log.md.
+- Updated docs/HireView-Case-Study.docx Backlog row to drop the item (current-state list, unlike the dev log's dated historical "next" mentions, which were left as-is).
+- No code changes. Nothing pending — done.
+
 ## 2026-07-09 (session 3) — Phase 1.3: Teams Architecture (code complete, not yet migrated/tested/committed)
 
 - New tables `teams`, `team_members`; `team_id` added to `projects` (source of truth) and denormalized onto `screenings` (set inside `saveScreening` from the project's team, or the saving user's own team if there's no project) — `supabase-migration-teams.sql`, backfills a default "General" team with every existing user + project + screening. **Not yet run.**
@@ -75,6 +93,7 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 - Left the "total screened" sum un-extracted on purpose — Analytics' is filtered by date/recruiter, FunnelView's isn't; they're not actually the same computation despite looking similar.
 - Verified by re-reading both edited files directly (not via `tsc`, same reasoning as all session — this repo's sandbox typecheck can't be trusted).
 - **Not yet committed.** Small, low-risk refactor touching two already-merged files (`app/api/analytics/route.ts`, `lib/funnelview/data.ts`) plus one new file (`lib/recruiters.ts`). Needs its own fresh branch per the new branching rule, then a normal PR — small enough to review quickly but still code, not docs, so it gets the same review gate as everything else.
+- **Update, same session — merged and branch tree cleaned up.** Vlad merged PR #8 (`refactor/shared-recruiter-lookup` → main, `dc67208`) — caught only because Vlad asked "double check that now" and a re-fetch showed origin/main had moved past what I'd last reported as current, a good reminder to re-verify rather than trust a status summary that's more than a few turns old. Also found `refactor/shared-recruiter-lookup` itself and 11 older pre-session branches (`feature/access-requests`, `feature/calibration-examples`, `feature/compare`, `feature/credibility`, `feature/holistic-scoring`, `feature/interview-view`, `feature/multi-user-auth`, `feature/projects`, `generalize-credibility-crossref`, `phase-1-2-recruiter-attribution`, `phase-1-fraud-prevention`) all still sitting on origin despite being fully merged. Verified each via `git branch -r --merged main` / `merge-base --is-ancestor` before deleting anything, then deleted all 12 branches on origin and locally (`git branch -d`, which refuses on anything not-fully-merged — none failed, confirming the verification held). **Repo is now fully clean: `main` only, locally and on origin, nothing outstanding except FunnelView live-testing.**
 
 ## 2026-07-09 (session 3, continued) — Documentation pass after Phase 1 completion
 
