@@ -1,0 +1,21 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Rejection reason on tracker
+-- Run this in Supabase SQL editor → Run
+--
+-- Teti's request, 2026-07-10: since every screened candidate is now saved
+-- regardless of score (see supabase-migration-reject-reason companion code
+-- change in app/api/screen-resumes/route.ts), a recruiter should be able to
+-- see WHY a candidate was rejected if they show up again — same pattern as
+-- the existing on_hold/on_hold_reason columns on this table.
+--
+-- Additive only, no backfill — existing "Reject" stage rows just have a
+-- null reason until a recruiter fills one in.
+--
+-- IMPORTANT — run this BEFORE deploying the code that reads/writes
+-- reject_reason. lib/screenings.ts's upsertTrackerEntry writes this column
+-- conditionally (only when a caller actually sends a rejectReason), so it
+-- won't break existing saves either way, but the reason will silently fail
+-- to save until this migration has run.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE tracker ADD COLUMN IF NOT EXISTS reject_reason text;

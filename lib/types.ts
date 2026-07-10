@@ -43,6 +43,8 @@ export interface TrackerEntry {
   immigration: string;
   onHold: boolean;
   onHoldReason: string;
+  /** Reason captured when stage moves to "Reject" — mirrors onHoldReason. */
+  rejectReason: string;
   scheduled: boolean;
   interviewDate?: string;
   orderIndex: number;
@@ -127,6 +129,19 @@ export interface ExistingCandidateRef {
   candidateName: string;
 }
 
+/**
+ * System-wide (any project, any team) rejection history — Teti's request,
+ * 2026-07-10. Deliberately not scoped like every other duplicate/match
+ * signal in this app: a recruiter should see if a name-matched candidate
+ * was already rejected somewhere else, regardless of team boundaries.
+ * Compared client-side after scoring, same pattern as ExistingCandidateRef.
+ */
+export interface RejectionHistoryEntry {
+  candidateName: string;
+  projectName: string | null;
+  reason: string | null;
+}
+
 export interface ScreeningRecord {
   id: number;
   candidateName: string;
@@ -185,6 +200,7 @@ export interface FullTrackerData {
   immigration?: string;
   onHold?: boolean;
   onHoldReason?: string;
+  rejectReason?: string;
   scheduled?: boolean;
   interviewDate?: string;
   previousStage?: TrackerStage;

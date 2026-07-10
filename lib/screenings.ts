@@ -17,7 +17,7 @@ import { getPrimaryTeamId } from "./teams";
 import { getAuthUser } from "./auth";
 import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
-  Recommendation, ScreeningRecord, TrackerEntry, TrackerStage,
+  Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage,
 } from "./types";
 
 interface ScreeningRow {
@@ -128,6 +128,61 @@ async function markNameMatchPair(idA: number, idB: number): Promise<void> {
     supabase.from("screenings").update({ name_match_id: idB }).eq("id", idA),
     supabase.from("screenings").update({ name_match_id: idA }).eq("id", idB),
   ]);
+}
+
+// ── Rejection history (system-wide, any recruiter) ──────────────────────────
+//
+// Teti's request, 2026-07-10: since every candidate is now saved regardless
+// of score, a recruiter should be able to see if a name-matched candidate
+// was already rejected somewhere else in the system. Deliberately NOT scoped
+// to project or team, unlike every other match signal in this file — "the
+// whole system," not "my team." Own isolated queries (tracker → screenings →
+// projects, joined in JS), never touches SCREENING_COLUMNS or
+// getFullTrackerEntries' shared select.
+//
+// Requires reject_reason (supabase-migration-reject-reason.sql). Safe to
+// call before that migration runs — the tracker.select() below will error,
+// but this function isn't wired into any page that already works today, so
+// nothing breaks; it just returns no results until the column exists.
+
+export async function listRejectionHistory(): Promise<RejectionHistoryEntry[]> {
+  const supabase = getSupabaseClient();
+
+  const { data: rejected, error: trackerErr } = await supabase
+    .from("tracker")
+    .select("screening_id, reject_reason")
+    .eq("stage", "Reject")
+    .returns<{ screening_id: number; reject_reason: string | null }[]>();
+  if (trackerErr || !rejected || rejected.length === 0) return [];
+
+  const screeningIds = rejected.map((r) => r.screening_id);
+  const { data: screeningRows, error: screeningErr } = await supabase
+    .from("screenings")
+    .select("id, candidate_name, project_id")
+    .in("id", screeningIds)
+    .returns<{ id: number; candidate_name: string; project_id: number | null }[]>();
+  if (screeningErr || !screeningRows) return [];
+
+  const projectIds = [...new Set(
+    screeningRows.map((r) => r.project_id).filter((id): id is number => id != null)
+  )];
+  let projectNameById = new Map<number, string>();
+  if (projectIds.length > 0) {
+    const { data: projectRows } = await supabase
+      .from("projects")
+      .select("id, name")
+      .in("id", projectIds)
+      .returns<{ id: number; name: string }[]>();
+    projectNameById = new Map((projectRows ?? []).map((p) => [p.id, p.name]));
+  }
+
+  const reasonByScreeningId = new Map(rejected.map((r) => [r.screening_id, r.reject_reason]));
+
+  return screeningRows.map((row) => ({
+    candidateName: row.candidate_name,
+    projectName: row.project_id != null ? (projectNameById.get(row.project_id) ?? null) : null,
+    reason: reasonByScreeningId.get(row.id) ?? null,
+  }));
 }
 
 // ── Save ───────────────────────────────────────────────────────────────────
@@ -532,6 +587,7 @@ export async function upsertTrackerEntry(
       ...(fields.immigration !== undefined && { immigration: fields.immigration }),
       ...(fields.onHold !== undefined && { on_hold: fields.onHold }),
       ...(fields.onHoldReason !== undefined && { on_hold_reason: fields.onHoldReason }),
+      ...(fields.rejectReason !== undefined && { reject_reason: fields.rejectReason }),
       ...(fields.scheduled !== undefined && { scheduled: fields.scheduled }),
       ...(fields.interviewDate !== undefined && { interview_date: fields.interviewDate }),
       ...(fields.orderIndex !== undefined && { order_index: fields.orderIndex }),
@@ -575,7 +631,7 @@ export async function getFullTrackerEntries(
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("tracker")
-    .select("screening_id, stage, company, role, expected_level, next_step, steps_completed, comments, immigration, on_hold, on_hold_reason, scheduled, interview_date, previous_stage")
+    .select("screening_id, stage, company, role, expected_level, next_step, steps_completed, comments, immigration, on_hold, on_hold_reason, reject_reason, scheduled, interview_date, previous_stage")
     .in("screening_id", screeningIds);
   if (error) throw error;
   const map: Record<number, FullTrackerData> = {};
@@ -591,6 +647,7 @@ export async function getFullTrackerEntries(
       immigration: (row.immigration as string) ?? undefined,
       onHold: (row.on_hold as boolean) ?? false,
       onHoldReason: (row.on_hold_reason as string) ?? undefined,
+      rejectReason: (row.reject_reason as string) ?? undefined,
       scheduled: (row.scheduled as boolean) ?? false,
       interviewDate: (row.interview_date as string) ?? undefined,
       previousStage: (row.previous_stage as TrackerStage) ?? undefined,

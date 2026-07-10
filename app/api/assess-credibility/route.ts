@@ -55,7 +55,15 @@ export async function POST(request: NextRequest) {
     const { error: uploadErr } = await supabase.storage
       .from(RESUME_BUCKET)
       .upload(path, buffer, { contentType, upsert: true });
-    if (!uploadErr) crossRefPath = path;
+    if (!uploadErr) {
+      crossRefPath = path;
+    } else {
+      // Previously swallowed silently — the credibility check would still
+      // succeed and show results, giving no indication the doc never made
+      // it into storage, so it just wouldn't show up later in Interview
+      // View with no visible error anywhere. Log it so this is diagnosable.
+      console.error("Failed to store cross-reference doc for Interview View:", uploadErr);
+    }
   } catch {
     return NextResponse.json({ error: "Could not extract text from cross-reference document" }, { status: 400 });
   }

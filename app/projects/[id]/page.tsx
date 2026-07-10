@@ -19,7 +19,7 @@ import { TrackerStageSelect } from "@/components/TrackerStageSelect";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
   CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
-  ExistingCandidateRef, FullTrackerData, JDAnalysis, Project, ScreenResumesError, ScreeningRecord, TrackerStage,
+  ExistingCandidateRef, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
@@ -262,6 +262,11 @@ function ScreenTab({ project, onScreeningsSaved }: {
   // fileName -> matched existing candidate, purely informational (scoring
   // already happened by the time a name match is knowable).
   const [nameMatches, setNameMatches] = useState<Map<string, ExistingCandidateRef>>(new Map());
+  // System-wide (any project, any team) prior rejections, by normalized
+  // name — Teti's request, 2026-07-10. Same pattern as nameMatches, just
+  // sourced from checkData.rejectionHistory instead of existingCandidates.
+  const [rejectionHistoryBaseline, setRejectionHistoryBaseline] = useState<RejectionHistoryEntry[]>([]);
+  const [rejectionMatches, setRejectionMatches] = useState<Map<string, RejectionHistoryEntry>>(new Map());
   const [isLinkedInMode, setIsLinkedInMode] = useState(false);
   // undefined = not checked yet, 0 = checked and there's nothing to suggest against.
   const [otherActiveCount, setOtherActiveCount] = useState<number | undefined>(undefined);
@@ -330,12 +335,14 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
       let classifications: CheckExistingResult[] = [];
       let candidates: ExistingCandidateRef[] = [];
+      let rejections: RejectionHistoryEntry[] = [];
       try {
         const checkRes = await fetch("/api/screen-resumes/check-existing", { method: "POST", body: checkFormData });
         if (checkRes.ok) {
           const checkData = await checkRes.json();
           classifications = Array.isArray(checkData.results) ? checkData.results : [];
           candidates = Array.isArray(checkData.existingCandidates) ? checkData.existingCandidates : [];
+          rejections = Array.isArray(checkData.rejectionHistory) ? checkData.rejectionHistory : [];
         }
       } catch {
         // Best-effort — if the pre-check itself fails, fall through and
@@ -363,6 +370,8 @@ function ScreenTab({ project, onScreeningsSaved }: {
       setExistingMatches(matched);
       setExistingCandidates(candidates);
       setNameMatches(findNameMatches(scored, candidates));
+      setRejectionHistoryBaseline(rejections);
+      setRejectionMatches(findRejectionMatches(scored, rejections));
       setScreenView("results");
       if (scored.length > 0) onScreeningsSaved();
     } catch (err) {
@@ -394,6 +403,21 @@ function ScreenTab({ project, onScreeningsSaved }: {
     return matches;
   }
 
+  // System-wide (any project, any team) rejection history — same pattern as
+  // findNameMatches, just matched against rejectionHistoryBaseline instead
+  // of same-project candidates. No batch-sibling registration here (unlike
+  // findNameMatches): two people in the SAME upload batch coincidentally
+  // sharing a name isn't "this candidate was rejected before."
+  function findRejectionMatches(scored: CandidateResult[], baseline: RejectionHistoryEntry[]): Map<string, RejectionHistoryEntry> {
+    const byNormalizedName = new Map(baseline.map((r) => [normalizeCandidateName(r.candidateName), r]));
+    const matches = new Map<string, RejectionHistoryEntry>();
+    for (const r of scored) {
+      const hit = byNormalizedName.get(normalizeCandidateName(r.candidateName));
+      if (hit) matches.set(r.fileName, hit);
+    }
+    return matches;
+  }
+
   // A recruiter overriding a "duplicate"/"possible_update" card — forces a
   // real score for that one file and folds it into the normal results list.
   async function handleForceRescore(file: File) {
@@ -403,6 +427,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
       const merged = [...results, ...scored].sort((a, b) => b.score - a.score);
       setResults(merged);
       setNameMatches(findNameMatches(merged, existingCandidates));
+      setRejectionMatches(findRejectionMatches(merged, rejectionHistoryBaseline));
       if (errors.length > 0) setFileErrors((prev) => [...prev, ...errors]);
       if (scored.length > 0) onScreeningsSaved();
     } catch (err) {
@@ -457,27 +482,10 @@ function ScreenTab({ project, onScreeningsSaved }: {
               jdAnalysis={project.jdAnalysis}
               onStatusChange={handleStatusChange}
               nameMatch={nameMatches.get(result.fileName)}
-              onSave={result.id === undefined ? async () => {
-                const file = files.find((f) => f.name === result.fileName);
-                if (!file) throw new Error("Original file no longer available — try re-uploading");
-                const fd = new FormData();
-                fd.set("resultJson", JSON.stringify(result));
-                fd.set("resumeFile", file);
-                fd.set("jobDescription", project.jobDescription);
-                fd.set("projectId", String(project.id));
-                if (isLinkedInMode) fd.set("linkedInMode", "true");
-                const res = await fetch("/api/screenings/save-one", { method: "POST", body: fd });
-                if (!res.ok) {
-                  const body = await res.json().catch(() => null);
-                  throw new Error(body?.error ?? "Save failed");
-                }
-                const data = await res.json();
-                setResults((prev) => prev.map((r) => r.fileName === result.fileName ? { ...r, id: data.id } : r));
-                onScreeningsSaved();
-                return data.id as number;
-              } : undefined}
+              rejectionHistory={rejectionMatches.get(result.fileName)}
+              belowThreshold={result.score < project.scoreThreshold}
               otherActiveCount={otherActiveCount}
-              onCheckCrossProjectPromise={result.id === undefined ? () => {
+              onCheckCrossProjectPromise={result.score < project.scoreThreshold ? () => {
                 const run = async () => {
                   const file = files.find((f) => f.name === result.fileName);
                   if (!file) return false;
@@ -495,7 +503,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
                 fitQueueRef.current = chained.catch(() => {});
                 return chained as Promise<boolean>;
               } : undefined}
-              onFindBetterFit={result.id === undefined ? () => {
+              onFindBetterFit={result.score < project.scoreThreshold ? () => {
                 const run = async () => {
                   const file = files.find((f) => f.name === result.fileName);
                   if (!file) throw new Error("Original file no longer available — try re-uploading");
@@ -516,7 +524,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
                 fitQueueRef.current = chained.catch(() => {});
                 return chained as Promise<FitSuggestion | null>;
               } : undefined}
-              onTransferToProject={result.id === undefined ? async (suggestion: FitSuggestion) => {
+              onTransferToProject={result.score < project.scoreThreshold ? async (suggestion: FitSuggestion) => {
                 const file = files.find((f) => f.name === result.fileName);
                 if (!file) throw new Error("Original file no longer available — try re-uploading");
                 const fd = new FormData();
@@ -577,7 +585,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
       <div className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
         <span className="text-sm text-zinc-700 dark:text-zinc-300">
-          LinkedIn profiles <span className="text-zinc-400 dark:text-zinc-500">— adjusts scoring for profile PDFs</span>
+          Sourced (LinkedIn) <span className="text-zinc-400 dark:text-zinc-500">— adjusts scoring for profile PDFs</span>
         </span>
         <button
           type="button"
@@ -1305,6 +1313,7 @@ function DrawerBody({
   onScreeningFieldSaved,
   photoUrl,
   onPhotoUpload,
+  projectName,
 }: {
   selected: ScreeningRecord;
   trackerEntry: FullTrackerData;
@@ -1313,10 +1322,12 @@ function DrawerBody({
   onScreeningFieldSaved: (id: number, fields: Partial<ScreeningRecord>) => void;
   photoUrl?: string;
   onPhotoUpload: (file: File) => void;
+  /** Auto-fills the Role field when nothing's been saved yet — still freely editable. */
+  projectName: string;
 }) {
   const [leverUrl, setLeverUrl] = useState(selected.leverUrl ?? "");
   const [company, setCompany] = useState(trackerEntry.company ?? "");
-  const [role, setRole] = useState(trackerEntry.role ?? "");
+  const [role, setRole] = useState(trackerEntry.role ?? projectName);
   const [expectedLevel, setExpectedLevel] = useState(trackerEntry.expectedLevel ?? "");
   const [nextStep, setNextStep] = useState(trackerEntry.nextStep ?? "");
   const [stepsCompleted, setStepsCompleted] = useState(trackerEntry.stepsCompleted ?? "");
@@ -1324,6 +1335,10 @@ function DrawerBody({
   const [immigration, setImmigration] = useState(trackerEntry.immigration ?? "");
   const [onHold, setOnHold] = useState(trackerEntry.onHold ?? false);
   const [onHoldReason, setOnHoldReason] = useState(trackerEntry.onHoldReason ?? "");
+  // Teti's request, 2026-07-10 — captured when stage is "Reject" so a
+  // recruiter can see why later. reject_reason migration confirmed run and
+  // wired into getFullTrackerEntries' select same day.
+  const [rejectReason, setRejectReason] = useState(trackerEntry.rejectReason ?? "");
   const [scheduled, setScheduled] = useState(trackerEntry.scheduled ?? false);
   const [interviewDate, setInterviewDate] = useState(trackerEntry.interviewDate ?? "");
   const [saving, setSaving] = useState<string | null>(null);
@@ -1337,7 +1352,7 @@ function DrawerBody({
 
   useEffect(() => {
     setCompany(trackerEntry.company ?? "");
-    setRole(trackerEntry.role ?? "");
+    setRole(trackerEntry.role ?? projectName);
     setExpectedLevel(trackerEntry.expectedLevel ?? "");
     setNextStep(trackerEntry.nextStep ?? "");
     setStepsCompleted(trackerEntry.stepsCompleted ?? "");
@@ -1345,6 +1360,7 @@ function DrawerBody({
     setImmigration(trackerEntry.immigration ?? "");
     setOnHold(trackerEntry.onHold ?? false);
     setOnHoldReason(trackerEntry.onHoldReason ?? "");
+    setRejectReason(trackerEntry.rejectReason ?? "");
     setScheduled(trackerEntry.scheduled ?? false);
     setInterviewDate(trackerEntry.interviewDate ?? "");
   }, [selected.id]);
@@ -1510,6 +1526,17 @@ function DrawerBody({
           placeholder="FDE_AI Builder" className={inputCls} />
       </div>
 
+      {/* Rejection reason — only shown once this candidate is in the Reject stage */}
+      {trackerEntry.stage === "Reject" && (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
+          <FieldLabel label="Rejection reason" fkey="rejectReason" />
+          <textarea rows={2} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
+            onBlur={(e) => saveTrackerField({ rejectReason: e.target.value }, "rejectReason")}
+            placeholder="Why this candidate was rejected — visible system-wide if they apply again"
+            className={`resize-none border-rose-200 bg-white dark:border-rose-500/30 dark:bg-zinc-900 ${inputCls}`} />
+        </div>
+      )}
+
       {/* Next Step */}
       <div>
         <FieldLabel label="Next step" fkey="nextStep" />
@@ -1570,7 +1597,7 @@ function DrawerBody({
   );
 }
 
-function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrackerDataChange, onViewResult, onScreeningFieldSaved }: {
+function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrackerDataChange, onViewResult, onScreeningFieldSaved, projectName }: {
   screenings: ScreeningRecord[];
   stagesMap: Record<number, TrackerStage>;
   onStageChange: (id: number, stage: TrackerStage) => void;
@@ -1578,6 +1605,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   onTrackerDataChange: (id: number, fields: Partial<FullTrackerData>) => void;
   onViewResult: (id: number) => void;
   onScreeningFieldSaved: (id: number, fields: Partial<ScreeningRecord>) => void;
+  projectName: string;
 }) {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<ScreeningRecord | null>(null);
@@ -1664,7 +1692,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
         "Stage": stagesMap[s.id] ?? "New",
         "Scheduled": td.scheduled ? "Yes" : "No",
         "Company": td.company ?? "",
-        "Role": td.role ?? "",
+        "Role": td.role ?? projectName,
         "Exp. Level": td.expectedLevel ?? "",
         "Next Step": td.nextStep ?? "",
         "Steps Completed": td.stepsCompleted ?? "",
@@ -1672,6 +1700,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
         "Immigration": td.immigration ?? "",
         "Interview Date": td.interviewDate ?? "",
              "On Hold": td.onHold ? (td.onHoldReason ? `Yes — ${td.onHoldReason}` : "Yes") : "No",
+        "Rejection Reason": td.rejectReason ?? "",
         "Lever URL": s.leverUrl ?? "",
       };
     });
@@ -1921,6 +1950,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               onScreeningFieldSaved={onScreeningFieldSaved}
               photoUrl={photoUrls[selected.id]}
               onPhotoUpload={(file) => handlePhotoUpload(selected.id, file)}
+              projectName={projectName}
             />
           </div>
         </>
@@ -2102,6 +2132,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             onTrackerDataChange={handleTrackerDataChange}
             onViewResult={(id: number) => { setExpandedId(id); setTab("pipeline"); }}
             onScreeningFieldSaved={(id, fields) => setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s))}
+            projectName={project.name}
           />
         )}
         {tab === "settings" && (
