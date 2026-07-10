@@ -34,10 +34,21 @@ export interface FunnelSourceSplit {
   outbound: number;
 }
 
+/** Same funnel shape as FunnelData's top-level stages, scoped to one project instead of blended across all of them. */
+export interface FunnelProjectBreakdown {
+  projectId: number;
+  projectName: string;
+  totalScreened: number;
+  stages: FunnelStageCount[];
+  archivedOrRejected: number;
+}
+
 export interface FunnelData {
   totalScreened: number;
   stages: FunnelStageCount[];
   sourceSplit: FunnelSourceSplit;
   archivedOrRejected: number;
   candidates: FunnelCandidate[];
+  /** Per-project breakdown of the same funnel, sorted by totalScreened descending. Candidates with no assigned project are excluded (already reflected in the blended totals above). */
+  byProject: FunnelProjectBreakdown[];
 }

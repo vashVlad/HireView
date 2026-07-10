@@ -153,6 +153,26 @@ export default function UsersPage() {
     fetchTeams();
   }
 
+  async function handleDeleteTeam(team: TeamRow) {
+    const memberNote =
+      team.members.length > 0
+        ? ` ${team.members.length} member${team.members.length === 1 ? "" : "s"} will lose access to this team's projects and candidates.`
+        : "";
+    if (
+      !confirm(
+        `Delete "${team.name}"? This cannot be undone.${memberNote} Any projects/candidates assigned to this team become unassigned — visible to admins only, hidden from recruiters until reassigned to a team.`
+      )
+    ) {
+      return;
+    }
+
+    // Optimistic update, same pattern as add/remove member below.
+    setTeams((prev) => prev.filter((t) => t.id !== team.id));
+
+    await fetch(`/api/admin/teams/${team.id}`, { method: "DELETE" });
+    fetchTeams();
+  }
+
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
     setInviteError(null);
@@ -451,7 +471,15 @@ export default function UsersPage() {
                 const available = users.filter((u) => !memberIds.has(u.id));
                 return (
                   <li key={team.id} className="px-6 py-4">
-                    <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{team.name}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{team.name}</p>
+                      <button
+                        onClick={() => handleDeleteTeam(team)}
+                        className="shrink-0 rounded-lg px-2 py-1 text-xs text-zinc-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10"
+                      >
+                        Delete team
+                      </button>
+                    </div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {team.members.length === 0 ? (
                         <span className="text-xs text-zinc-400">No members</span>
