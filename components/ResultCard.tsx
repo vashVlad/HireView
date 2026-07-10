@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { CandidateResult, CandidateStatus, CredibilityAssessment } from "@/lib/types";
+import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
 import { InsightList } from "./InsightList";
@@ -35,6 +35,7 @@ export function ResultCard({
   onCheckCrossProjectPromise,
   onTransferToProject,
   otherActiveCount,
+  nameMatch,
   solo = false,
 }: {
   result: CandidateResult;
@@ -49,6 +50,13 @@ export function ResultCard({
   onTransferToProject?: (suggestion: FitSuggestion) => Promise<void>;
   /** Count of other active projects in the team. undefined = not checked yet, 0 = nothing to suggest against. */
   otherActiveCount?: number;
+  /**
+   * Post-score name match against an already-saved candidate in this
+   * project — the one case the pre-score hash/filename check can't catch
+   * (two genuinely different resume files for the same person). Purely
+   * informational: scoring already happened by the time this is known.
+   */
+  nameMatch?: ExistingCandidateRef;
   solo?: boolean;
 }) {
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
@@ -211,6 +219,11 @@ export function ResultCard({
           <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>{result.fileName}</p>
         </div>
       </div>
+      {nameMatch && (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+          A different resume file for a candidate named <strong>{nameMatch.candidateName}</strong> already exists in this project — worth a second look, wasn&#x2019;t caught before scoring.
+        </p>
+      )}
       {trajectoryText && (
         <div className="mt-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
