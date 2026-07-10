@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import * as XLSX from "xlsx";
 import { SiteHeader } from "@/components/SiteHeader";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import type { FunnelData } from "@/lib/funnelview/types";
@@ -102,16 +103,66 @@ export default function FunnelViewPage() {
       })
     : [];
 
+  function handleExport() {
+    if (!data) return;
+
+    const summaryRows = data.stages.map((s) => ({
+      Stage: s.label,
+      Count: s.count,
+      "% of Previous Stage": s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—",
+    }));
+    summaryRows.push({ Stage: "Archived/Rejected", Count: data.archivedOrRejected, "% of Previous Stage": "—" });
+    const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+    summarySheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 20 }];
+
+    const candidateRows = data.candidates.map((c) => {
+      const archived = c.status === "archived" || c.trackerStage === "Reject";
+      return {
+        Name: c.candidateName,
+        Source: c.source === "outbound" ? "Outbound" : "Inbound",
+        Score: c.score,
+        "Current Stage": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
+        "Previous Stage": c.previousTrackerStage ?? "",
+        Recruiter: c.recruiterEmail ?? "",
+        "Screened Date": new Date(c.createdAt).toLocaleDateString(),
+        "Fraud Flags (Y/N)": c.hasFraudFlag ? "Y" : "N",
+        "Archived (Y/N)": archived ? "Y" : "N",
+      };
+    });
+    const candidateSheet = XLSX.utils.json_to_sheet(candidateRows);
+    candidateSheet["!cols"] = [
+      { wch: 24 }, { wch: 10 }, { wch: 8 }, { wch: 18 }, { wch: 18 },
+      { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 14 },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, summarySheet, "Funnel Summary");
+    XLSX.utils.book_append_sheet(wb, candidateSheet, "All Candidates");
+
+    const today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `FunnelView_Report_${today}.xlsx`);
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/funnelview" />
 
       <main className="mx-auto max-w-5xl px-6 py-10">
-        <div className="mb-8">
-          <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">FunnelView</h1>
-          <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-            Full candidate funnel, live from HireView data. Admin only.
-          </p>
+        <div className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">FunnelView</h1>
+            <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+              Full candidate funnel, live from HireView data. Admin only.
+            </p>
+          </div>
+          {data && (
+            <button
+              onClick={handleExport}
+              className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700"
+            >
+              Export Excel Report
+            </button>
+          )}
         </div>
 
         {error && (

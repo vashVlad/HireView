@@ -64,14 +64,22 @@ Deployed workflow tool for a recruiter working two roles at once at Brillio. Mul
 - **Funnel:** Total Screened (from `screening_batches.total_count`, org-wide) → Passed Threshold (count of `screenings` rows) → Reached Out (status ≠ `new_applicant`) → TA → L1 → L2 → In-Person → Offer, each showing count + conversion % from the immediately preceding stage. Archived/rejected candidates reported as a separate count (not folded into the cumulative bars), attributed to whichever stage they last reached via `previous_stage`.
 - **Source split:** inbound (`linkedin_mode = false`, applied via job board) vs outbound (`linkedin_mode = true`, sourced via LinkedIn) — confirmed this mapping by reading the actual UI copy in `app/projects/[id]/page.tsx` ("Screen LinkedIn profiles" toggle) rather than assuming.
 - **Candidate table:** name, role, current stage (+ previous if different), source badge, recruiter (colored initial avatar + email, reusing `lib/avatarColor.ts`). Filterable by role, archived/rejected hidden by default with a toggle.
-- No new schema, no new tables, no CSV export, no new role, org-wide not team-scoped (see decisions-log). Zero entanglement with `lib/screenings.ts` or the do-not-touch files.
+- No new schema, no new tables, no new role, org-wide not team-scoped (see decisions-log). Zero entanglement with `lib/screenings.ts` or the do-not-touch files.
 - **Merged to main, 2026-07-09.** `88b1d02` "feat: add FunnelView (Manager Visibility)" merged via merge commit `34182e0`. (`b22b2ab`, the docs/ + supabase/migrations/ reorg, had already reached main earlier via a separate PR #7 — Claude Code caught this before merging, so the actual delta merged here was FunnelView alone, not both.) `npx tsc --noEmit` clean, `npm run build` succeeded — `/funnelview` and `/api/funnelview` both compiled and appear in the route manifest. `phase-1-3-teams-architecture` branch deleted both locally and on origin after the merge — retired per the new one-branch-per-feature rule (see decisions-log).
-- **Not yet live-tested** in a running app (only verified via file re-reads + the build/typecheck above) — needs a real pass: confirm funnel numbers match actual pipeline state, confirm 403 for non-admin, confirm mobile layout.
+- **Live-tested and validated, 2026-07-09.** Confirmed against 78 real candidate screenings: 78 screened → 66 passed threshold (85%) → 24 reached out → 6 TA → 3 L1 → 3 L2 → 1 In-Person → 0 Offer, plus 10 archived. Numbers confirmed accurate, visualization confirmed clean and readable.
+- **Excel export added, 2026-07-09.** "Export Excel Report" button, admin-gated (same as the page). Two-sheet workbook: Funnel Summary (stage/count/% of previous) and All Candidates (name, source, score, current/previous stage, recruiter, screened date, fraud flags, archived). Built client-side from the already-fetched `FunnelData` state via the existing `xlsx` dependency (same library/pattern as the Tracker export) — not cached, reflects whatever's on screen at download time. Required extending `FunnelCandidate` (`lib/funnelview/types.ts`) and `getFunnelData()` (`lib/funnelview/data.ts`) with `score`/`hasFraudFlag`, sourced from the `screenings` table's `score`/`duplicate_flag`/`history_alert_type` columns.
 
 ## What's NOT shipped yet
 
-- **Outreach drafting (Phase 5)** — auto-draft LinkedIn messages. Repeatedly listed as next, never started.
-- **Impact metrics** — measure screening time + TA false positive rate. Needed for BLUEPRINT Phase 2 validation.
+(nothing currently — Outreach Drafting was descoped, see below; FunnelView is now fully validated)
+
+## Impact metrics
+
+- **Validated 2026-07-09** — see Impact Report (`docs/HireView-Impact-Report.docx`): 78 real candidate screenings, funnel numbers confirmed, business value calc added ($136.50 on one role from 3.9 hours saved, conservative per-role floor). The BLUEPRINT's older 60% throughput figure is untouched/unvalidated against this specific dataset — still worth reconciling per open-questions.md. TA false positive rate still not measured.
+
+## Descoped
+
+- **Outreach drafting** — removed from the roadmap 2026-07-09 per Vlad, not needed. Was listed as "Phase 3" (CLAUDE.md) / "Phase 4" / "Phase 5" (dev log, inconsistently) since Phase 0 and never started. See decisions-log.
 
 ## Deploy / migration status
 

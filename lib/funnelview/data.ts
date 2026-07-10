@@ -17,6 +17,9 @@ interface ScreeningFunnelRow {
   status: CandidateStatus;
   previous_status: CandidateStatus | null;
   linkedin_mode: boolean;
+  score: number;
+  duplicate_flag: boolean | null;
+  history_alert_type: string | null;
   created_at: string;
 }
 
@@ -48,7 +51,9 @@ export async function getFunnelData(): Promise<FunnelData> {
     supabase.from("screening_batches").select("total_count"),
     supabase
       .from("screenings")
-      .select("id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, created_at")
+      .select(
+        "id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, score, duplicate_flag, history_alert_type, created_at"
+      )
       .returns<ScreeningFunnelRow[]>(),
     supabase.from("tracker").select("screening_id, stage, previous_stage").returns<TrackerFunnelRow[]>(),
     supabase.from("projects").select("id, name").returns<{ id: number; name: string }[]>(),
@@ -77,6 +82,8 @@ export async function getFunnelData(): Promise<FunnelData> {
       recruiterId: s.user_id,
       recruiterEmail: s.user_id != null ? (emailByUserId.get(s.user_id) ?? s.user_id) : null,
       source: s.linkedin_mode ? "outbound" : "inbound",
+      score: s.score,
+      hasFraudFlag: Boolean(s.duplicate_flag) || s.history_alert_type != null,
       status: s.status,
       previousStatus: s.previous_status,
       trackerStage: stage,
