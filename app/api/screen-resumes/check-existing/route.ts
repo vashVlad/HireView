@@ -3,7 +3,8 @@ import { extractResumeText } from "@/lib/parseResume";
 import { hashResumeText, normalizeCandidateName, normalizeFileName } from "@/lib/resumeContentHash";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getAuthUser } from "@/lib/auth";
-import type { CheckExistingResult, ExistingCandidateRef, Recommendation } from "@/lib/types";
+import { listRejectionHistory } from "@/lib/screenings";
+import type { CheckExistingResult, ExistingCandidateRef, Recommendation, RejectionHistoryEntry } from "@/lib/types";
 
 export const maxDuration = 30;
 
@@ -59,13 +60,20 @@ export async function POST(request: NextRequest) {
   if (files.length === 0) {
     return NextResponse.json({ error: "At least one resume file is required" }, { status: 400 });
   }
+
+  // System-wide (any project, any team) — independent of projectId, so it's
+  // fetched even in the no-project-context branch below. Fails closed to []
+  // if reject_reason's migration hasn't run yet; never throws.
+  const rejectionHistory: RejectionHistoryEntry[] = await listRejectionHistory().catch(() => []);
+
   if (projectId == null) {
-    // No project context (e.g. ad-hoc screening) — nothing to check against.
+    // No project context (e.g. ad-hoc screening) — nothing project-scoped to check against.
     return NextResponse.json({
       results: files
         .filter((f): f is File => f instanceof File)
         .map((f) => ({ fileName: f.name, status: "new" as const })),
       existingCandidates: [],
+      rejectionHistory,
     });
   }
 
@@ -141,5 +149,5 @@ export async function POST(request: NextRequest) {
     })
   );
 
-  return NextResponse.json({ results, existingCandidates });
+  return NextResponse.json({ results, existingCandidates, rejectionHistory });
 }

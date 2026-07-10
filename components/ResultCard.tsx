@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef } from "@/lib/types";
+import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, RejectionHistoryEntry } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
 import { InsightList } from "./InsightList";
@@ -30,12 +30,13 @@ export function ResultCard({
   roleContext,
   jdAnalysis,
   onStatusChange,
-  onSave,
+  belowThreshold = false,
   onFindBetterFit,
   onCheckCrossProjectPromise,
   onTransferToProject,
   otherActiveCount,
   nameMatch,
+  rejectionHistory,
   solo = false,
 }: {
   result: CandidateResult;
@@ -43,12 +44,17 @@ export function ResultCard({
   roleContext?: string;
   jdAnalysis?: JDAnalysis | null;
   onStatusChange?: (id: number, status: CandidateStatus) => void;
-  onSave?: () => Promise<number>;
+  /**
+   * Every screened candidate is saved regardless of score — this just
+   * decides whether to surface the cross-project fit suggestion (a
+   * below-threshold score on THIS project doesn't mean much for others).
+   */
+  belowThreshold?: boolean;
   onFindBetterFit?: () => Promise<FitSuggestion | null>;
   /** Cheap Claude classification call — decides whether this candidate is worth auto-firing the full cross-project check for. */
   onCheckCrossProjectPromise?: () => Promise<boolean>;
   onTransferToProject?: (suggestion: FitSuggestion) => Promise<void>;
-  /** Count of other active projects in the team. undefined = not checked yet, 0 = nothing to suggest against. */
+  /** Count of other active projects across every team this recruiter belongs to. undefined = not checked yet, 0 = nothing to suggest against. */
   otherActiveCount?: number;
   /**
    * Post-score name match against an already-saved candidate in this
@@ -57,15 +63,19 @@ export function ResultCard({
    * informational: scoring already happened by the time this is known.
    */
   nameMatch?: ExistingCandidateRef;
+  /**
+   * System-wide (any project, any team) — this candidate was rejected
+   * somewhere in the system before. Deliberately not scoped like nameMatch,
+   * duplicateFlag, or historyAlertType — any recruiter should see this.
+   */
+  rejectionHistory?: RejectionHistoryEntry;
   solo?: boolean;
 }) {
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
     result.credibility ?? null
   );
   const [showQuestion, setShowQuestion] = useState(false);
-  const [savedId, setSavedId] = useState<number | undefined>(result.id);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedId] = useState<number | undefined>(result.id);
   const [checkingGate, setCheckingGate] = useState(false);
   const [gateChecked, setGateChecked] = useState(false);
   const [checkingFit, setCheckingFit] = useState(false);
@@ -115,7 +125,7 @@ export function ResultCard({
   // since setting a ref doesn't trigger a re-render or re-run the effect.
   const gateStartedRef = useRef(false);
   useEffect(() => {
-    if (!onCheckCrossProjectPromise || !hasOtherActiveProjects || savedId !== undefined) return;
+    if (!onCheckCrossProjectPromise || !hasOtherActiveProjects || !belowThreshold) return;
     if (gateStartedRef.current) return;
     gateStartedRef.current = true;
 
@@ -135,7 +145,7 @@ export function ResultCard({
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onCheckCrossProjectPromise, hasOtherActiveProjects, savedId]);
+  }, [onCheckCrossProjectPromise, hasOtherActiveProjects, belowThreshold]);
 
   async function handleTransfer() {
     if (!onTransferToProject || !fitSuggestion || transferring) return;
@@ -148,21 +158,6 @@ export function ResultCard({
       setTransferError(err instanceof Error ? err.message : "Transfer failed");
     } finally {
       setTransferring(false);
-    }
-  }
-
-  async function handleSave() {
-    if (!onSave || saving) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      const id = await onSave();
-      setSavedId(id);
-      result.id = id; // mutate so status change handler works
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : "Failed to save");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -224,22 +219,65 @@ export function ResultCard({
           A different resume file for a candidate named <strong>{nameMatch.candidateName}</strong> already exists in this project — worth a second look, wasn&#x2019;t caught before scoring.
         </p>
       )}
-      {trajectoryText && (
-        <div className="mt-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Career trajectory
-          </p>
-          <TrajectoryRenderer
-            text={trajectoryText}
-            className={solo ? "text-base" : "text-sm"}
-            highlights={mustSkills.length || niceSkills.length ? { must: mustSkills, nice: niceSkills } : undefined}
-          />
+      {rejectionHistory && (
+        <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-center text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
+          Previously rejected{rejectionHistory.projectName ? <> for <strong>{rejectionHistory.projectName}</strong></> : null}
+          {rejectionHistory.reason ? <> — &#x201C;{rejectionHistory.reason}&#x201D;</> : " — no reason recorded"}.
+        </p>
+      )}
+
+      {/* Cross-project fit — surfaced immediately, right before Career Trajectory,
+          so a recruiter sees it before reading anything else. Every candidate is
+          already saved regardless of score; this is purely about whether a
+          stronger-fitting open role exists elsewhere. A cheap Claude gate decides
+          whether to auto-fire the real check; manual link otherwise. */}
+      {belowThreshold && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
+        <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
+          {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
+          {!fitError && (checkingGate || checkingFit) && (
+            <p className="text-xs text-violet-500 dark:text-violet-400">Checking other active roles…</p>
+          )}
+          {!fitError && !checkingGate && !checkingFit && fitChecked && (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-zinc-600 dark:text-zinc-300">
+                {fitSuggestion ? (
+                  <>
+                    Stronger fit for <span className="font-semibold text-violet-600 dark:text-violet-400">{fitSuggestion.projectName}</span> — scored {fitSuggestion.score} there
+                  </>
+                ) : (
+                  "No stronger fit found among your other active roles."
+                )}
+              </p>
+              {fitSuggestion && onTransferToProject && (
+                <div className="flex items-center gap-2 shrink-0">
+                  {transferError && <span className="text-xs text-rose-500">{transferError}</span>}
+                  <button
+                    type="button"
+                    onClick={handleTransfer}
+                    disabled={transferring}
+                    className="shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {transferring ? "Transferring…" : `Transfer to ${fitSuggestion.projectName}`}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {!fitError && !checkingGate && !checkingFit && !fitChecked && (gateChecked || !onCheckCrossProjectPromise) && (
+            <button
+              type="button"
+              onClick={handleFindBetterFit}
+              className="text-xs font-medium text-violet-500 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+            >
+              Check other active roles
+            </button>
+          )}
         </div>
       )}
 
-      {/* Transferred confirmation — replaces the unsaved banner once a transfer succeeds */}
+      {/* Transferred confirmation — replaces the fit-suggestion block once a transfer succeeds */}
       {transferredTo && (
-        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
+        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
           Transferred to{" "}
           <Link
             href={`/projects/${transferredTo.projectId}?tab=pipeline`}
@@ -250,70 +288,16 @@ export function ResultCard({
         </div>
       )}
 
-      {/* Unsaved banner */}
-      {savedId === undefined && onSave && !transferredTo && (
-        <div className="mt-4 flex flex-col gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-800/50">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Score below threshold — not saved to pipeline
-            </p>
-            <div className="flex items-center gap-2 shrink-0">
-              {saveError && <span className="text-xs text-rose-500">{saveError}</span>}
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-              >
-                {saving ? "Saving…" : "Save anyway"}
-              </button>
-            </div>
-          </div>
-
-          {/* Cross-project fit — a cheap Claude gate decides whether to auto-fire the real check; manual link otherwise */}
-          {onFindBetterFit && hasOtherActiveProjects && (
-            <div className="border-t border-zinc-200 pt-2.5 dark:border-zinc-700">
-              {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
-              {!fitError && (checkingGate || checkingFit) && (
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">Checking other active roles…</p>
-              )}
-              {!fitError && !checkingGate && !checkingFit && fitChecked && (
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs text-zinc-600 dark:text-zinc-300">
-                    {fitSuggestion ? (
-                      <>
-                        Stronger fit for <span className="font-semibold text-violet-600 dark:text-violet-400">{fitSuggestion.projectName}</span> — scored {fitSuggestion.score} there
-                      </>
-                    ) : (
-                      "No stronger fit found among your other active roles."
-                    )}
-                  </p>
-                  {fitSuggestion && onTransferToProject && (
-                    <div className="flex items-center gap-2 shrink-0">
-                      {transferError && <span className="text-xs text-rose-500">{transferError}</span>}
-                      <button
-                        type="button"
-                        onClick={handleTransfer}
-                        disabled={transferring}
-                        className="shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {transferring ? "Transferring…" : `Transfer to ${fitSuggestion.projectName}`}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {!fitError && !checkingGate && !checkingFit && !fitChecked && (gateChecked || !onCheckCrossProjectPromise) && (
-                <button
-                  type="button"
-                  onClick={handleFindBetterFit}
-                  className="text-xs font-medium text-zinc-400 underline decoration-dotted underline-offset-2 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
-                >
-                  Check other active roles
-                </button>
-              )}
-            </div>
-          )}
+      {trajectoryText && (
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+            Career trajectory
+          </p>
+          <TrajectoryRenderer
+            text={trajectoryText}
+            className={solo ? "text-base" : "text-sm"}
+            highlights={mustSkills.length || niceSkills.length ? { must: mustSkills, nice: niceSkills } : undefined}
+          />
         </div>
       )}
 

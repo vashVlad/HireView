@@ -124,26 +124,28 @@ export async function POST(request: NextRequest) {
       );
       results.push(result);
 
-      // Only persist candidates above the project's score threshold.
-      // Default is 45; configurable per-project in Settings tab.
-      if (result.score >= scoreThreshold) {
-        // Awaited (not fire-and-forget): Vercel can freeze the function as
-        // soon as the response is sent, which would silently drop an
-        // un-awaited write.
-        try {
-          const { id } = await saveScreening({
-            result,
-            jobDescription,
-            resumeFile: resume.buffer,
-            resumeMimeType: resume.mimeType,
-            linkedInMode: linkedInModeOverride,
-            projectId,
-            userId,
-          });
-          result.id = id;
-        } catch (err) {
-          console.error("Failed to persist screening result:", err);
-        }
+      // Persist every screened candidate, regardless of score (Teti's
+      // request, 2026-07-10 — no candidate should be lost, including
+      // below-threshold ones, so rejection history is visible later).
+      // scoreThreshold now only gates the cross-project fit suggestion in
+      // the UI, not whether a record gets saved at all.
+      //
+      // Awaited (not fire-and-forget): Vercel can freeze the function as
+      // soon as the response is sent, which would silently drop an
+      // un-awaited write.
+      try {
+        const { id } = await saveScreening({
+          result,
+          jobDescription,
+          resumeFile: resume.buffer,
+          resumeMimeType: resume.mimeType,
+          linkedInMode: linkedInModeOverride,
+          projectId,
+          userId,
+        });
+        result.id = id;
+      } catch (err) {
+        console.error("Failed to persist screening result:", err);
       }
     } catch (error) {
       errors.push({
