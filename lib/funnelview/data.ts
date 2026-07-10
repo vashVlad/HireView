@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "@/lib/supabase";
+import { getRecruiterEmailMap } from "@/lib/recruiters";
 import type { CandidateStatus, TrackerStage } from "@/lib/types";
 import type { FunnelCandidate, FunnelData, FunnelStageCount } from "./types";
 
@@ -43,7 +44,7 @@ function furthestStage(stage: TrackerStage | null, previousStage: TrackerStage |
 export async function getFunnelData(): Promise<FunnelData> {
   const supabase = getSupabaseClient();
 
-  const [batchesRes, screeningsRes, trackerRes, projectsRes, usersRes] = await Promise.all([
+  const [batchesRes, screeningsRes, trackerRes, projectsRes, emailByUserId] = await Promise.all([
     supabase.from("screening_batches").select("total_count"),
     supabase
       .from("screenings")
@@ -51,7 +52,7 @@ export async function getFunnelData(): Promise<FunnelData> {
       .returns<ScreeningFunnelRow[]>(),
     supabase.from("tracker").select("screening_id, stage, previous_stage").returns<TrackerFunnelRow[]>(),
     supabase.from("projects").select("id, name").returns<{ id: number; name: string }[]>(),
-    supabase.auth.admin.listUsers(),
+    getRecruiterEmailMap(),
   ]);
 
   if (screeningsRes.error) throw screeningsRes.error;
@@ -63,7 +64,6 @@ export async function getFunnelData(): Promise<FunnelData> {
   const screenings = screeningsRes.data ?? [];
   const trackerByScreeningId = new Map((trackerRes.data ?? []).map((t) => [t.screening_id, t]));
   const projectNameById = new Map((projectsRes.data ?? []).map((p) => [p.id, p.name]));
-  const emailByUserId = new Map((usersRes.data?.users ?? []).map((u) => [u.id, u.email ?? u.id]));
 
   const candidates: FunnelCandidate[] = screenings.map((s) => {
     const tracker = trackerByScreeningId.get(s.id);
