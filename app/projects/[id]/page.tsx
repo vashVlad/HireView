@@ -8,7 +8,7 @@ import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
-import { ResultCard } from "@/components/ResultCard";
+import { ResultCard, type FitSuggestion } from "@/components/ResultCard";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -246,6 +246,23 @@ function ScreenTab({ project, onScreeningsSaved }: {
   const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [isLinkedInMode, setIsLinkedInMode] = useState(false);
+  // undefined = not checked yet, 0 = checked and there's nothing to suggest against.
+  const [otherActiveCount, setOtherActiveCount] = useState<number | undefined>(undefined);
+  // Serializes every cross-project-fit call — gate checks and real checks,
+  // auto-fired and manual alike — to at most one in flight at a time, so a
+  // batch of several below-threshold candidates can't burst concurrent
+  // Claude calls.
+  const fitQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+
+  useEffect(() => {
+    if (screenView !== "results") return;
+    let cancelled = false;
+    fetch(`/api/cross-project-fit?currentProjectId=${project.id}`)
+      .then((res) => (res.ok ? res.json() : { count: 0 }))
+      .then((data) => { if (!cancelled) setOtherActiveCount(data.count ?? 0); })
+      .catch(() => { if (!cancelled) setOtherActiveCount(0); });
+    return () => { cancelled = true; };
+  }, [screenView, project.id]);
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -347,6 +364,64 @@ function ScreenTab({ project, onScreeningsSaved }: {
                 setResults((prev) => prev.map((r) => r.fileName === result.fileName ? { ...r, id: data.id } : r));
                 onScreeningsSaved();
                 return data.id as number;
+              } : undefined}
+              otherActiveCount={otherActiveCount}
+              onCheckCrossProjectPromise={result.id === undefined ? () => {
+                const run = async () => {
+                  const file = files.find((f) => f.name === result.fileName);
+                  if (!file) return false;
+                  const fd = new FormData();
+                  fd.set("resumeFile", file);
+                  fd.set("currentProjectId", String(project.id));
+                  const res = await fetch("/api/cross-project-fit/gate", { method: "POST", body: fd });
+                  if (!res.ok) return false;
+                  const data = await res.json().catch(() => null);
+                  return Boolean(data?.promising);
+                };
+                // Chained onto the same shared queue as onFindBetterFit below —
+                // gate checks and real checks never run concurrently either.
+                const chained = fitQueueRef.current.then(run, run);
+                fitQueueRef.current = chained.catch(() => {});
+                return chained as Promise<boolean>;
+              } : undefined}
+              onFindBetterFit={result.id === undefined ? () => {
+                const run = async () => {
+                  const file = files.find((f) => f.name === result.fileName);
+                  if (!file) throw new Error("Original file no longer available — try re-uploading");
+                  const fd = new FormData();
+                  fd.set("resumeFile", file);
+                  fd.set("currentProjectId", String(project.id));
+                  const res = await fetch("/api/cross-project-fit", { method: "POST", body: fd });
+                  if (!res.ok) {
+                    const body = await res.json().catch(() => null);
+                    throw new Error(body?.error ?? "Could not check other roles");
+                  }
+                  const data = await res.json();
+                  return data.suggestion as FitSuggestion | null;
+                };
+                // Chain onto the shared queue so this call waits for anything
+                // already in flight, regardless of which card triggered it.
+                const chained = fitQueueRef.current.then(run, run);
+                fitQueueRef.current = chained.catch(() => {});
+                return chained as Promise<FitSuggestion | null>;
+              } : undefined}
+              onTransferToProject={result.id === undefined ? async (suggestion: FitSuggestion) => {
+                const file = files.find((f) => f.name === result.fileName);
+                if (!file) throw new Error("Original file no longer available — try re-uploading");
+                const fd = new FormData();
+                fd.set("resultJson", JSON.stringify(suggestion.result));
+                fd.set("resumeFile", file);
+                fd.set("jobDescription", suggestion.jobDescription);
+                fd.set("projectId", String(suggestion.projectId));
+                if (isLinkedInMode) fd.set("linkedInMode", "true");
+                const res = await fetch("/api/screenings/save-one", { method: "POST", body: fd });
+                if (!res.ok) {
+                  const body = await res.json().catch(() => null);
+                  throw new Error(body?.error ?? "Transfer failed");
+                }
+                // Not touching result.id here — this screening now belongs to
+                // suggestion.projectId, a different project, not this one.
+                onScreeningsSaved();
               } : undefined}
             />
           ))}
