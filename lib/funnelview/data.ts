@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRecruiterEmailMap } from "@/lib/recruiters";
 import type { CandidateStatus, TrackerStage } from "@/lib/types";
-import type { FunnelCandidate, FunnelData, FunnelStageCount } from "./types";
+import type { FunnelCandidate, FunnelData, FunnelProjectBreakdown, FunnelStageCount } from "./types";
 
 // Isolated data layer — deliberately does not import lib/screenings.ts or reuse
 // SCREENING_COLUMNS. FunnelView needs its own column set (user_id, linkedin_mode,
@@ -40,59 +40,12 @@ function furthestStage(stage: TrackerStage | null, previousStage: TrackerStage |
 }
 
 /**
- * Admin-only, org-wide funnel — deliberately not team-scoped (matches the existing
- * /analytics precedent: admin sees everything regardless of team, no new role).
- * See memory/HireView_Enterprise_Plan.md, FUNNELVIEW section.
+ * Builds the funnel stage bars (Total Screened → ... → Offer) plus the
+ * archived/rejected count for one slice of candidates — the org-wide
+ * blended view and each per-project breakdown all go through this same
+ * function, so the two can never silently drift apart in how they count.
  */
-export async function getFunnelData(): Promise<FunnelData> {
-  const supabase = getSupabaseClient();
-
-  const [batchesRes, screeningsRes, trackerRes, projectsRes, emailByUserId] = await Promise.all([
-    supabase.from("screening_batches").select("total_count"),
-    supabase
-      .from("screenings")
-      .select(
-        "id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, score, duplicate_flag, history_alert_type, created_at"
-      )
-      .returns<ScreeningFunnelRow[]>(),
-    supabase.from("tracker").select("screening_id, stage, previous_stage").returns<TrackerFunnelRow[]>(),
-    supabase.from("projects").select("id, name").returns<{ id: number; name: string }[]>(),
-    getRecruiterEmailMap(),
-  ]);
-
-  if (screeningsRes.error) throw screeningsRes.error;
-  if (trackerRes.error) throw trackerRes.error;
-
-  const batches = (batchesRes.data ?? []) as { total_count: number }[];
-  const totalScreened = batches.reduce((sum, b) => sum + b.total_count, 0);
-
-  const screenings = screeningsRes.data ?? [];
-  const trackerByScreeningId = new Map((trackerRes.data ?? []).map((t) => [t.screening_id, t]));
-  const projectNameById = new Map((projectsRes.data ?? []).map((p) => [p.id, p.name]));
-
-  const candidates: FunnelCandidate[] = screenings.map((s) => {
-    const tracker = trackerByScreeningId.get(s.id);
-    const stage = tracker?.stage ?? null;
-    const previousStage = tracker?.previous_stage ?? null;
-    return {
-      screeningId: s.id,
-      candidateName: s.candidate_name,
-      projectId: s.project_id,
-      projectName: s.project_id != null ? (projectNameById.get(s.project_id) ?? `Project ${s.project_id}`) : "—",
-      recruiterId: s.user_id,
-      recruiterEmail: s.user_id != null ? (emailByUserId.get(s.user_id) ?? s.user_id) : null,
-      source: s.linkedin_mode ? "outbound" : "inbound",
-      score: s.score,
-      hasFraudFlag: Boolean(s.duplicate_flag) || s.history_alert_type != null,
-      status: s.status,
-      previousStatus: s.previous_status,
-      trackerStage: stage,
-      previousTrackerStage: previousStage,
-      furthestStage: furthestStage(stage, previousStage),
-      createdAt: s.created_at,
-    };
-  });
-
+function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { stages: FunnelStageCount[]; archivedOrRejected: number } {
   const passedThreshold = candidates.length;
   const reachedOut = candidates.filter((c) => c.status !== "new_applicant").length;
   const archivedOrRejected = candidates.filter(
@@ -131,10 +84,102 @@ export async function getFunnelData(): Promise<FunnelData> {
     };
   });
 
+  return { stages, archivedOrRejected };
+}
+
+/**
+ * Admin-only, org-wide funnel — deliberately not team-scoped (matches the existing
+ * /analytics precedent: admin sees everything regardless of team, no new role).
+ * See memory/HireView_Enterprise_Plan.md, FUNNELVIEW section.
+ */
+export async function getFunnelData(): Promise<FunnelData> {
+  const supabase = getSupabaseClient();
+
+  const [batchesRes, screeningsRes, trackerRes, projectsRes, emailByUserId] = await Promise.all([
+    supabase.from("screening_batches").select("total_count, project_id"),
+    supabase
+      .from("screenings")
+      .select(
+        "id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, score, duplicate_flag, history_alert_type, created_at"
+      )
+      .returns<ScreeningFunnelRow[]>(),
+    supabase.from("tracker").select("screening_id, stage, previous_stage").returns<TrackerFunnelRow[]>(),
+    supabase.from("projects").select("id, name").returns<{ id: number; name: string }[]>(),
+    getRecruiterEmailMap(),
+  ]);
+
+  if (screeningsRes.error) throw screeningsRes.error;
+  if (trackerRes.error) throw trackerRes.error;
+
+  const batches = (batchesRes.data ?? []) as { total_count: number; project_id: number | null }[];
+  const totalScreened = batches.reduce((sum, b) => sum + b.total_count, 0);
+
+  const screenings = screeningsRes.data ?? [];
+  const trackerByScreeningId = new Map((trackerRes.data ?? []).map((t) => [t.screening_id, t]));
+  const projectNameById = new Map((projectsRes.data ?? []).map((p) => [p.id, p.name]));
+
+  const candidates: FunnelCandidate[] = screenings.map((s) => {
+    const tracker = trackerByScreeningId.get(s.id);
+    const stage = tracker?.stage ?? null;
+    const previousStage = tracker?.previous_stage ?? null;
+    return {
+      screeningId: s.id,
+      candidateName: s.candidate_name,
+      projectId: s.project_id,
+      projectName: s.project_id != null ? (projectNameById.get(s.project_id) ?? `Project ${s.project_id}`) : "—",
+      recruiterId: s.user_id,
+      recruiterEmail: s.user_id != null ? (emailByUserId.get(s.user_id) ?? s.user_id) : null,
+      source: s.linkedin_mode ? "outbound" : "inbound",
+      score: s.score,
+      hasFraudFlag: Boolean(s.duplicate_flag) || s.history_alert_type != null,
+      status: s.status,
+      previousStatus: s.previous_status,
+      trackerStage: stage,
+      previousTrackerStage: previousStage,
+      furthestStage: furthestStage(stage, previousStage),
+      createdAt: s.created_at,
+    };
+  });
+
+  const { stages, archivedOrRejected } = computeStages(totalScreened, candidates);
+
   const sourceSplit = {
     inbound: candidates.filter((c) => c.source === "inbound").length,
     outbound: candidates.filter((c) => c.source === "outbound").length,
   };
 
-  return { totalScreened, stages, sourceSplit, archivedOrRejected, candidates };
+  // Per-project breakdown — same funnel shape as above, scoped to one project
+  // at a time, so a blended org-wide number can't hide one specific role
+  // converting badly. Candidates/batches with no assigned project are left
+  // out of this list (they're still counted in the blended totals above);
+  // union of both sources since a project can have below-threshold-only
+  // batches (candidates never persisted) with zero rows in `candidates`.
+  const totalScreenedByProject = new Map<number, number>();
+  for (const b of batches) {
+    if (b.project_id == null) continue;
+    totalScreenedByProject.set(b.project_id, (totalScreenedByProject.get(b.project_id) ?? 0) + b.total_count);
+  }
+  const candidatesByProject = new Map<number, FunnelCandidate[]>();
+  for (const c of candidates) {
+    if (c.projectId == null) continue;
+    const list = candidatesByProject.get(c.projectId);
+    if (list) list.push(c);
+    else candidatesByProject.set(c.projectId, [c]);
+  }
+  const projectIds = new Set<number>([...totalScreenedByProject.keys(), ...candidatesByProject.keys()]);
+
+  const byProject: FunnelProjectBreakdown[] = Array.from(projectIds).map((projectId) => {
+    const projectCandidates = candidatesByProject.get(projectId) ?? [];
+    const projectTotalScreened = totalScreenedByProject.get(projectId) ?? 0;
+    const { stages: projectStages, archivedOrRejected: projectArchivedOrRejected } = computeStages(projectTotalScreened, projectCandidates);
+    return {
+      projectId,
+      projectName: projectNameById.get(projectId) ?? `Project ${projectId}`,
+      totalScreened: projectTotalScreened,
+      stages: projectStages,
+      archivedOrRejected: projectArchivedOrRejected,
+    };
+  }).sort((a, b) => b.totalScreened - a.totalScreened);
+
+  return { totalScreened, stages, sourceSplit, archivedOrRejected, candidates, byProject };
 }

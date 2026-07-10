@@ -96,3 +96,21 @@ export async function removeTeamMember(teamId: number, userId: string): Promise<
     .eq("user_id", userId);
   if (error) throw error;
 }
+
+/**
+ * Deletes a team. `team_members` rows cascade-delete (FK ON DELETE CASCADE).
+ * `projects.team_id`, `screenings.team_id`, and `resume_fingerprints.team_id`
+ * are ON DELETE SET NULL — any project/candidate assigned to this team is not
+ * deleted, it just becomes unassigned. An unassigned project/candidate drops
+ * out of every recruiter's team-scoped view (`teamIdsFilter`, see lib/auth.ts)
+ * since `NULL` can never match a `.in("team_id", teamIds)` filter — only an
+ * admin (who bypasses team scoping entirely) still sees it. Caller is
+ * responsible for warning about this before calling — this function does not
+ * pre-check membership or project counts, same "just delete, let the FK
+ * constraints handle cleanup" pattern as lib/projects.ts's deleteProject.
+ */
+export async function deleteTeam(teamId: number): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("teams").delete().eq("id", teamId);
+  if (error) throw error;
+}

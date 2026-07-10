@@ -42,11 +42,11 @@ function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
       </div>
       <div className="flex items-center justify-between text-sm">
         <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Inbound
+          <span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Applied
           <span className="font-semibold tabular-nums">{split.inbound.toLocaleString()}</span>
         </span>
         <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Outbound (LinkedIn)
+          <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Sourced (LinkedIn)
           <span className="font-semibold tabular-nums">{split.outbound.toLocaleString()}</span>
         </span>
       </div>
@@ -67,7 +67,7 @@ export default function FunnelViewPage() {
   const [data, setData] = useState<FunnelData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [projectFilter, setProjectFilter] = useState<string>("");
+  const [selectedProjectId, setSelectedProjectId] = useState<number | "">("");
   const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
@@ -91,35 +91,51 @@ export default function FunnelViewPage() {
     };
   }, []);
 
-  const projectNames = data
-    ? Array.from(new Set(data.candidates.map((c) => c.projectName))).sort()
-    : [];
+  // Single selector drives the whole page — funnel, source split, candidate
+  // table, and export all scope to whichever role (or "All roles") is picked
+  // here, so there's one source of truth instead of separate filters drifting
+  // out of sync with each other.
+  const roleOptions = data ? [...data.byProject].sort((a, b) => a.projectName.localeCompare(b.projectName)) : [];
+  const activeProject = data && selectedProjectId !== "" ? (data.byProject.find((p) => p.projectId === selectedProjectId) ?? null) : null;
 
-  const filteredCandidates = data
-    ? data.candidates.filter((c) => {
-        if (projectFilter && c.projectName !== projectFilter) return false;
-        if (!showArchived && (c.status === "archived" || c.trackerStage === "Reject")) return false;
-        return true;
-      })
+  const activeCandidates = data
+    ? selectedProjectId === "" ? data.candidates : data.candidates.filter((c) => c.projectId === selectedProjectId)
     : [];
+  const activeStages = activeProject ? activeProject.stages : (data?.stages ?? []);
+  const activeTotalScreened = activeProject ? activeProject.totalScreened : (data?.totalScreened ?? 0);
+  const activeArchivedOrRejected = activeProject ? activeProject.archivedOrRejected : (data?.archivedOrRejected ?? 0);
+  const activeSourceSplit = activeProject
+    ? {
+        inbound: activeCandidates.filter((c) => c.source === "inbound").length,
+        outbound: activeCandidates.filter((c) => c.source === "outbound").length,
+      }
+    : (data?.sourceSplit ?? { inbound: 0, outbound: 0 });
+
+  const filteredCandidates = activeCandidates.filter((c) => {
+    if (!showArchived && (c.status === "archived" || c.trackerStage === "Reject")) return false;
+    return true;
+  });
 
   function handleExport() {
     if (!data) return;
 
-    const summaryRows = data.stages.map((s) => ({
+    const summaryRows = activeStages.map((s) => ({
       Stage: s.label,
       Count: s.count,
       "% of Previous Stage": s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—",
     }));
-    summaryRows.push({ Stage: "Archived/Rejected", Count: data.archivedOrRejected, "% of Previous Stage": "—" });
+    summaryRows.push({ Stage: "Archived/Rejected", Count: activeArchivedOrRejected, "% of Previous Stage": "—" });
+    summaryRows.push({ Stage: "Sourced (LinkedIn)", Count: activeSourceSplit.outbound, "% of Previous Stage": "—" });
+    summaryRows.push({ Stage: "Applied", Count: activeSourceSplit.inbound, "% of Previous Stage": "—" });
     const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
     summarySheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 20 }];
 
-    const candidateRows = data.candidates.map((c) => {
+    const candidateRows = activeCandidates.map((c) => {
       const archived = c.status === "archived" || c.trackerStage === "Reject";
       return {
         Name: c.candidateName,
-        Source: c.source === "outbound" ? "Outbound" : "Inbound",
+        Role: c.projectName,
+        Source: c.source === "outbound" ? "Sourced" : "Applied",
         Score: c.score,
         "Current Stage": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
         "Previous Stage": c.previousTrackerStage ?? "",
@@ -131,16 +147,38 @@ export default function FunnelViewPage() {
     });
     const candidateSheet = XLSX.utils.json_to_sheet(candidateRows);
     candidateSheet["!cols"] = [
-      { wch: 24 }, { wch: 10 }, { wch: 8 }, { wch: 18 }, { wch: 18 },
+      { wch: 24 }, { wch: 22 }, { wch: 10 }, { wch: 8 }, { wch: 18 }, { wch: 18 },
       { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 14 },
     ];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, summarySheet, "Funnel Summary");
-    XLSX.utils.book_append_sheet(wb, candidateSheet, "All Candidates");
+
+    // "All roles" gets a bonus per-project breakdown sheet, since that shape
+    // of data only exists when nothing's filtered down to one role already.
+    if (!activeProject) {
+      const byProjectRows = data.byProject.flatMap((project) =>
+        project.stages.map((s) => ({
+          Role: project.projectName,
+          "Total Screened (Role)": project.totalScreened,
+          Stage: s.label,
+          Count: s.count,
+          "% of Previous Stage": s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—",
+          "Archived/Rejected (Role)": project.archivedOrRejected,
+        }))
+      );
+      const byProjectSheet = XLSX.utils.json_to_sheet(byProjectRows);
+      byProjectSheet["!cols"] = [
+        { wch: 28 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 18 }, { wch: 20 },
+      ];
+      XLSX.utils.book_append_sheet(wb, byProjectSheet, "By Project");
+    }
+
+    XLSX.utils.book_append_sheet(wb, candidateSheet, activeProject ? "Candidates" : "All Candidates");
 
     const today = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `FunnelView_Report_${today}.xlsx`);
+    const roleSlug = activeProject ? `_${activeProject.projectName.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")}` : "";
+    XLSX.writeFile(wb, `FunnelView_Report${roleSlug}_${today}.xlsx`);
   }
 
   return (
@@ -156,12 +194,28 @@ export default function FunnelViewPage() {
             </p>
           </div>
           {data && (
-            <button
-              onClick={handleExport}
-              className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700"
-            >
-              Export Excel Report
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {roleOptions.length > 0 && (
+                <select
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                >
+                  <option value="">All roles</option>
+                  {roleOptions.map((project) => (
+                    <option key={project.projectId} value={project.projectId}>
+                      {project.projectName}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={handleExport}
+                className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700"
+              >
+                Export Excel Report
+              </button>
+            </div>
           )}
         </div>
 
@@ -181,19 +235,21 @@ export default function FunnelViewPage() {
             {/* Funnel */}
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Funnel</h2>
+                <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  Funnel {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}
+                </h2>
                 <span className="text-xs text-zinc-400 dark:text-zinc-500">count · % of previous stage</span>
               </div>
-              {data.totalScreened === 0 && data.stages.every((s) => s.count === 0) ? (
+              {activeTotalScreened === 0 && activeStages.every((s) => s.count === 0) ? (
                 <p className="py-6 text-center text-sm text-zinc-400">
-                  No screening activity yet — the funnel fills in as candidates are screened.
+                  No screening activity yet{activeProject ? " for this role" : ""} — the funnel fills in as candidates are screened.
                 </p>
               ) : (
-                <StageBar stages={data.stages} />
+                <StageBar stages={activeStages} />
               )}
-              {data.archivedOrRejected > 0 && (
+              {activeArchivedOrRejected > 0 && (
                 <p className="mt-4 border-t border-zinc-100 pt-4 text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
-                  {data.archivedOrRejected.toLocaleString()} candidate{data.archivedOrRejected === 1 ? "" : "s"} archived or
+                  {activeArchivedOrRejected.toLocaleString()} candidate{activeArchivedOrRejected === 1 ? "" : "s"} archived or
                   rejected along the way — excluded from the bars above, counted at whichever stage they last reached.
                 </p>
               )}
@@ -201,11 +257,13 @@ export default function FunnelViewPage() {
 
             {/* Source split */}
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-              <h2 className="mb-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Source split</h2>
-              {data.sourceSplit.inbound + data.sourceSplit.outbound === 0 ? (
+              <h2 className="mb-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                Sourced vs. Applied {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}
+              </h2>
+              {activeSourceSplit.inbound + activeSourceSplit.outbound === 0 ? (
                 <p className="py-2 text-center text-sm text-zinc-400">No data yet.</p>
               ) : (
-                <SourceSplit split={data.sourceSplit} />
+                <SourceSplit split={activeSourceSplit} />
               )}
             </div>
 
@@ -213,23 +271,10 @@ export default function FunnelViewPage() {
             <div className="rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
                 <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                  Candidates <span className="font-normal text-zinc-400">({filteredCandidates.length})</span>
+                  Candidates {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}{" "}
+                  <span className="font-normal text-zinc-400">({filteredCandidates.length})</span>
                 </h2>
                 <div className="flex items-center gap-2">
-                  {projectNames.length > 1 && (
-                    <select
-                      value={projectFilter}
-                      onChange={(e) => setProjectFilter(e.target.value)}
-                      className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-                    >
-                      <option value="">All roles</option>
-                      {projectNames.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
                   <label className="flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
                     <input
                       type="checkbox"
@@ -276,7 +321,7 @@ export default function FunnelViewPage() {
                                 : "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
                             }`}
                           >
-                            {c.source === "outbound" ? "Outbound" : "Inbound"}
+                            {c.source === "outbound" ? "Sourced" : "Applied"}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
