@@ -15,12 +15,14 @@ interface ResumeUploaderProps {
 
 export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [rejected, setRejected] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function addFiles(incoming: FileList | File[]) {
-    const accepted = Array.from(incoming).filter((file) =>
-      /\.(pdf|docx)$/i.test(file.name)
-    );
+    const all = Array.from(incoming);
+    const accepted = all.filter((file) => /\.(pdf|docx?)$/i.test(file.name));
+    const skipped = all.filter((file) => !/\.(pdf|docx?)$/i.test(file.name));
+    setRejected(skipped.map((file) => file.name));
     const existingNames = new Set(files.map((file) => file.name));
     const merged = [...files, ...accepted.filter((file) => !existingNames.has(file.name))];
     onFilesChange(merged);
@@ -52,7 +54,7 @@ export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf,.docx"
+          accept=".pdf,.doc,.docx"
           multiple
           className="hidden"
           onChange={(e) => e.target.files && addFiles(e.target.files)}
@@ -68,6 +70,12 @@ export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
         </p>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">PDF or Word — drop as many as you like</p>
       </label>
+
+      {rejected.length > 0 && (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
+          Skipped — only PDF and Word (.doc/.docx) are supported: {rejected.join(", ")}
+        </p>
+      )}
 
       {files.length > 0 && (
         <div className="flex items-center justify-between gap-2">

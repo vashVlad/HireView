@@ -99,13 +99,12 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [roleName, setRoleName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  async function extractFile(file: File) {
     setExtracting(true);
     setError(null);
     const form = new FormData();
@@ -122,6 +121,19 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
       // reset so same file can be re-uploaded
       if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) extractFile(file);
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+    if (extracting) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) extractFile(file);
   }
 
   // auto-focus textarea on open
@@ -203,18 +215,32 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         {/* Step: input */}
         {(step === "input" || step === "analyzing") && (
           <div className="flex flex-col gap-4">
-            <div className="relative">
+            <div
+              className="relative"
+              onDragOver={(e) => { e.preventDefault(); if (!extracting) setIsDragging(true); }}
+              onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+              onDrop={handleDrop}
+            >
               <textarea ref={textareaRef} value={jd} onChange={(e) => setJd(e.target.value)}
-                placeholder="Paste job description here..."
+                placeholder="Paste job description here, or drag & drop a PDF/Word/text file..."
                 rows={10}
-                className="w-full resize-none rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/60 dark:focus:bg-zinc-900" />
+                className={`w-full resize-none rounded-2xl border px-4 py-3 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-violet-400 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/60 dark:focus:bg-zinc-900 ${
+                  isDragging
+                    ? "border-violet-400 bg-violet-50 dark:border-violet-500 dark:bg-violet-500/10"
+                    : "border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800/50"
+                }`} />
+              {isDragging && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl border-2 border-dashed border-violet-400 bg-violet-50/90 text-sm font-medium text-violet-600 dark:border-violet-500 dark:bg-zinc-900/90 dark:text-violet-400">
+                  Drop file to extract text
+                </div>
+              )}
               {/* File upload */}
-              <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" className="hidden" onChange={handleFileUpload} />
+              <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.txt" className="hidden" onChange={handleFileUpload} />
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={extracting}
-                title="Upload a PDF, Word, or text file"
+                title="Upload a PDF, Word, or text file — or drag & drop it onto the box"
                 className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-500 shadow-sm transition-colors hover:border-violet-300 hover:text-violet-600 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:border-violet-500 dark:hover:text-violet-400"
               >
                 {extracting ? (
