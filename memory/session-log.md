@@ -408,3 +408,12 @@ Also checked whether Phase 1.1's existing fingerprint-based duplicate detection 
 - **This sandbox's git/build tooling worked cleanly this session** — no mount flakiness. `npm install` confirmed `word-extractor` present, `npx tsc --noEmit` clean, `npm run build` succeeded for real (not scratch-project verification) — all 42 routes generated.
 - Committed `e7a162a` (16 files), pushed to `origin/feat/legacy-doc-support-and-bugfixes`.
 - **What's next:** Vlad opens the PR (`https://github.com/vashVlad/HireView/pull/new/feat/legacy-doc-support-and-bugfixes`) and merges when ready — no further live-test needed, all four bugs in this batch were already confirmed fixed by Vlad before this session.
+
+## 2026-07-15 (same day, separate session) — Teti feedback batch (3 bugs) committed and pushed
+
+- Picked up an in-progress working tree matching the 2026-07-15 "Fixed (Teti feedback batch)" entry in state.md — 8 modified files + `lib/extractCandidateNameFallback.ts`, coded but not yet built/committed (the prior session's own sandbox had no working project mount, so this was genuinely unverified).
+- Same wrong-branch pattern as every prior handoff: was sitting on `feat/legacy-doc-support-and-bugfixes`, which had already merged as PR #15 (`56bf32c`) in between. Stashed with `-u`, synced `main`, created `fix/teti-feedback-batch` fresh, popped clean — exact same file set.
+- Do-not-touch check: `scoreCandidate.ts`/`analyzeJD.ts`/`parseResume.ts`/`calibrationExamples.ts`/`screen-resumes/route.ts` all confirmed zero diff. Full diff review of all four changed files plus the new fallback file matched the handoff description exactly — including double-checking two subtle claims rather than taking them on faith: `roleContext` was already a `ResultCard` prop before this diff (not newly introduced), and `CheckExistingResult` already existed in `lib/types.ts`.
+- `npx tsc --noEmit` and `npm run build` both ran for real this time — first genuine build check these three fixes got (the originating session couldn't run either). Both clean, all 42 routes generated.
+- Committed `eab3250` (9 files), pushed to `origin/fix/teti-feedback-batch`. `gh` still not on PATH — compare URL given: `https://github.com/vashVlad/HireView/compare/main...fix/teti-feedback-batch?expand=1`.
+- **Not yet merged** — needs Vlad's live-test pass first (filename-collision scoring, Google-Docs-exported PDF name recovery, company-alias credibility check), per the checklist in state.md.
