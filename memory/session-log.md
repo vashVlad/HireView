@@ -388,3 +388,12 @@ Also checked whether Phase 1.1's existing fingerprint-based duplicate detection 
 **Pending user action:** Run `supabase-migration-interview.sql` in Supabase SQL editor. Also run `UPDATE screenings SET interview_questions = NULL;` to regenerate questions with the new tighter prompt.
 
 **Next:** Phase 4 Outreach Drafting problem statement — Vlad to write, then build.
+
+## 2026-07-15 — Legacy .doc support + bugfix batch committed and pushed
+
+- Picked up an in-progress working tree matching the 2026-07-10 "JD upload bug + legacy .doc support" entries above — 15 modified files + `lib/word-extractor.d.ts`, all coded and previously live-tested/fixed by Vlad, just never committed.
+- Same wrong-branch pattern as prior handoffs: was sitting on `feat/save-all-and-rejection-history`, which turned out to already be merged (PR #14, `69daefc`). Stashed with `-u`, synced `main`, created `feat/legacy-doc-support-and-bugfixes` fresh, popped the stash back — exact same file set, no conflicts.
+- Do-not-touch check, with two nuances in mind from open-questions.md: `scoreCandidate.ts`/`analyzeJD.ts`/`screen-resumes/route.ts` confirmed zero diff; `calibrationExamples.ts` confirmed zero diff (its twin storage-key bug remains deliberately unfixed); `parseResume.ts`'s diff reviewed in full and confirmed scoped to exactly the `WordExtractor` import + the new `.doc` branch (the one approved exception).
+- **This sandbox's git/build tooling worked cleanly this session** — no mount flakiness. `npm install` confirmed `word-extractor` present, `npx tsc --noEmit` clean, `npm run build` succeeded for real (not scratch-project verification) — all 42 routes generated.
+- Committed `e7a162a` (16 files), pushed to `origin/feat/legacy-doc-support-and-bugfixes`.
+- **What's next:** Vlad opens the PR (`https://github.com/vashVlad/HireView/pull/new/feat/legacy-doc-support-and-bugfixes`) and merges when ready — no further live-test needed, all four bugs in this batch were already confirmed fixed by Vlad before this session.
