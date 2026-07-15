@@ -1,4 +1,5 @@
 import mammoth from "mammoth";
+import WordExtractor from "word-extractor";
 
 // pdfjs-dist (used by pdf-parse) calls into DOMMatrix for glyph/path transforms
 // even during plain text extraction. Node has no DOMMatrix, so polyfill it.
@@ -41,6 +42,14 @@ export async function extractResumeText(
   if (extension === "docx") {
     const result = await mammoth.extractRawText({ buffer });
     return result.value;
+  }
+
+  // Legacy OLE-based Word format. mammoth only reads the modern .docx
+  // (ECMA-376/zip) format, so old .doc files need a separate parser.
+  if (extension === "doc") {
+    const extractor = new WordExtractor();
+    const doc = await extractor.extract(buffer);
+    return doc.getBody();
   }
 
   if (extension === "txt") {

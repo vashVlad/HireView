@@ -140,7 +140,7 @@ export function CalibrationPanel({ projectId }: { projectId?: number }) {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx"
+            accept=".pdf,.doc,.docx"
             className="sr-only"
             disabled={uploading}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileChange(f); }}

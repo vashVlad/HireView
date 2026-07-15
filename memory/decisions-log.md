@@ -4,6 +4,11 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-10 — Cross-project-fit gate's stuck-forever bug reappeared; fixed with a `mountedRef`, not by touching the dependency array again.**
+Vlad reported "Checking other active roles…" showing and then never resolving — the exact symptom the [[feedback_useeffect_self_cancel]] fix (Phase 2.1) was supposed to have closed. Root cause was adjacent, not a reversion: that fix's `cancelled` flag was set in the effect's cleanup, and `onCheckCrossProjectPromise` (a prop passed from `app/projects/[id]/page.tsx` as an inline arrow function, recreated every parent render) is still in the effect's dependency array. Nearly any parent re-render while the gate call is in flight reruns the effect; `gateStartedRef` correctly blocks a second API call from starting, but the ORIGINAL run's cleanup still fires and flips `cancelled`, so its result is silently discarded when it resolves — `setCheckingGate(false)` never runs. Fix: replaced the per-run `cancelled` closure variable with a `mountedRef` set once via its own `[]`-dependency effect (true unmount only) — a same-instance rerun triggered by prop-identity churn no longer cancels the in-flight call's ability to update state. `gateStartedRef` alone remains the guard against starting a second call. Not fixed by memoizing `onCheckCrossProjectPromise` in the parent (would also work, but leaves the same trap for the next inline-function prop passed into this effect) — see [[feedback_useeffect_self_cancel]], worth updating with this addendum.
+
+---
+
 **2026-07-09 — FunnelView per-project breakdown built on a shared `computeStages()` helper, not a second copy of the funnel logic.**
 The blended org-wide funnel and each per-project funnel need to count things identically (same definition of "passed threshold," same cumulative tracker-stage logic, same archived/rejected handling) or a manager comparing the two views would see numbers that don't reconcile. Rather than trust two hand-written implementations to stay in sync, extracted the counting logic out of `getFunnelData()` into `computeStages(totalScreened, candidates)` and call it once for the blended view and once per project — a future change to the funnel definition only has one place to edit, and the two views can't silently drift apart.
 

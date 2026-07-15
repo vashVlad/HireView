@@ -115,21 +115,32 @@ export function ResultCard({
   //
   // gateStartedRef (not state) guards against double-starting this: state
   // set INSIDE this effect (checkingGate) must never also be a dependency
-  // of this same effect — doing that once caused a real bug here. Setting
-  // checkingGate(true) triggers a re-render, React sees the dependency
-  // changed, tears down this effect instance (flipping its `cancelled`
-  // flag), and starts a second one — but the original async call is still
-  // in flight. When it finally resolves, it sees `cancelled` and bails out
-  // without ever calling setCheckingGate(false), leaving "Checking other
-  // active roles…" stuck on screen forever. A ref sidesteps this entirely
-  // since setting a ref doesn't trigger a re-render or re-run the effect.
+  // of this same effect — doing that once caused a real bug here (see
+  // decisions-log 2026-07-10). That fix used a `cancelled` flag set in the
+  // effect's cleanup — but `onCheckCrossProjectPromise` is an inline arrow
+  // function the parent recreates on every render, so it's still a fresh
+  // reference on nearly every re-render while the gate call is in flight.
+  // That reruns this effect: the ref guard correctly stops a *second* API
+  // call from starting, but the cleanup from the ORIGINAL run still fires
+  // and flips `cancelled`, so when the original call resolves it silently
+  // bails out without ever calling setCheckingGate(false) — "Checking other
+  // active roles…" stuck forever, same symptom as the bug this was meant to
+  // fix, just triggered a different way. Fix: only bail on true unmount
+  // (mountedRef, set once via its own `[]` effect), never on a same-instance
+  // dependency-array rerun — gateStartedRef already guarantees this async
+  // chain only ever starts once per card.
   const gateStartedRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   useEffect(() => {
     if (!onCheckCrossProjectPromise || !hasOtherActiveProjects || !belowThreshold) return;
     if (gateStartedRef.current) return;
     gateStartedRef.current = true;
 
-    let cancelled = false;
     (async () => {
       setCheckingGate(true);
       let promising = false;
@@ -138,12 +149,11 @@ export function ResultCard({
       } catch {
         promising = false;
       }
-      if (cancelled) return;
+      if (!mountedRef.current) return;
       setCheckingGate(false);
       setGateChecked(true);
       if (promising) handleFindBetterFit();
     })();
-    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onCheckCrossProjectPromise, hasOtherActiveProjects, belowThreshold]);
 

@@ -61,7 +61,7 @@ function FileSlot({
           : "border-zinc-200 hover:border-violet-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-violet-600 dark:hover:bg-zinc-800/50"
       }`}
     >
-      <input ref={inputRef} type="file" accept=".pdf,.docx" className="hidden" onChange={(e) => e.target.files && onPick(e.target.files)} />
+      <input ref={inputRef} type="file" accept=".pdf,.doc,.docx" className="hidden" onChange={(e) => e.target.files && onPick(e.target.files)} />
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
         <path d="M12 16V4m0 0 4 4m-4-4-4 4" strokeLinecap="round" strokeLinejoin="round" />
         <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" strokeLinecap="round" strokeLinejoin="round" />
@@ -77,8 +77,17 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
   const [error, setError] = useState<string | null>(null);
 
   function pickFile(files: FileList) {
-    const f = Array.from(files).find((f) => /\.(pdf|docx)$/i.test(f.name));
-    if (f) setFile(f);
+    // Was `/\.(pdf|docx)$/i` — silently dropped .doc files (drag-and-drop
+    // bypasses the input's `accept` attribute entirely, so this regex was
+    // the only real gate) even though the picker itself already allows
+    // .doc. Matches the file-slot input's accept=".pdf,.doc,.docx" now.
+    const f = Array.from(files).find((f) => /\.(pdf|docx?)$/i.test(f.name));
+    if (f) {
+      setFile(f);
+      setError(null);
+    } else if (files.length > 0) {
+      setError("Only PDF and Word (.doc/.docx) files are supported.");
+    }
   }
 
   async function runCheck() {

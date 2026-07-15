@@ -185,6 +185,17 @@ export async function listRejectionHistory(): Promise<RejectionHistoryEntry[]> {
   }));
 }
 
+// Supabase Storage keys only allow \w / ! - . * ' ( ) space & $ @ = ; : + , ?
+// — a raw candidate-uploaded filename (accents, %, ~ from 8.3-short-name
+// exports, etc.) can easily fall outside that set and fail the upload with
+// an opaque "Invalid key" error. The human-readable name is already stored
+// separately in the `file_name` column for display, so the storage path
+// itself only needs to be a valid, collision-resistant key — not pretty.
+function sanitizeStorageFileName(name: string): string {
+  const cleaned = name.replace(/[^\w!\-.*'() &$@=;:+,?]/g, "_");
+  return cleaned.length > 0 ? cleaned : "resume";
+}
+
 // ── Save ───────────────────────────────────────────────────────────────────
 
 export async function saveScreening(params: {
@@ -215,7 +226,7 @@ export async function saveScreening(params: {
     console.error("Team lookup failed for screening (saved without team_id):", err);
   }
 
-  const resumePath = `${randomUUID()}/${result.fileName}`;
+  const resumePath = `${randomUUID()}/${sanitizeStorageFileName(result.fileName)}`;
   const upload = await supabase.storage
     .from(RESUME_BUCKET)
     .upload(resumePath, resumeFile, { contentType: resumeMimeType });

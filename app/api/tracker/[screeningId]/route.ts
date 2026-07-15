@@ -50,6 +50,7 @@ export async function PATCH(
         ...(body.immigration !== undefined && { immigration: body.immigration }),
         ...(body.onHold !== undefined && { onHold: body.onHold }),
         ...(body.onHoldReason !== undefined && { onHoldReason: body.onHoldReason }),
+        ...(body.rejectReason !== undefined && { rejectReason: body.rejectReason }),
         ...(body.scheduled !== undefined && { scheduled: body.scheduled }),
         ...(body.interviewDate !== undefined && { interviewDate: body.interviewDate }),
         ...(body.orderIndex !== undefined && { orderIndex: body.orderIndex }),

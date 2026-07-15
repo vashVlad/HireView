@@ -196,12 +196,12 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
                       <polyline points="17 8 12 3 7 8" strokeLinecap="round" strokeLinejoin="round" />
                       <line x1="12" y1="3" x2="12" y2="15" strokeLinecap="round" />
                     </svg>
-                    <span className="truncate">{jdFile ? jdFile.name : "Upload JD file (.pdf or .docx)"}</span>
+                    <span className="truncate">{jdFile ? jdFile.name : "Upload JD file (.pdf, .doc, or .docx)"}</span>
                     {jdFile && (
                       <button type="button" onClick={(e) => { e.preventDefault(); setJdFile(null); if (jdFileRef.current) jdFileRef.current.value = ""; }}
                         className="ml-auto shrink-0 text-zinc-400 hover:text-rose-500">✕</button>
                     )}
-                    <input ref={jdFileRef} type="file" accept=".pdf,.docx" className="sr-only"
+                    <input ref={jdFileRef} type="file" accept=".pdf,.doc,.docx" className="sr-only"
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) { setJdFile(f); setJdText(""); } }} />
                   </label>
                   {!jdFile && (
