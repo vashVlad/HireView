@@ -8,8 +8,7 @@ import { InsightList } from "@/components/InsightList";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
-import { StatusSelect } from "@/components/StatusSelect";
-import { TrackerStageSelect } from "@/components/TrackerStageSelect";
+import { StatusStageControl } from "@/components/StatusStageControl";
 import {
   CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS,
   type CandidateStatus, type CredibilityAssessment, type CredibilitySignal,
@@ -53,6 +52,7 @@ function CandidateCard({
   trackerStage,
   onStatusChange,
   onStageChange,
+  onArchiveReasonChange,
   onFlagToggle,
   onDelete,
   onSaveNotes,
@@ -64,6 +64,7 @@ function CandidateCard({
   trackerStage?: TrackerStage;
   onStatusChange: (id: number, status: CandidateStatus) => void;
   onStageChange: (id: number, stage: TrackerStage) => void;
+  onArchiveReasonChange: (id: number, reason: string) => void;
   onFlagToggle: (id: number, current: boolean, note?: string) => void;
   onDelete: (id: number) => void;
   onSaveNotes: (id: number, text: string) => void;
@@ -176,13 +177,14 @@ function CandidateCard({
           </div>
           {/* Status row */}
           <div className="mt-1.5 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-            <StatusSelect status={s.status} onChange={(status) => onStatusChange(s.id, status)} />
-            {s.status === "interview" && (
-              <TrackerStageSelect
-                stage={trackerStage ?? null}
-                onChange={(stage) => onStageChange(s.id, stage)}
-              />
-            )}
+            <StatusStageControl
+              status={s.status}
+              stage={trackerStage ?? null}
+              onStatusChange={(status) => onStatusChange(s.id, status)}
+              onStageChange={(stage) => onStageChange(s.id, stage)}
+              archiveReason={s.archiveReason}
+              onArchiveReasonChange={(reason) => onArchiveReasonChange(s.id, reason)}
+            />
           </div>
         </div>
 
@@ -314,7 +316,7 @@ function CandidateCard({
                 const sw = window.screen.availWidth;
                 const sh = window.screen.availHeight;
                 const halfW = Math.floor(sw / 2);
-                window.open(`/interview/${s.id}/document`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+                window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
               }}
               className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -374,9 +376,11 @@ export default function CandidatesPage() {
         const allScreenings: ScreeningRecord[] = historyData.screenings ?? [];
         setScreenings(allScreenings);
         setProjects(projectsData.projects ?? []);
-        const interviewIds = allScreenings.filter((s) => s.status === "interview").map((s) => s.id);
-        if (interviewIds.length > 0) {
-          fetch(`/api/tracker?ids=${interviewIds.join(",")}`)
+        // "screening" status = actively in the Tracker (TA/L1/L2/In-Person/Offer
+        // arc) — was "interview" before that status was removed 2026-07-15.
+        const trackerIds = allScreenings.filter((s) => s.status === "screening").map((s) => s.id);
+        if (trackerIds.length > 0) {
+          fetch(`/api/tracker?ids=${trackerIds.join(",")}`)
             .then((r) => r.json())
             .then((d) => {
               const entries: Record<string, { stage?: TrackerStage }> = d.entries ?? {};
@@ -420,6 +424,11 @@ export default function CandidatesPage() {
   function handleStageChange(id: number, stage: TrackerStage) {
     setStagesMap((prev) => ({ ...prev, [id]: stage }));
     fetch(`/api/tracker/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage }) }).catch(() => {});
+  }
+
+  function handleArchiveReasonChange(id: number, archiveReason: string) {
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, archiveReason } : s));
+    fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveReason }) }).catch(() => {});
   }
 
   function handleFlagToggle(id: number, current: boolean, note?: string) {
@@ -563,6 +572,7 @@ export default function CandidatesPage() {
                   trackerStage={stagesMap[s.id]}
                   onStatusChange={handleStatusChange}
                   onStageChange={handleStageChange}
+                  onArchiveReasonChange={handleArchiveReasonChange}
                   onFlagToggle={handleFlagToggle}
                   onDelete={handleDelete}
                   onSaveNotes={handleSaveNotes}

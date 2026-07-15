@@ -49,6 +49,9 @@ export async function PATCH(
     if (body.leverUrl !== undefined) {
       await updateScreening(numId, { leverUrl: body.leverUrl });
     }
+    if (body.archiveReason !== undefined) {
+      await updateScreening(numId, { archiveReason: body.archiveReason });
+    }
     if (body.credibility !== undefined) {
       await updateScreeningCredibility(numId, body.credibility, actorUserId);
     }

@@ -58,11 +58,11 @@ function ProjectCard({ project }: { project: ProjectSummary }) {
           <span className="text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">{project.screeningCount}</span>
           <span className="text-xs text-zinc-400 dark:text-zinc-500">{project.screeningCount === 1 ? "candidate" : "candidates"} screened</span>
         </div>
-        {project.interviewCount > 0 && (
+        {project.inTrackerCount > 0 && (
           <>
             <div className="h-8 w-px bg-zinc-100 dark:bg-zinc-800" />
             <div className="flex flex-col gap-0.5">
-              <span className="text-2xl font-bold tabular-nums text-violet-600 dark:text-violet-400">{project.interviewCount}</span>
+              <span className="text-2xl font-bold tabular-nums text-violet-600 dark:text-violet-400">{project.inTrackerCount}</span>
               <span className="text-xs text-zinc-400 dark:text-zinc-500">in pipeline</span>
             </div>
           </>

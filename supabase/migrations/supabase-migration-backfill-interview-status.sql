@@ -1,0 +1,28 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Backfill "interview" status to "screening"
+-- Run this in Supabase SQL editor → Run
+--
+-- Part of the pipeline status restructuring (Vlad, 2026-07-15): "interview"
+-- is removed from CandidateStatus. Screening is now the single top-level
+-- status a candidate sits in for the entire TA -> L1 -> L2 -> In-Person ->
+-- Offer/Reject arc (TrackerStage, unchanged) — it's no longer a separate
+-- status that comes after Screening.
+--
+-- No column changes here (status is already a plain text column, not a
+-- Postgres enum type, so removing "interview" from the app-level TypeScript
+-- union doesn't require a schema change) — this is a pure data backfill.
+--
+-- IMPORTANT — run this BEFORE deploying the code that removes "interview"
+-- from CandidateStatus (lib/types.ts) and repoints every
+-- `status === "interview"` check to `status === "screening"`. Any row still
+-- sitting at status='interview' when that code ships would silently stop
+-- matching any status filter/label in the app (it's simply not a value the
+-- UI or FunnelView knows about anymore) until this backfill runs.
+--
+-- Existing candidates who were at "interview" already have a real
+-- TrackerStage assigned in most cases (that's how they got there) — this
+-- backfill preserves that; nothing in the `tracker` table is touched, only
+-- the `screenings.status` column.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+UPDATE screenings SET status = 'screening' WHERE status = 'interview';

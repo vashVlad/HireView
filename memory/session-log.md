@@ -12,6 +12,59 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-15 (same day, follow-on #6) — Fixed the resume-viewer regression + added Archive reason
+
+- Vlad reported the previous fix (follow-on #5, below) regressed: PDFs now forced a download too, not just docx — "it still wants me to download it... it worked before." Root cause: the fetch-based mime-type check failed closed on fetch failures. Redesigned to pass `resumeMimeType`/`fileName` via URL query params from the caller (already has them, no fetch needed) — synchronous, no race. Also had to wrap the page in `<Suspense>` for Next's `useSearchParams()` requirement.
+- Added Archive reason (Tech skills / Domain knowledge / Failed cross-reference check / Not interested) as a third segment on the merged `StatusStageControl` pill, shown when status is Archived — mirrors the Reject stage's reason field. New `archive_reason` column/migration, not yet wired into the shared select (same sequencing caution as `location`).
+- AskUserQuestion errored out twice mid-session ("Tool permission stream closed") when trying to confirm the UI-location and auto-archive-reason design choices — proceeded with stated best-guess defaults (inline on the pill; auto-archived candidates start blank) rather than blocking. **Flag to Vlad to confirm these weren't the intended design.**
+- Hit the stale-bash-mount issue again, worse this time — affected 6 files simultaneously (up to a 43-line gap on one), not just 1. Manually resynced every affected file via bash heredoc/append before trusting `tsc`. See decisions-log for the full pattern writeup.
+- `npx tsc --noEmit` clean. Not yet live-tested.
+
+## 2026-07-15 (same day, follow-on #5) — Fixed resume viewer "black screen + auto-download"
+
+- Vlad reported the resume popup viewer shows a black screen and downloads the file on its own. Root cause: non-PDF resumes (docx/doc) can't render in an iframe — the browser silently downloads them instead, which is what he was seeing.
+- Fixed `app/interview/[id]/document/page.tsx`: now checks `resumeMimeType` (via existing `/api/history/[id]`) before deciding what to render — PDF still gets the iframe, anything else gets a fallback panel with an explicit "Download to view" button. No more automatic/silent download.
+- Along the way hit a real instance of the documented stale-bash-mount issue — see decisions-log for the workaround (wrote known-good content directly via bash heredoc to force resync before `tsc` would give a trustworthy result).
+- `npx tsc --noEmit` clean across the repo. Not yet live-tested by Vlad.
+
+## 2026-07-15 (same day, follow-on #4) — Built the pipeline status restructuring (code-complete, not live-tested)
+
+- Continued straight from the locked spec (see state.md's "pipeline status restructuring" section) per Vlad's "let's keep going with that then."
+- `CandidateStatus` narrowed to drop `interview` (Screening now the sole container for TA→L1→L2→In-Person→Offer/Reject); new `StatusStageControl.tsx` merges the old side-by-side status+stage dropdowns into one connected pill, `TrackerStageSelect.tsx` deleted as fully orphaned; drawer's Role field moved under the photo and made click-to-edit, new Location field added, Next Step removed entirely; auto-archive wired into `saveScreening` (below-threshold saves go straight to Archived) via a flagged do-not-touch exception on both screen-resumes routes.
+- Two new migrations, must run in order, neither confirmed run yet: `supabase-migration-backfill-interview-status.sql` then `supabase-migration-tracker-location.sql`. `location` deliberately not yet added to `getFullTrackerEntries`'s shared SELECT — same safe-sequencing pattern as `reject_reason`, avoids repeating two prior migration-sequencing outages.
+- `npx tsc --noEmit` clean across the whole repo. Not yet live-tested — see state.md's checklist (7 items) for what to verify once both migrations run.
+- Next: Vlad runs the two migrations in order, live-tests against the checklist, then this can be committed/PR'd on its own branch per the one-feature-one-branch-one-PR convention.
+
+## 2026-07-15 (same day, follow-on #3) — Retired filename-matching entirely; Compare moved to the nameMatch signal
+
+- Vlad questioned why the Robert Hayes / Nicholas Keenan filename match fired at all, given they're clearly different people. Traced it: `normalizeFileName()` strips `Resume (16).pdf` down to the bare word `"resume"` — the default browser auto-rename shape for any resume named `Resume.pdf`, so it matches essentially anyone else's generic download filename.
+- Discussed a generic-terms blocklist as a patch; landed instead on a bigger, cleaner fix — `nameMatch` (real extracted-identity comparison, already runs automatically post-score for every candidate) answers the same underlying question more reliably than any filename heuristic. Vlad chose to retire filename-matching entirely and move the Compare button onto `nameMatch` instead.
+- Removed: `possible_update` classification (`check-existing/route.ts`, `lib/types.ts`), `normalizeFileName()` (`lib/resumeContentHash.ts`, confirmed no other callers), the `filenameMatch` banner/state (`ResultCard.tsx`, `app/projects/[id]/page.tsx`).
+- Found along the way: `AlreadyScreenedCard.tsx`'s `possible_update` branch (flagged as a live backwards-Compare bug in open-questions.md a few hours earlier this same day) was actually already dead/unreachable code since Bug 1 shipped — simplified the component to duplicate-only rather than fixing a bug that could never fire.
+- Added: Compare button + embedded `CrossReferenceChecker` on `ResultCard.tsx`'s `nameMatch` banner, reusing the `crossRefScreeningId` mechanism built earlier this session for the now-removed filenameMatch Compare — that work carried over cleanly.
+- **Not yet live-tested.**
+
+---
+
+## 2026-07-15 (same day, follow-on #2) — Fixed backwards + data-corrupting Compare on Bug 1's filename-match banner
+
+- Vlad reported (with screenshots) that "Compare" on Robert Hayes' filename-match banner showed a credibility assessment labeled backwards — "Resume: Nicholas Keenan / Cross-ref: Robert Hayes" on Robert Hayes' own card.
+- Root cause: Bug 1's "Compare" embed called `CrossReferenceChecker` with `screeningId={filenameMatch.id}` (the OTHER candidate) and `initialFile` (the CURRENT candidate's upload) — backwards. Worse: the API route persists the cross-ref doc's path onto `screeningId`, so this was silently writing Robert Hayes' resume into Nicholas Keenan's own DB record as his "LinkedIn PDF" — real data corruption, not just a mislabeled result.
+- Fixed: `/api/assess-credibility` gained a `crossRefScreeningId` mode (fetches another screening's resume server-side, never persists to either record); `CredibilityChecker.tsx` and `ResultCard.tsx` updated to use it with the correct sides (`screeningId={savedId}`, `crossRefScreeningId={filenameMatch.id}`). See decisions-log.md for the full reasoning.
+- Found the identical bug in `AlreadyScreenedCard.tsx` (different flow, can't reuse the same fix — flagged in open-questions.md, not fixed this pass).
+- **Not yet live-tested.** Also worth a manual DB check: this bug likely already ran for real against Nicholas Keenan's actual record before being caught.
+
+---
+
+## 2026-07-15 (same day, follow-on) — Status dropdown now appears on ResultCard right after screening
+
+- Vlad asked for the status dropdown to be usable directly on the ResultCard right after screening, not only from the Pipeline tab.
+- Investigation found the feature was already fully built (`StatusSelect`, `onStatusChange`, the PATCH route) — it just never rendered because `lib/screenings.ts`'s `saveScreening` never set `status` on the `CandidateResult` object it hands back to the API route, so the render gate (`result.status !== undefined`) always failed on a fresh screen.
+- Fixed with a one-line addition to the insert (`status: "new_applicant"`, previously an implicit DB default) plus mutating `result.status` onto the object in place, same pattern already used for `result.id`/`result.candidateName`. No changes needed in `ResultCard.tsx` or the page component.
+- **Not yet live-tested** — needs a real screening pass to confirm the dropdown shows immediately and a change made there survives navigating to the Pipeline tab.
+
+---
+
 ## 2026-07-15 — Teti feedback batch: 3 bugs fixed (filename collision, missing name, company-alias false positives) + pipeline restructuring design documented (not built)
 
 - Teti sent a feedback batch: a screenshot of an "Unknown (resume name not provided)" pipeline card, a diagnostic sample PDF, three numbered issues, and a separate meeting-summary proposing a larger pipeline restructuring. Vlad asked for a proper plan first (per Blueprint methodology), approved it, then approved building the three confirmed bugs.

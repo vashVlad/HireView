@@ -1,0 +1,27 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Archive reason
+-- Run this in Supabase SQL editor → Run
+--
+-- Vlad's ask, 2026-07-15: capture WHY a candidate was archived, using a fixed
+-- set of reasons — "Tech skills", "Domain knowledge", "Failed cross-reference
+-- check", "Not interested" — mirroring how the Reject tracker stage already
+-- captures reject_reason. Unlike reject_reason (which lives on `tracker` and
+-- only applies to candidates who reached the Reject stage), Archived is a
+-- top-level CandidateStatus reachable from anywhere — including candidates
+-- who never entered the Tracker at all (e.g. auto-archived below the score
+-- threshold at save time, see lib/screenings.ts saveScreening). So this
+-- column lives on `screenings`, next to `status`, not on `tracker`.
+--
+-- Additive only, no backfill — existing archived candidates simply have no
+-- reason until someone sets one.
+--
+-- IMPORTANT — this is intentionally NOT yet wired into SCREENING_COLUMNS
+-- (lib/screenings.ts), the shared select every Pipeline/All Candidates load
+-- uses. Wiring a new column into that shared, already-live query path before
+-- this migration is confirmed run has caused real outages on this project
+-- before (see feedback_migration_sequencing in the memory vault) — the write
+-- path (PATCH /api/history/[id]) ships now, but the read path is a deliberate
+-- follow-up once Vlad confirms this migration ran.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE screenings ADD COLUMN IF NOT EXISTS archive_reason text;

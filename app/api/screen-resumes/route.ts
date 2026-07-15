@@ -127,8 +127,15 @@ export async function POST(request: NextRequest) {
       // Persist every screened candidate, regardless of score (Teti's
       // request, 2026-07-10 — no candidate should be lost, including
       // below-threshold ones, so rejection history is visible later).
-      // scoreThreshold now only gates the cross-project fit suggestion in
-      // the UI, not whether a record gets saved at all.
+      // scoreThreshold now ALSO gates the initial status (see saveScreening's
+      // auto-archive logic, lib/screenings.ts, 2026-07-15) in addition to the
+      // cross-project fit suggestion — below-threshold candidates still get
+      // saved, just straight into "archived" instead of "new_applicant".
+      //
+      // DO-NOT-TOUCH EXCEPTION (flagged per project convention): this file is
+      // on the do-not-touch list. The only change here is adding the
+      // already-locally-available `scoreThreshold` (computed above) to this
+      // existing saveScreening call — no other logic in this route was touched.
       //
       // Awaited (not fire-and-forget): Vercel can freeze the function as
       // soon as the response is sent, which would silently drop an
@@ -142,6 +149,7 @@ export async function POST(request: NextRequest) {
           linkedInMode: linkedInModeOverride,
           projectId,
           userId,
+          scoreThreshold,
         });
         result.id = id;
       } catch (err) {

@@ -14,8 +14,7 @@ import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
-import { StatusSelect } from "@/components/StatusSelect";
-import { TrackerStageSelect } from "@/components/TrackerStageSelect";
+import { StatusStageControl } from "@/components/StatusStageControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
   CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
@@ -252,26 +251,23 @@ function ScreenTab({ project, onScreeningsSaved }: {
   // ever reaching the scoring route, keyed by the original File so a
   // "Re-screen anyway" can still send it through on demand.
   //
-  // Only "duplicate" (exact content-hash match) belongs here. "possible_update"
-  // is filename-only — no content comparison at all — and was previously
-  // treated the same as duplicate, meaning it also skipped scoring. That's a
-  // real bug (Teti, 2026-07-13): if two DIFFERENT candidates happen to upload
-  // files with the same generic name ("Resume 16.pdf"), the second person
-  // never gets scored at all — the recruiter just sees the first person's
-  // cached data again, silently. Filename similarity is too weak a signal to
-  // justify losing a candidate's real identity and score. See possibleUpdateMatches.
+  // Only "duplicate" (exact content-hash match) belongs here — that's the
+  // only status check-existing returns besides "new" as of 2026-07-15.
+  // Filename-only matching ("possible_update") was removed the same day: it
+  // compared incidental filename strings rather than real identity, and
+  // false-flagged unrelated candidates who happened to share a generic
+  // download filename (e.g. "Resume (16).pdf" — the default browser
+  // auto-rename for any resume literally named "Resume.pdf", which
+  // normalizes to nothing but the bare word "resume"). The real case this
+  // was trying to catch — a genuinely returning candidate — is already
+  // covered more reliably by the post-score name-match check below
+  // (existingCandidates/nameMatches), which compares actual extracted
+  // identity instead of a filename. See decisions-log.md, 2026-07-15.
   const [existingMatches, setExistingMatches] = useState<
     { match: CheckExistingResult; file: File }[]
   >([]);
-  // fileName -> the existing candidate a filename-only match pointed at, plus
-  // the actual uploaded File (so the comparison banner can pre-fill the same
-  // way AlreadyScreenedCard's does). Purely informational, attached to the
-  // real (freshly-scored) ResultCard — never blocks scoring, unlike existingMatches above.
-  const [possibleUpdateMatches, setPossibleUpdateMatches] = useState<
-    Map<string, { existing: NonNullable<CheckExistingResult["existing"]>; file: File }>
-  >(new Map());
   // Candidates already saved in this project, by normalized name — the one
-  // signal hash/filename matching can't catch (two different resume files
+  // signal exact-content hashing can't catch (two different resume files
   // for the same person). Populated during the pre-check, compared against
   // AFTER scoring since candidate name doesn't exist before then.
   const [existingCandidates, setExistingCandidates] = useState<ExistingCandidateRef[]>([]);
@@ -368,19 +364,13 @@ function ScreenTab({ project, onScreeningsSaved }: {
       const byFileName = new Map(classifications.map((c) => [c.fileName, c]));
       const newFiles: File[] = [];
       const matched: { match: CheckExistingResult; file: File }[] = [];
-      const possibleUpdateByFileName = new Map<string, { existing: NonNullable<CheckExistingResult["existing"]>; file: File }>();
       for (const f of files) {
         const c = byFileName.get(f.name);
         if (c && c.existing && c.status === "duplicate") {
           // Exact content match — genuinely nothing new to learn, safe to skip scoring.
           matched.push({ match: c, file: f });
         } else {
-          // "possible_update" (filename-only signal) and "new" both get
-          // scored normally — filename alone never withholds a real result.
           newFiles.push(f);
-          if (c && c.existing && c.status === "possible_update") {
-            possibleUpdateByFileName.set(f.name, { existing: c.existing, file: f });
-          }
         }
       }
 
@@ -391,7 +381,6 @@ function ScreenTab({ project, onScreeningsSaved }: {
       setResults(scored);
       setFileErrors(errors);
       setExistingMatches(matched);
-      setPossibleUpdateMatches(possibleUpdateByFileName);
       setExistingCandidates(candidates);
       setNameMatches(findNameMatches(scored, candidates));
       setRejectionHistoryBaseline(rejections);
@@ -442,8 +431,8 @@ function ScreenTab({ project, onScreeningsSaved }: {
     return matches;
   }
 
-  // A recruiter overriding a "duplicate"/"possible_update" card — forces a
-  // real score for that one file and folds it into the normal results list.
+  // A recruiter overriding a "duplicate" card — forces a real score for
+  // that one file and folds it into the normal results list.
   async function handleForceRescore(file: File) {
     setExistingMatches((prev) => prev.filter((m) => m.file !== file));
     try {
@@ -465,7 +454,6 @@ function ScreenTab({ project, onScreeningsSaved }: {
     setFileErrors([]);
     setFiles([]);
     setExistingMatches([]);
-    setPossibleUpdateMatches(new Map());
     setExistingCandidates([]);
     setNameMatches(new Map());
   }
@@ -507,8 +495,6 @@ function ScreenTab({ project, onScreeningsSaved }: {
               jdAnalysis={project.jdAnalysis}
               onStatusChange={handleStatusChange}
               nameMatch={nameMatches.get(result.fileName)}
-              filenameMatch={possibleUpdateMatches.get(result.fileName)?.existing}
-              filenameMatchFile={possibleUpdateMatches.get(result.fileName)?.file}
               roleContext={project.name}
               rejectionHistory={rejectionMatches.get(result.fileName)}
               belowThreshold={result.score < project.scoreThreshold}
@@ -576,10 +562,8 @@ function ScreenTab({ project, onScreeningsSaved }: {
             <AlreadyScreenedCard
               key={match.fileName}
               fileName={match.fileName}
-              status={match.status as "duplicate" | "possible_update"}
               existing={match.existing!}
               file={file}
-              roleContext={project.name}
               onForceRescore={handleForceRescore}
             />
           ))}
@@ -732,6 +716,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     } catch { /* non-fatal */ }
   }
 
+  async function handleArchiveReasonChange(id: number, archiveReason: string) {
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, archiveReason } : s));
+    try {
+      await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveReason }) });
+    } catch { /* non-fatal */ }
+  }
+
   async function handleToggleFlag(id: number, current: boolean, note?: string) {
     const next = !current;
     setPendingFlagId(null);
@@ -775,7 +766,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     { label: "New", value: "new_applicant" },
     { label: "Contacted", value: "contacted" },
     { label: "Screening", value: "screening" },
-    { label: "Interview", value: "interview" },
     { label: "Archived", value: "archived" },
   ];
 
@@ -910,13 +900,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 </div>
                 {/* Status row */}
                 <div className="mt-1.5 flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                  <StatusSelect status={s.status} onChange={(status) => handleStatusChange(s.id, status)} />
-                  {s.status === "interview" && (
-                    <TrackerStageSelect
-                      stage={stagesMap[s.id] ?? null}
-                      onChange={(stage) => handleStageChange(s.id, stage)}
-                    />
-                  )}
+                  <StatusStageControl
+                    status={s.status}
+                    stage={stagesMap[s.id] ?? null}
+                    onStatusChange={(status) => handleStatusChange(s.id, status)}
+                    onStageChange={(stage) => handleStageChange(s.id, stage)}
+                    archiveReason={s.archiveReason}
+                    onArchiveReasonChange={(reason) => handleArchiveReasonChange(s.id, reason)}
+                  />
                 </div>
               </div>
               {/* Resume button */}
@@ -928,7 +919,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   const halfW = Math.floor(sw / 2);
                   // Use sw - halfW so resume + notes widths sum to exactly sw (handles odd screen widths)
                   window.open(
-                    `/interview/${s.id}/document`,
+                    `/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`,
                     `iv_doc_${s.id}`,
                     `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`
                   );
@@ -1108,7 +1099,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       const sw = window.screen.availWidth;
                       const sh = window.screen.availHeight;
                       const halfW = Math.floor(sw / 2);
-                      window.open(`/interview/${s.id}/document`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+                      window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
                     }}
                     className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1356,8 +1347,12 @@ function DrawerBody({
   const [leverUrl, setLeverUrl] = useState(selected.leverUrl ?? "");
   const [company, setCompany] = useState(trackerEntry.company ?? "");
   const [role, setRole] = useState(trackerEntry.role ?? projectName);
+  const [editingRole, setEditingRole] = useState(false);
   const [expectedLevel, setExpectedLevel] = useState(trackerEntry.expectedLevel ?? "");
-  const [nextStep, setNextStep] = useState(trackerEntry.nextStep ?? "");
+  // Manually entered in this drawer — 2026-07-15. Not yet read back from the
+  // shared getFullTrackerEntries select (see lib/screenings.ts comment); will
+  // appear blank on reload until that follow-up wiring lands post-migration.
+  const [location, setLocation] = useState(trackerEntry.location ?? "");
   const [stepsCompleted, setStepsCompleted] = useState(trackerEntry.stepsCompleted ?? "");
   const [comments, setComments] = useState(trackerEntry.comments ?? "");
   const [immigration, setImmigration] = useState(trackerEntry.immigration ?? "");
@@ -1381,8 +1376,9 @@ function DrawerBody({
   useEffect(() => {
     setCompany(trackerEntry.company ?? "");
     setRole(trackerEntry.role ?? projectName);
+    setEditingRole(false);
     setExpectedLevel(trackerEntry.expectedLevel ?? "");
-    setNextStep(trackerEntry.nextStep ?? "");
+    setLocation(trackerEntry.location ?? "");
     setStepsCompleted(trackerEntry.stepsCompleted ?? "");
     setComments(trackerEntry.comments ?? "");
     setImmigration(trackerEntry.immigration ?? "");
@@ -1467,6 +1463,36 @@ function DrawerBody({
         />
       </label>
 
+      {/* Role — shown right under the photo; defaults to the project name until
+          edited. Click-to-edit per Vlad's request, 2026-07-15: static text +
+          edit button instead of an always-open input. */}
+      <div className="-mt-1 flex justify-center">
+        {editingRole ? (
+          <input
+            type="text"
+            autoFocus
+            value={role}
+            onChange={(e) => setRole(e.target.value)}
+            onBlur={(e) => { saveTrackerField({ role: e.target.value }, "role"); setEditingRole(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            placeholder="FDE_AI Builder"
+            className={`mx-auto max-w-[220px] text-center ${inputCls}`}
+          />
+        ) : (
+          <button type="button" onClick={() => setEditingRole(true)}
+            className="group inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-violet-600 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-violet-400">
+            {role || projectName}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              className="opacity-0 transition-opacity group-hover:opacity-60">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        )}
+        {saving === "role" && <span className="ml-1.5 self-center text-[10px] text-zinc-400">Saving…</span>}
+        {saving !== "role" && saved === "role" && <span className="ml-1.5 self-center text-[10px] text-emerald-500">Saved</span>}
+      </div>
+
       {/* View result link */}
       <button type="button" onClick={() => onViewResult(selected.id)}
         className="flex items-center gap-1.5 self-start text-xs font-medium text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300">
@@ -1530,7 +1556,7 @@ function DrawerBody({
         </div>
       </div>
 
-      {/* Company + Role */}
+      {/* Company + Exp. level */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <FieldLabel label="Company" fkey="company" />
@@ -1546,12 +1572,12 @@ function DrawerBody({
         </div>
       </div>
 
-      {/* Role */}
+      {/* Location — manually entered, 2026-07-15 */}
       <div>
-        <FieldLabel label="Role" fkey="role" />
-        <input type="text" value={role} onChange={(e) => setRole(e.target.value)}
-          onBlur={(e) => saveTrackerField({ role: e.target.value }, "role")}
-          placeholder="FDE_AI Builder" className={inputCls} />
+        <FieldLabel label="Location" fkey="location" />
+        <input type="text" value={location} onChange={(e) => setLocation(e.target.value)}
+          onBlur={(e) => saveTrackerField({ location: e.target.value }, "location")}
+          placeholder="New York, NY" className={inputCls} />
       </div>
 
       {/* Rejection reason — only shown once this candidate is in the Reject stage */}
@@ -1564,14 +1590,6 @@ function DrawerBody({
             className={`resize-none border-rose-200 bg-white dark:border-rose-500/30 dark:bg-zinc-900 ${inputCls}`} />
         </div>
       )}
-
-      {/* Next Step */}
-      <div>
-        <FieldLabel label="Next step" fkey="nextStep" />
-        <input type="text" value={nextStep} onChange={(e) => setNextStep(e.target.value)}
-          onBlur={(e) => saveTrackerField({ nextStep: e.target.value }, "nextStep")}
-          placeholder="L2 6/30 with Nayana & Sean" className={inputCls} />
-      </div>
 
       {/* Steps Completed */}
       <div>
@@ -1667,9 +1685,11 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
     if (selected) setSelected((prev) => screenings.find((s) => s.id === prev?.id) ?? null);
   }, [screenings, stagesMap]);
 
-  const interviewScreenings = screenings.filter((s) => s.status === "interview");
+  // "screening" status = actively in the Tracker (TA/L1/L2/In-Person/Offer
+  // arc) — was "interview" before that status was removed 2026-07-15.
+  const trackerScreenings = screenings.filter((s) => s.status === "screening");
 
-  const filtered = interviewScreenings.filter((s) =>
+  const filtered = trackerScreenings.filter((s) =>
     !search || s.candidateName.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -1713,7 +1733,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   }
 
   function exportToExcel() {
-    const rows = interviewScreenings.map((s) => {
+    const rows = trackerScreenings.map((s) => {
       const td = trackerData[s.id] ?? {};
       return {
         "Name": s.candidateName,
@@ -1722,7 +1742,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
         "Company": td.company ?? "",
         "Role": td.role ?? projectName,
         "Exp. Level": td.expectedLevel ?? "",
-        "Next Step": td.nextStep ?? "",
+        "Location": td.location ?? "",
         "Steps Completed": td.stepsCompleted ?? "",
         "Comments": td.comments ?? "",
         "Immigration": td.immigration ?? "",
@@ -1736,14 +1756,14 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
     // Column widths
     ws["!cols"] = [
       { wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 18 }, { wch: 18 },
-      { wch: 10 }, { wch: 28 }, { wch: 32 }, { wch: 32 }, { wch: 14 }, { wch: 16 }, { wch: 36 },
+      { wch: 18 }, { wch: 32 }, { wch: 32 }, { wch: 14 }, { wch: 16 }, { wch: 36 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Tracker");
     XLSX.writeFile(wb, "tracker.xlsx");
   }
 
-  if (interviewScreenings.length === 0) {
+  if (trackerScreenings.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-16 text-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800">
@@ -1753,8 +1773,8 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
             <path d="M9 12h6M9 16h4" strokeLinecap="round"/>
           </svg>
         </div>
-        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">No active interviews</p>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">Move candidates to Interview status in the Pipeline tab to track them here.</p>
+        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">No one in the tracker yet</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">Move candidates to Screening status in the Pipeline tab to track them here.</p>
       </div>
     );
   }
@@ -2005,13 +2025,15 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     if (td.stage) stagesMap[Number(sid)] = td.stage;
   }
 
-  const interviewCount = screenings.filter((s) => s.status === "interview").length;
+  // "screening" status = actively in the Tracker (TA/L1/L2/In-Person/Offer
+  // arc) — was "interview" before that status was removed 2026-07-15.
+  const trackerCount = screenings.filter((s) => s.status === "screening").length;
 
   const TABS: { key: Tab; label: string }[] = [
     { key: "filters", label: "Filters" },
     { key: "screen", label: "Screen" },
     { key: "pipeline", label: `Pipeline${screenings.length > 0 ? ` (${screenings.length})` : ""}` },
-    { key: "tracker", label: `Tracker${interviewCount > 0 ? ` (${interviewCount})` : ""}` },
+    { key: "tracker", label: `Tracker${trackerCount > 0 ? ` (${trackerCount})` : ""}` },
     { key: "settings", label: "Settings" },
   ];
 
@@ -2043,9 +2065,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         setProject(projectData.project);
         const allScreenings: ScreeningRecord[] = historyData.screenings ?? [];
         setScreenings(allScreenings);
-        const iIds = allScreenings.filter((s) => s.status === "interview").map((s) => s.id);
-        if (iIds.length > 0) {
-          fetch(`/api/tracker?ids=${iIds.join(",")}`)
+        // "screening" status = actively in the Tracker (TA/L1/L2/In-Person/Offer
+        // arc) — was "interview" before that status was removed 2026-07-15.
+        const trackerIds = allScreenings.filter((s) => s.status === "screening").map((s) => s.id);
+        if (trackerIds.length > 0) {
+          fetch(`/api/tracker?ids=${trackerIds.join(",")}`)
             .then((r) => r.json())
             .then((d) => setTrackerData(d.entries ?? {}))
             .catch(() => {});

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, ExistingCandidateRef, RejectionHistoryEntry } from "@/lib/types";
+import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, RejectionHistoryEntry } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
 import { InsightList } from "./InsightList";
@@ -36,8 +36,6 @@ export function ResultCard({
   onTransferToProject,
   otherActiveCount,
   nameMatch,
-  filenameMatch,
-  filenameMatchFile,
   rejectionHistory,
   solo = false,
 }: {
@@ -60,24 +58,18 @@ export function ResultCard({
   otherActiveCount?: number;
   /**
    * Post-score name match against an already-saved candidate in this
-   * project — the one case the pre-score hash/filename check can't catch
-   * (two genuinely different resume files for the same person). Purely
+   * project — the one case exact-content hashing can't catch (two genuinely
+   * different resume files that turn out to name the same person). Purely
    * informational: scoring already happened by the time this is known.
+   * Offers an optional "Compare" against the matched candidate (see the
+   * showNameCompare state below) — this used to live on a separate,
+   * pre-score filename-match signal, retired 2026-07-15 because comparing
+   * filenames (rather than real identity) produced false positives on
+   * generic filenames like "Resume (16).pdf". nameMatch is strictly more
+   * reliable for the same underlying question, so Compare moved here
+   * instead of being dropped. See decisions-log.md.
    */
   nameMatch?: ExistingCandidateRef;
-  /**
-   * Filename-only match against an existing screening in this project (the
-   * pre-score "possible_update" signal) — deliberately weak, so unlike
-   * "duplicate" it never skips scoring. This is the freshly-scored, real
-   * candidate; filenameMatch/filenameMatchFile just offer an optional
-   * comparison against whoever the filename happened to match. Fixes a real
-   * bug (Teti, 2026-07-13): two different candidates sharing a generic
-   * filename ("Resume 16.pdf") used to silently lose the second person's
-   * real identity and score entirely.
-   */
-  filenameMatch?: NonNullable<CheckExistingResult["existing"]>;
-  /** The actual uploaded file behind filenameMatch, so the comparison can pre-fill like AlreadyScreenedCard's does. */
-  filenameMatchFile?: File;
   /**
    * System-wide (any project, any team) — this candidate was rejected
    * somewhere in the system before. Deliberately not scoped like nameMatch,
@@ -91,8 +83,8 @@ export function ResultCard({
   );
   const [showQuestion, setShowQuestion] = useState(false);
   const [savedId] = useState<number | undefined>(result.id);
-  const [showFilenameCompare, setShowFilenameCompare] = useState(false);
-  const [filenameCompareAssessment, setFilenameCompareAssessment] = useState<CredibilityAssessment | null>(null);
+  const [showNameCompare, setShowNameCompare] = useState(false);
+  const [nameCompareAssessment, setNameCompareAssessment] = useState<CredibilityAssessment | null>(null);
   const [checkingGate, setCheckingGate] = useState(false);
   const [gateChecked, setGateChecked] = useState(false);
   const [checkingFit, setCheckingFit] = useState(false);
@@ -242,36 +234,43 @@ export function ResultCard({
         </div>
       </div>
       {nameMatch && (
-        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
-          A different resume file for a candidate named <strong>{nameMatch.candidateName}</strong> already exists in this project — worth a second look, wasn&#x2019;t caught before scoring.
-        </p>
-      )}
-      {filenameMatch && (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
           <div className="flex items-center justify-between gap-2">
             <p className="text-center flex-1">
-              Filename matches <strong>{filenameMatch.candidateName}</strong>, already screened here — resume content is different, so this was scored independently. Might be the same person under a different upload, might be a coincidence.
+              A different resume file for a candidate named <strong>{nameMatch.candidateName}</strong> already exists in this project — worth a second look, wasn&#x2019;t caught before scoring.
             </p>
-            {filenameMatchFile && !filenameCompareAssessment && (
-              <button type="button" onClick={() => setShowFilenameCompare((v) => !v)}
+            {savedId !== undefined && !nameCompareAssessment && (
+              <button type="button" onClick={() => setShowNameCompare((v) => !v)}
                 className="shrink-0 rounded-lg border border-amber-300 bg-white px-2 py-1 font-medium text-amber-700 hover:bg-amber-50 dark:border-amber-500/40 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-zinc-800">
-                {showFilenameCompare ? "Hide" : "Compare"}
+                {showNameCompare ? "Hide" : "Compare"}
               </button>
             )}
           </div>
-          {filenameCompareAssessment && (
+          {nameCompareAssessment && (
             <p className="mt-1.5 text-center text-zinc-600 dark:text-zinc-300">
               Compared — see details below.
             </p>
           )}
-          {(showFilenameCompare || filenameCompareAssessment) && filenameMatchFile && (
+          {(showNameCompare || nameCompareAssessment) && savedId !== undefined && (
             <div className="mt-2 rounded-lg border border-amber-100 bg-white p-3 dark:border-amber-500/20 dark:bg-zinc-900">
+              {/*
+               * screeningId is THIS candidate's own saved record (savedId),
+               * crossRefScreeningId is the other, already-saved candidate
+               * nameMatch points at. This Compare action used to live on a
+               * separate pre-score filename-match signal, which had exactly
+               * this direction backwards (screeningId was the OTHER
+               * candidate) — see decisions-log.md, 2026-07-15, for the full
+               * story of why that was wrong and why nameMatch (real identity
+               * comparison, not a filename string) is the more trustworthy
+               * trigger for this action going forward.
+               */}
               <CrossReferenceChecker
-                screeningId={filenameMatch.id}
+                screeningId={savedId}
                 roleContext={roleContext}
-                initialFile={filenameMatchFile}
-                currentAssessment={filenameCompareAssessment ?? undefined}
-                onComplete={setFilenameCompareAssessment}
+                crossRefScreeningId={nameMatch.id}
+                crossRefLabel={nameMatch.candidateName}
+                currentAssessment={nameCompareAssessment ?? undefined}
+                onComplete={setNameCompareAssessment}
               />
             </div>
           )}

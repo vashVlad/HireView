@@ -16,9 +16,35 @@ interface CrossReferenceCheckerProps {
    * Still requires the recruiter to click "Run credibility check" themselves.
    */
   initialFile?: File | null;
+  /**
+   * Compare against another already-saved screening's stored resume instead
+   * of an uploaded file — for candidate-vs-candidate comparisons where both
+   * sides already exist in the DB (e.g. two screenings that share a filename).
+   * Takes priority over initialFile/file: no upload needed, and nothing new
+   * gets persisted to either screening's linkedInPdfPath (see
+   * app/api/assess-credibility/route.ts) since there's no new external doc,
+   * just an internal comparison.
+   */
+  crossRefScreeningId?: number;
+  /** Display name for crossRefScreeningId, shown in place of the file slot. */
+  crossRefLabel?: string;
 }
 
 type CheckState = "idle" | "checking" | "error";
+
+/** Static equivalent of FileSlot's "has file" state, for a fixed crossRefScreeningId target — nothing to pick, so no drop zone or clear button. */
+function CrossRefTargetChip({ label }: { label?: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <span className="shrink-0 rounded bg-violet-100 px-1.5 py-px text-[10px] font-bold text-violet-600 dark:bg-violet-500/20 dark:text-violet-400">
+        XREF
+      </span>
+      <span className="truncate text-xs text-zinc-600 dark:text-zinc-400">
+        Comparing against {label ?? "existing candidate"}&#x2019;s resume
+      </span>
+    </div>
+  );
+}
 
 function FileSlot({
   file,
@@ -71,10 +97,12 @@ function FileSlot({
   );
 }
 
-export function CrossReferenceChecker({ screeningId, roleContext, currentAssessment, onComplete, initialFile }: CrossReferenceCheckerProps) {
+export function CrossReferenceChecker({ screeningId, roleContext, currentAssessment, onComplete, initialFile, crossRefScreeningId, crossRefLabel }: CrossReferenceCheckerProps) {
   const [file, setFile] = useState<File | null>(initialFile ?? null);
   const [checkState, setCheckState] = useState<CheckState>("idle");
   const [error, setError] = useState<string | null>(null);
+
+  const hasCrossRefTarget = crossRefScreeningId !== undefined || file !== null;
 
   function pickFile(files: FileList) {
     // Was `/\.(pdf|docx)$/i` — silently dropped .doc files (drag-and-drop
@@ -91,13 +119,21 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
   }
 
   async function runCheck() {
-    if (!file || checkState === "checking") return;
+    if (!hasCrossRefTarget || checkState === "checking") return;
     setCheckState("checking");
     setError(null);
 
     const formData = new FormData();
     formData.set("screeningId", String(screeningId));
-    formData.set("crossRefDoc", file);
+    // A manually-picked file (including via the "re-run with a different
+    // document" area) always wins over the fixed crossRefScreeningId target —
+    // once the recruiter has actively chosen something to compare against,
+    // that choice should be respected on re-run, not silently ignored.
+    if (file) {
+      formData.set("crossRefDoc", file);
+    } else if (crossRefScreeningId !== undefined) {
+      formData.set("crossRefScreeningId", String(crossRefScreeningId));
+    }
     if (roleContext) formData.set("roleContext", roleContext);
 
     try {
@@ -137,12 +173,16 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
           <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
             Re-run with a different document
           </p>
-          <FileSlot file={file} onPick={pickFile} onClear={() => setFile(null)} />
+          {!file && crossRefScreeningId !== undefined ? (
+            <CrossRefTargetChip label={crossRefLabel} />
+          ) : (
+            <FileSlot file={file} onPick={pickFile} onClear={() => setFile(null)} />
+          )}
           {error && <p className="text-xs text-rose-500 dark:text-rose-400">{error}</p>}
           <button
             type="button"
             onClick={runCheck}
-            disabled={!file || checkState === "checking"}
+            disabled={!hasCrossRefTarget || checkState === "checking"}
             className="flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
             {checkState === "checking" ? (
@@ -162,12 +202,16 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
   // ── No result yet — just show the uploader ────────────────────────────────
   return (
     <div className="flex flex-col gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-      <FileSlot file={file} onPick={pickFile} onClear={() => setFile(null)} />
+      {!file && crossRefScreeningId !== undefined ? (
+        <CrossRefTargetChip label={crossRefLabel} />
+      ) : (
+        <FileSlot file={file} onPick={pickFile} onClear={() => setFile(null)} />
+      )}
       {error && <p className="text-xs text-rose-500 dark:text-rose-400">{error}</p>}
       <button
         type="button"
         onClick={runCheck}
-        disabled={!file || checkState === "checking"}
+        disabled={!hasCrossRefTarget || checkState === "checking"}
         className="mt-1 flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
       >
         {checkState === "checking" ? (

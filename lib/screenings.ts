@@ -207,8 +207,17 @@ export async function saveScreening(params: {
   linkedInMode?: boolean;
   projectId?: number;
   userId?: string;
+  /**
+   * Project's score_threshold (see lib/projects.ts, default 45). When
+   * provided and the candidate's score falls below it, the screening is
+   * saved directly as "archived" instead of "new_applicant" — Vlad's ask,
+   * 2026-07-15, so below-threshold candidates don't clutter the active
+   * pipeline. Omit (or pass undefined) to keep the old always-new_applicant
+   * behavior, e.g. for callers with no project context.
+   */
+  scoreThreshold?: number;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, projectId, userId } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, projectId, userId, scoreThreshold } = params;
   const supabase = getSupabaseClient();
 
   // Recover a missing candidate name before it ever reaches the DB (Teti's
@@ -251,6 +260,14 @@ export async function saveScreening(params: {
     .upload(resumePath, resumeFile, { contentType: resumeMimeType });
   if (upload.error) throw upload.error;
 
+  // Auto-archive: below-threshold candidates are saved straight to
+  // "archived" instead of "new_applicant" so they never clutter the active
+  // pipeline. Vlad's ask, 2026-07-15 (AskUserQuestion: "Save directly as
+  // Archived"). Only applies when a threshold was actually passed in —
+  // callers with no project context keep the old unconditional behavior.
+  const initialStatus: CandidateStatus =
+    scoreThreshold !== undefined && result.score < scoreThreshold ? "archived" : "new_applicant";
+
   const insert = await supabase
     .from("screenings")
     .insert({
@@ -264,6 +281,7 @@ export async function saveScreening(params: {
       concerns: result.concerns,
       career_trajectory: result.careerTrajectory ?? null,
       recommendation: result.recommendation,
+      status: initialStatus,
       job_description: jobDescription,
       resume_path: resumePath,
       resume_mime_type: resumeMimeType,
@@ -277,6 +295,17 @@ export async function saveScreening(params: {
   if (insert.error) throw insert.error;
 
   const screeningId = insert.data.id;
+
+  // Vlad's ask, 2026-07-15: the status dropdown should be usable right on
+  // the ResultCard immediately after screening, not only once the recruiter
+  // navigates to the Pipeline tab. ResultCard already renders StatusSelect
+  // when `result.status !== undefined` (components/ResultCard.tsx) and both
+  // do-not-touch callers of saveScreening already mutate this same `result`
+  // object in place for `result.id` — so mutating `result.status` here too
+  // (matching initialStatus computed above, whether that's "new_applicant"
+  // or the auto-archive "archived") reaches the immediate API response with
+  // zero changes to either do-not-touch route.
+  result.status = initialStatus;
 
   // Best-effort, non-throwing (logAction swallows its own errors).
   //
@@ -485,6 +514,8 @@ export async function updateScreening(
     photoUrl?: string;
     linkedInPdfPath?: string;
     interviewQuestions?: string[];
+    /** See ARCHIVE_REASONS (lib/types.ts) and supabase-migration-archive-reason.sql. */
+    archiveReason?: string;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -500,6 +531,9 @@ export async function updateScreening(
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   if (fields.interviewQuestions !== undefined) update.interview_questions = fields.interviewQuestions;
+  // archive_reason column not yet confirmed run (supabase-migration-archive-reason.sql)
+  // — see that file's header for the sequencing rationale.
+  if (fields.archiveReason !== undefined) update.archive_reason = fields.archiveReason;
   if (Object.keys(update).length === 0) return;
 
   // Attribution needs the "before" value for status/flagged — everything else
@@ -611,7 +645,12 @@ export async function upsertTrackerEntry(
       ...(fields.company !== undefined && { company: fields.company }),
       ...(fields.role !== undefined && { role: fields.role }),
       ...(fields.expectedLevel !== undefined && { expected_level: fields.expectedLevel }),
-      ...(fields.nextStep !== undefined && { next_step: fields.nextStep }),
+      // location column added 2026-07-15 (supabase-migration-tracker-location.sql,
+      // NOT YET CONFIRMED RUN as of this write — run it before this write path
+      // is exercised for real, or the upsert will fail with a missing-column
+      // error the first time someone saves a Location value). next_step
+      // removed the same day per Vlad's request ("remove it entirely").
+      ...(fields.location !== undefined && { location: fields.location }),
       ...(fields.stepsCompleted !== undefined && { steps_completed: fields.stepsCompleted }),
       ...(fields.comments !== undefined && { comments: fields.comments }),
       ...(fields.immigration !== undefined && { immigration: fields.immigration }),
@@ -659,9 +698,18 @@ export async function getFullTrackerEntries(
 ): Promise<Record<number, FullTrackerData>> {
   if (screeningIds.length === 0) return {};
   const supabase = getSupabaseClient();
+  // location is deliberately NOT in this select yet — supabase-migration-
+  // tracker-location.sql needs to be confirmed run first (see
+  // upsertTrackerEntry's comment above and decisions-log.md, 2026-07-15).
+  // This is the exact same sequencing reject_reason followed: land the write
+  // path now, add the column to this shared select as a follow-up once the
+  // migration is confirmed. Adding it here before then would 500 every
+  // Tracker load for every screening (this select feeds the whole tab), not
+  // just the one save — see feedback_migration_sequencing in the global
+  // memory vault, this has caused two real outages before.
   const { data, error } = await supabase
     .from("tracker")
-    .select("screening_id, stage, company, role, expected_level, next_step, steps_completed, comments, immigration, on_hold, on_hold_reason, reject_reason, scheduled, interview_date, previous_stage")
+    .select("screening_id, stage, company, role, expected_level, steps_completed, comments, immigration, on_hold, on_hold_reason, reject_reason, scheduled, interview_date, previous_stage")
     .in("screening_id", screeningIds);
   if (error) throw error;
   const map: Record<number, FullTrackerData> = {};
@@ -671,7 +719,6 @@ export async function getFullTrackerEntries(
       company: (row.company as string) ?? undefined,
       role: (row.role as string) ?? undefined,
       expectedLevel: (row.expected_level as string) ?? undefined,
-      nextStep: (row.next_step as string) ?? undefined,
       stepsCompleted: (row.steps_completed as string) ?? undefined,
       comments: (row.comments as string) ?? undefined,
       immigration: (row.immigration as string) ?? undefined,

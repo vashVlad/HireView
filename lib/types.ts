@@ -1,13 +1,18 @@
 export type Recommendation = "proceed" | "decline";
 
-export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "interview" | "archived";
+// "interview" removed 2026-07-15 — Screening is now the container status for
+// the entire TA -> L1 -> L2 -> In-Person -> Offer/Reject arc (TrackerStage,
+// below), rather than a separate top-level status a candidate moves into.
+// Existing DB rows are backfilled from "interview" to "screening" by
+// supabase-migration-backfill-interview-status.sql — run that BEFORE
+// deploying this change (see decisions-log.md, 2026-07-15).
+export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived";
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
   "new_applicant",
   "recruiter_screen",
   "contacted",
   "screening",
-  "interview",
   "archived",
 ];
 
@@ -16,9 +21,25 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
   recruiter_screen: "Recruiter Screen",
   contacted: "Contacted",
   screening: "Screening",
-  interview: "Interview",
   archived: "Archived",
 };
+
+// Fixed reason list for archived candidates — Vlad's ask, 2026-07-15,
+// mirroring how the Reject tracker stage captures reject_reason (see
+// TrackerEntry.rejectReason below). Unlike rejectReason (free text, only
+// shown once a candidate reaches the Reject stage), this is a fixed set of
+// options since Archived is reachable from anywhere, including candidates
+// who never entered the Tracker (e.g. auto-archived below the score
+// threshold at save time). Stored on `screenings.archive_reason` — see
+// supabase-migration-archive-reason.sql. Not yet wired into the shared
+// SCREENING_COLUMNS select (lib/screenings.ts) — see that migration's
+// header comment for why.
+export const ARCHIVE_REASONS = [
+  "Tech skills",
+  "Domain knowledge",
+  "Failed cross-reference check",
+  "Not interested",
+] as const;
 
 // ── Tracker ──────────────────────────────────────────────────────────────────
 
@@ -37,7 +58,8 @@ export interface TrackerEntry {
   company: string;
   role: string;
   expectedLevel: string;
-  nextStep: string;
+  /** Where the candidate is based — manually entered in the Tracker drawer. Added 2026-07-15. */
+  location: string;
   stepsCompleted: string;
   comments: string;
   immigration: string;
@@ -102,7 +124,7 @@ export interface ScreenResumesError {
 
 export interface CheckExistingResult {
   fileName: string;
-  status: "new" | "duplicate" | "possible_update";
+  status: "new" | "duplicate";
   existing?: {
     id: number;
     candidateName: string;
@@ -120,9 +142,9 @@ export interface CheckExistingResult {
 
 /**
  * A candidate already saved in the project, keyed by normalized name — the
- * only thing hashResumeText/normalizeFileName can't catch (two genuinely
- * different resume files that turn out to name the same person). Compared
- * client-side AFTER scoring, since candidate name doesn't exist before it.
+ * only thing hashResumeText can't catch (two genuinely different resume
+ * files that turn out to name the same person). Compared client-side AFTER
+ * scoring, since candidate name doesn't exist before it.
  */
 export interface ExistingCandidateRef {
   id: number;
@@ -156,6 +178,14 @@ export interface ScreeningRecord {
   recommendation: Recommendation | null;
   status: CandidateStatus;
   statusUpdatedAt?: string;
+  /**
+   * Why this candidate was archived — one of ARCHIVE_REASONS, or undefined
+   * if never set. Only meaningful when status === "archived". Added
+   * 2026-07-15; not yet in the shared SCREENING_COLUMNS select (see
+   * supabase-migration-archive-reason.sql), so this will read as undefined
+   * until that follow-up wiring lands post-migration.
+   */
+  archiveReason?: string;
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;
@@ -194,7 +224,8 @@ export interface FullTrackerData {
   company?: string;
   role?: string;
   expectedLevel?: string;
-  nextStep?: string;
+  /** Where the candidate is based — manually entered in the Tracker drawer. Added 2026-07-15. */
+  location?: string;
   stepsCompleted?: string;
   comments?: string;
   immigration?: string;
@@ -239,7 +270,8 @@ export interface Project {
 
 export interface ProjectSummary extends Project {
   screeningCount: number;
-  interviewCount: number;
+  /** Candidates with status "screening" — the container status for the whole TA/L1/L2/In-Person/Offer arc as of 2026-07-15. Renamed from interviewCount when "interview" was removed from CandidateStatus. */
+  inTrackerCount: number;
   teamName?: string;
 }
 

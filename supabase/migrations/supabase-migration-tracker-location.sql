@@ -1,0 +1,26 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Location on tracker
+-- Run this in Supabase SQL editor → Run
+--
+-- Part of the pipeline status restructuring (Vlad, 2026-07-15): a new
+-- Location field, manually entered in the Tracker drawer, lives on `tracker`
+-- (not `screenings`) alongside the other interview-process fields
+-- (company, role, expected_level, etc.).
+--
+-- Additive only, no backfill — existing tracker rows just have a null
+-- location until a recruiter fills one in.
+--
+-- IMPORTANT — run this BEFORE deploying the code that reads/writes location.
+-- lib/screenings.ts's upsertTrackerEntry writes this column conditionally
+-- (only when a caller actually sends a location value), so it won't break
+-- existing saves either way — but a save that includes a location value
+-- will fail until this migration has run. The column is deliberately NOT
+-- yet added to getFullTrackerEntries' shared select (the query that feeds
+-- the whole Tracker tab) — that's a follow-up, once this migration is
+-- confirmed run, to avoid breaking every Tracker load in the meantime. See
+-- decisions-log.md, 2026-07-15, and the global memory vault's
+-- feedback_migration_sequencing entry — this exact mistake has caused two
+-- real outages on this project before.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE tracker ADD COLUMN IF NOT EXISTS location text;
