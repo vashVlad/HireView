@@ -12,6 +12,17 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-15 — Teti feedback batch: 3 bugs fixed (filename collision, missing name, company-alias false positives) + pipeline restructuring design documented (not built)
+
+- Teti sent a feedback batch: a screenshot of an "Unknown (resume name not provided)" pipeline card, a diagnostic sample PDF, three numbered issues, and a separate meeting-summary proposing a larger pipeline restructuring. Vlad asked for a proper plan first (per Blueprint methodology), approved it, then approved building the three confirmed bugs.
+- **Bug 1 (fixed):** `possible_update` filename matches were incorrectly skipping scoring like real `duplicate` matches, silently dropping a second real candidate that happened to share a generic filename with someone else. Now only `duplicate` skips; `possible_update` scores normally with an informational amber banner.
+- **Bug 2 (fixed):** missing candidate names traced to Google-Docs-exported PDFs placing the header outside the extractable text layer (confirmed directly against Teti's sample file). Fixed with a Claude vision fallback (`lib/extractCandidateNameFallback.ts`, native Anthropic PDF document-block support) after a `pdfjs-dist`/`@napi-rs/canvas` rendering approach proved incompatible and was abandoned.
+- **Bug 3 (fixed):** company-name aliases (e.g. "Hypermedia Systems" = "HMS") were being flagged as credibility discrepancies. Added explicit guidance to `lib/assessCredibility.ts`'s tool schema and prompt so same-company variations are `match`, not `discrepancy`.
+- **Pipeline restructuring (documented, not built):** Vlad's exact corrected spec captured in state.md's new Design section — remove `interview` status, "Screening" becomes the container for the existing TA/L1/L2/In-Person/Offer/Reject tracker stages, plus auto-archive on threshold, a new Location field, and Next Step automation. Deliberately deferred — needs its own Phase 2 design pass given how many places read `CandidateStatus`.
+- **What's next:** Vlad live-tests all three bug fixes (see state.md's checklist), then commits/pushes/PRs via Claude Code. Pipeline restructuring needs a dedicated session starting from state.md's Design entry, not the original meeting summary (Vlad's direct correction supersedes it).
+
+---
+
 ## 2026-07-09 (session 3, continued) — FunnelView per-project breakdown (code complete, not committed/tested)
 
 - Vlad asked for a per-project breakdown so one badly-converting role can't hide inside the blended org-wide funnel.
@@ -397,3 +408,12 @@ Also checked whether Phase 1.1's existing fingerprint-based duplicate detection 
 - **This sandbox's git/build tooling worked cleanly this session** — no mount flakiness. `npm install` confirmed `word-extractor` present, `npx tsc --noEmit` clean, `npm run build` succeeded for real (not scratch-project verification) — all 42 routes generated.
 - Committed `e7a162a` (16 files), pushed to `origin/feat/legacy-doc-support-and-bugfixes`.
 - **What's next:** Vlad opens the PR (`https://github.com/vashVlad/HireView/pull/new/feat/legacy-doc-support-and-bugfixes`) and merges when ready — no further live-test needed, all four bugs in this batch were already confirmed fixed by Vlad before this session.
+
+## 2026-07-15 (same day, separate session) — Teti feedback batch (3 bugs) committed and pushed
+
+- Picked up an in-progress working tree matching the 2026-07-15 "Fixed (Teti feedback batch)" entry in state.md — 8 modified files + `lib/extractCandidateNameFallback.ts`, coded but not yet built/committed (the prior session's own sandbox had no working project mount, so this was genuinely unverified).
+- Same wrong-branch pattern as every prior handoff: was sitting on `feat/legacy-doc-support-and-bugfixes`, which had already merged as PR #15 (`56bf32c`) in between. Stashed with `-u`, synced `main`, created `fix/teti-feedback-batch` fresh, popped clean — exact same file set.
+- Do-not-touch check: `scoreCandidate.ts`/`analyzeJD.ts`/`parseResume.ts`/`calibrationExamples.ts`/`screen-resumes/route.ts` all confirmed zero diff. Full diff review of all four changed files plus the new fallback file matched the handoff description exactly — including double-checking two subtle claims rather than taking them on faith: `roleContext` was already a `ResultCard` prop before this diff (not newly introduced), and `CheckExistingResult` already existed in `lib/types.ts`.
+- `npx tsc --noEmit` and `npm run build` both ran for real this time — first genuine build check these three fixes got (the originating session couldn't run either). Both clean, all 42 routes generated.
+- Committed `eab3250` (9 files), pushed to `origin/fix/teti-feedback-batch`. `gh` still not on PATH — compare URL given: `https://github.com/vashVlad/HireView/compare/main...fix/teti-feedback-batch?expand=1`.
+- **Not yet merged** — needs Vlad's live-test pass first (filename-collision scoring, Google-Docs-exported PDF name recovery, company-alias credibility check), per the checklist in state.md.

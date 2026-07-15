@@ -28,7 +28,7 @@ const CREDIBILITY_TOOL = {
             status: {
               type: "string",
               enum: ["match", "discrepancy", "cannot_verify"],
-              description: "match = consistent; discrepancy = materially different; cannot_verify = cross-reference doesn't have enough info to confirm.",
+              description: "match = consistent; discrepancy = materially different; cannot_verify = cross-reference doesn't have enough info to confirm. For company names specifically: an abbreviation/acronym (Hypermedia Systems vs HMS), a legal-entity suffix (Acme vs Acme Inc.), punctuation/spacing, or a known rebrand/acquisition of the SAME underlying company is a match, not a discrepancy — only use discrepancy when the two names plausibly refer to different companies.",
             },
             note: {
               type: "string",
@@ -88,7 +88,7 @@ ${roleNote}
 ${comparisonInstruction}
 
 Your job:
-1. ${hasCrossRef ? "Flag every cross-reference field as match, discrepancy, or cannot_verify. Notes: one sentence max, state the fact." : "Skip cross-reference comparison — leave rows empty."}
+1. ${hasCrossRef ? "Flag every cross-reference field as match, discrepancy, or cannot_verify. Notes: one sentence max, state the fact. Company names: treat abbreviations/acronyms, legal-entity suffixes, punctuation differences, and known rebrands or acquisitions of the same company as a match — not a discrepancy. Example: \"Hypermedia Systems\" and \"HMS\" are the same company. Only flag discrepancy when the names plausibly refer to genuinely different companies." : "Skip cross-reference comparison — leave rows empty."}
 2. Note what sectors the candidate has actually worked in and whether that's relevant.
 3. Read the career trajectory for consistency and signs of inflation.
 4. If the cross-reference document appears to be a second resume version, include resumeDelta describing what changed and whether it looks like honest tailoring or suspicious rearrangement. Otherwise omit resumeDelta.

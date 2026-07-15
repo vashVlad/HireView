@@ -3,6 +3,7 @@ import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
 import { extractResumeText } from "./parseResume";
 import { generateFingerprint } from "./generateFingerprint";
 import { hashResumeText, normalizeCandidateName } from "./resumeContentHash";
+import { extractCandidateNameFromPdf, looksLikeMissingName } from "./extractCandidateNameFallback";
 import {
   saveFingerprint,
   findDuplicateMatch,
@@ -209,6 +210,24 @@ export async function saveScreening(params: {
 }): Promise<{ id: number }> {
   const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, projectId, userId } = params;
   const supabase = getSupabaseClient();
+
+  // Recover a missing candidate name before it ever reaches the DB (Teti's
+  // bug report, 2026-07-13 — "Unknown (resume name not provided)" cards).
+  // scoreCandidate.ts (do-not-touch) is honest when the resume TEXT it was
+  // given has no discoverable name — confirmed root cause: some PDF export
+  // tools place the header outside the extractable text layer entirely, so
+  // there was genuinely nothing for it to find. Mutating result.candidateName
+  // IN PLACE here (not reassigning a local copy) is deliberate: both callers
+  // of saveScreening (app/api/screen-resumes/route.ts and
+  // app/api/screenings/save-one/route.ts, both do-not-touch) push the same
+  // `result` object into their own response before/around calling this
+  // function and already rely on exactly this mutate-by-reference pattern
+  // for `result.id = id` — so this fix reaches the immediate UI too, not
+  // just the next reload, without touching either do-not-touch route.
+  if (looksLikeMissingName(result.candidateName) && resumeMimeType === "application/pdf") {
+    const recovered = await extractCandidateNameFromPdf(resumeFile).catch(() => null);
+    if (recovered) result.candidateName = recovered;
+  }
 
   // Denormalize team_id from the project (source of truth) so list queries
   // can filter with a plain .eq/.in instead of a join. Falls back to the
