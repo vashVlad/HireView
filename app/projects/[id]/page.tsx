@@ -1349,9 +1349,7 @@ function DrawerBody({
   const [role, setRole] = useState(trackerEntry.role ?? projectName);
   const [editingRole, setEditingRole] = useState(false);
   const [expectedLevel, setExpectedLevel] = useState(trackerEntry.expectedLevel ?? "");
-  // Manually entered in this drawer — 2026-07-15. Not yet read back from the
-  // shared getFullTrackerEntries select (see lib/screenings.ts comment); will
-  // appear blank on reload until that follow-up wiring lands post-migration.
+  // Manually entered in this drawer — 2026-07-15.
   const [location, setLocation] = useState(trackerEntry.location ?? "");
   const [stepsCompleted, setStepsCompleted] = useState(trackerEntry.stepsCompleted ?? "");
   const [comments, setComments] = useState(trackerEntry.comments ?? "");

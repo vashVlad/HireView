@@ -54,6 +54,7 @@ interface ScreeningRow {
   history_alert_match_id: number | null;
   name_match_id: number | null;
   previous_status: CandidateStatus | null;
+  archive_reason: string | null;
   created_at: string;
 }
 
@@ -92,6 +93,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.history_alert_match_id != null ? { historyAlertMatchId: row.history_alert_match_id } : {}),
     ...(row.name_match_id != null ? { nameMatchId: row.name_match_id } : {}),
     ...(row.previous_status != null ? { previousStatus: row.previous_status } : {}),
+    ...(row.archive_reason != null ? { archiveReason: row.archive_reason } : {}),
     createdAt: row.created_at,
   };
 }
@@ -390,8 +392,12 @@ export async function saveScreening(params: {
 
 // ── List ───────────────────────────────────────────────────────────────────
 
+// archive_reason added to this shared select 2026-07-15 as the deliberate
+// follow-up described on ScreeningRow/rowToRecord — supabase-migration-
+// archive-reason.sql confirmed run first, same sequencing reject_reason and
+// location followed.
 const SCREENING_COLUMNS =
-  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, created_at";
+  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, archive_reason, created_at";
 
 /**
  * Fills in the matched candidate's name and project (name + id) for any
@@ -646,10 +652,8 @@ export async function upsertTrackerEntry(
       ...(fields.role !== undefined && { role: fields.role }),
       ...(fields.expectedLevel !== undefined && { expected_level: fields.expectedLevel }),
       // location column added 2026-07-15 (supabase-migration-tracker-location.sql,
-      // NOT YET CONFIRMED RUN as of this write — run it before this write path
-      // is exercised for real, or the upsert will fail with a missing-column
-      // error the first time someone saves a Location value). next_step
-      // removed the same day per Vlad's request ("remove it entirely").
+      // confirmed run). next_step removed the same day per Vlad's request
+      // ("remove it entirely").
       ...(fields.location !== undefined && { location: fields.location }),
       ...(fields.stepsCompleted !== undefined && { steps_completed: fields.stepsCompleted }),
       ...(fields.comments !== undefined && { comments: fields.comments }),
@@ -698,18 +702,13 @@ export async function getFullTrackerEntries(
 ): Promise<Record<number, FullTrackerData>> {
   if (screeningIds.length === 0) return {};
   const supabase = getSupabaseClient();
-  // location is deliberately NOT in this select yet — supabase-migration-
-  // tracker-location.sql needs to be confirmed run first (see
-  // upsertTrackerEntry's comment above and decisions-log.md, 2026-07-15).
-  // This is the exact same sequencing reject_reason followed: land the write
-  // path now, add the column to this shared select as a follow-up once the
-  // migration is confirmed. Adding it here before then would 500 every
-  // Tracker load for every screening (this select feeds the whole tab), not
-  // just the one save — see feedback_migration_sequencing in the global
-  // memory vault, this has caused two real outages before.
+  // location added 2026-07-15 (supabase-migration-tracker-location.sql,
+  // confirmed run) — wired into this shared select as the deliberate
+  // follow-up described in upsertTrackerEntry's comment above and
+  // decisions-log.md, same sequencing reject_reason followed.
   const { data, error } = await supabase
     .from("tracker")
-    .select("screening_id, stage, company, role, expected_level, steps_completed, comments, immigration, on_hold, on_hold_reason, reject_reason, scheduled, interview_date, previous_stage")
+    .select("screening_id, stage, company, role, expected_level, location, steps_completed, comments, immigration, on_hold, on_hold_reason, reject_reason, scheduled, interview_date, previous_stage")
     .in("screening_id", screeningIds);
   if (error) throw error;
   const map: Record<number, FullTrackerData> = {};
@@ -719,6 +718,7 @@ export async function getFullTrackerEntries(
       company: (row.company as string) ?? undefined,
       role: (row.role as string) ?? undefined,
       expectedLevel: (row.expected_level as string) ?? undefined,
+      location: (row.location as string) ?? undefined,
       stepsCompleted: (row.steps_completed as string) ?? undefined,
       comments: (row.comments as string) ?? undefined,
       immigration: (row.immigration as string) ?? undefined,

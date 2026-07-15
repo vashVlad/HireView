@@ -31,9 +31,7 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
 // options since Archived is reachable from anywhere, including candidates
 // who never entered the Tracker (e.g. auto-archived below the score
 // threshold at save time). Stored on `screenings.archive_reason` — see
-// supabase-migration-archive-reason.sql. Not yet wired into the shared
-// SCREENING_COLUMNS select (lib/screenings.ts) — see that migration's
-// header comment for why.
+// supabase-migration-archive-reason.sql (confirmed run 2026-07-15).
 export const ARCHIVE_REASONS = [
   "Tech skills",
   "Domain knowledge",
@@ -181,9 +179,7 @@ export interface ScreeningRecord {
   /**
    * Why this candidate was archived — one of ARCHIVE_REASONS, or undefined
    * if never set. Only meaningful when status === "archived". Added
-   * 2026-07-15; not yet in the shared SCREENING_COLUMNS select (see
-   * supabase-migration-archive-reason.sql), so this will read as undefined
-   * until that follow-up wiring lands post-migration.
+   * 2026-07-15 (supabase-migration-archive-reason.sql).
    */
   archiveReason?: string;
   jobDescription: string;
