@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
-import { hashResumeText, normalizeCandidateName, normalizeFileName } from "@/lib/resumeContentHash";
+import { hashResumeText, normalizeCandidateName } from "@/lib/resumeContentHash";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getAuthUser } from "@/lib/auth";
 import { listRejectionHistory } from "@/lib/screenings";
@@ -15,15 +15,21 @@ export const maxDuration = 30;
  * the frontend calls this first, removes anything flagged "duplicate" from
  * the batch, and sends the rest to the existing scoring route unchanged.
  *
- * Two signals, both free (local parsing + hashing only, zero Claude calls):
+ * One signal, free (local parsing + hashing only, zero Claude calls):
  *   - "duplicate": exact match on resume_content_hash — same content,
  *     byte-for-byte-of-text. Nothing to gain from re-scoring; the frontend
  *     shows the existing saved result as-is.
- *   - "possible_update": no hash match, but the filename normalizes to the
- *     same candidate's existing screening. Might be an edited resume, might
- *     be a coincidence — the frontend offers a credibility comparison
- *     (reusing /api/assess-credibility with the OLD screening as the base
- *     and this upload as the cross-reference doc) rather than guessing.
+ *
+ * Filename-based matching ("possible_update") was removed 2026-07-15 — a
+ * filename alone (e.g. "Resume (16).pdf", the default browser auto-rename
+ * for any resume literally named "Resume.pdf") normalizes down to a bare
+ * generic term with zero identity signal, so it flagged unrelated candidates
+ * as often as real ones. The post-score candidate-name check
+ * (findNameMatches in app/projects/[id]/page.tsx, using existingCandidates
+ * below) already covers the real case this was trying to catch — two
+ * different resume files that turn out to name the same actual person — more
+ * reliably, since it compares real extracted identity instead of an
+ * incidental filename string. See decisions-log.md, 2026-07-15.
  *
  * Scoped to the project only (like Phase 1.1's same-project duplicate
  * detection), not team-wide — "already exists in the project" is literally
@@ -89,10 +95,8 @@ export async function POST(request: NextRequest) {
   }
 
   const byHash = new Map<string, ExistingScreeningRow>();
-  const byNormalizedName = new Map<string, ExistingScreeningRow>();
   for (const row of existingRows ?? []) {
     if (row.resume_content_hash) byHash.set(row.resume_content_hash, row);
-    byNormalizedName.set(normalizeFileName(row.file_name), row);
   }
 
   // Neither hash nor filename catches "two genuinely different resume files
@@ -134,11 +138,6 @@ export async function POST(request: NextRequest) {
         const exactMatch = byHash.get(hash);
         if (exactMatch) {
           return { fileName: file.name, status: "duplicate", existing: toExisting(exactMatch) };
-        }
-
-        const nameMatch = byNormalizedName.get(normalizeFileName(file.name));
-        if (nameMatch) {
-          return { fileName: file.name, status: "possible_update", existing: toExisting(nameMatch) };
         }
 
         return { fileName: file.name, status: "new" };

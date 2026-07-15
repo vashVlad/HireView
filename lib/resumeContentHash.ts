@@ -23,33 +23,17 @@ export function hashResumeText(text: string): string {
 }
 
 /**
- * Weaker fallback signal for "might be the same candidate, possibly an
- * edited resume" — used only when the exact hash above doesn't match.
- * Strips extension, casing, and common re-save suffixes ("(1)", "-copy",
- * "_v2", "final", etc.) so "John_Smith_Resume.pdf" and
- * "John_Smith_Resume_v2.pdf" normalize to the same value. Free, local,
- * no Claude call — deliberately noisy in favor of false positives over
- * false negatives, since a match here only offers a credibility comparison,
- * it never silently skips or overwrites anything.
- */
-export function normalizeFileName(fileName: string): string {
-  return fileName
-    .toLowerCase()
-    .replace(/\.[a-z0-9]+$/, "") // strip extension
-    .replace(/[_\-\s]+(v?\d+|copy|final|updated|new|revised)\)?$/g, "") // trailing version/copy markers
-    .replace(/\(\d+\)$/, "") // trailing " (1)" style suffix
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-/**
  * Free post-score safety net: candidate name only exists once Claude has
  * already scored the resume, so this can never avoid the scoring cost the
- * way hashResumeText/normalizeFileName can — it's purely an informational
- * signal for a case neither of those catch: two genuinely different resume
- * files (different filenames, different content) that turn out to name the
- * same candidate. Deliberately loose (whitespace/case only) — a name match
- * doesn't imply fraud, just "worth a second look."
+ * way hashResumeText can — it's purely an informational signal for two
+ * genuinely different resume files (different filenames, different content)
+ * that turn out to name the same candidate. Deliberately loose (whitespace/
+ * case only) — a name match doesn't imply fraud, just "worth a second look."
+ * As of 2026-07-15, this is also the ONLY same-candidate signal besides the
+ * exact content hash — a filename-only match (normalizeFileName, removed
+ * this date) was retired because it compared incidental strings rather than
+ * real identity, and produced false positives on generic filenames like
+ * "Resume (16).pdf". See decisions-log.md.
  */
 export function normalizeCandidateName(name: string): string {
   return name.toLowerCase().trim().replace(/\s+/g, " ");

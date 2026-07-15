@@ -44,7 +44,7 @@ export async function PATCH(
         ...(body.company !== undefined && { company: body.company }),
         ...(body.role !== undefined && { role: body.role }),
         ...(body.expectedLevel !== undefined && { expectedLevel: body.expectedLevel }),
-        ...(body.nextStep !== undefined && { nextStep: body.nextStep }),
+        ...(body.location !== undefined && { location: body.location }),
         ...(body.stepsCompleted !== undefined && { stepsCompleted: body.stepsCompleted }),
         ...(body.comments !== undefined && { comments: body.comments }),
         ...(body.immigration !== undefined && { immigration: body.immigration }),

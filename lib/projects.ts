@@ -108,17 +108,19 @@ export async function getProjectSummaries(teamIds?: number[]): Promise<ProjectSu
   const supabase = getSupabaseClient();
   const ids = projects.map((p) => p.id);
 
-  const [screeningRes, interviewRes] = await Promise.all([
+  const [screeningRes, inTrackerRes] = await Promise.all([
     supabase
       .from("screenings")
       .select("project_id")
       .in("project_id", ids)
       .returns<{ project_id: number }[]>(),
+    // "screening" status = actively in the Tracker (TA/L1/L2/In-Person/Offer
+    // arc) — was "interview" before that status was removed 2026-07-15.
     supabase
       .from("screenings")
       .select("project_id")
       .in("project_id", ids)
-      .eq("status", "interview")
+      .eq("status", "screening")
       .returns<{ project_id: number }[]>(),
   ]);
 
@@ -128,10 +130,10 @@ export async function getProjectSummaries(teamIds?: number[]): Promise<ProjectSu
       screeningCounts.set(row.project_id, (screeningCounts.get(row.project_id) ?? 0) + 1);
   }
 
-  const interviewCounts = new Map<number, number>();
-  for (const row of interviewRes.data ?? []) {
+  const inTrackerCounts = new Map<number, number>();
+  for (const row of inTrackerRes.data ?? []) {
     if (row.project_id != null)
-      interviewCounts.set(row.project_id, (interviewCounts.get(row.project_id) ?? 0) + 1);
+      inTrackerCounts.set(row.project_id, (inTrackerCounts.get(row.project_id) ?? 0) + 1);
   }
 
   const teamIdsPresent = [...new Set(projects.map((p) => p.teamId).filter((t): t is number => t != null))];
@@ -144,7 +146,7 @@ export async function getProjectSummaries(teamIds?: number[]): Promise<ProjectSu
   return projects.map((p) => ({
     ...p,
     screeningCount: screeningCounts.get(p.id) ?? 0,
-    interviewCount: interviewCounts.get(p.id) ?? 0,
+    inTrackerCount: inTrackerCounts.get(p.id) ?? 0,
     ...(p.teamId != null && teamNameById.has(p.teamId) ? { teamName: teamNameById.get(p.teamId) } : {}),
   }));
 }
