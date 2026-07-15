@@ -251,9 +251,25 @@ function ScreenTab({ project, onScreeningsSaved }: {
   // pre-check (app/api/screen-resumes/check-existing) — set aside before
   // ever reaching the scoring route, keyed by the original File so a
   // "Re-screen anyway" can still send it through on demand.
+  //
+  // Only "duplicate" (exact content-hash match) belongs here. "possible_update"
+  // is filename-only — no content comparison at all — and was previously
+  // treated the same as duplicate, meaning it also skipped scoring. That's a
+  // real bug (Teti, 2026-07-13): if two DIFFERENT candidates happen to upload
+  // files with the same generic name ("Resume 16.pdf"), the second person
+  // never gets scored at all — the recruiter just sees the first person's
+  // cached data again, silently. Filename similarity is too weak a signal to
+  // justify losing a candidate's real identity and score. See possibleUpdateMatches.
   const [existingMatches, setExistingMatches] = useState<
     { match: CheckExistingResult; file: File }[]
   >([]);
+  // fileName -> the existing candidate a filename-only match pointed at, plus
+  // the actual uploaded File (so the comparison banner can pre-fill the same
+  // way AlreadyScreenedCard's does). Purely informational, attached to the
+  // real (freshly-scored) ResultCard — never blocks scoring, unlike existingMatches above.
+  const [possibleUpdateMatches, setPossibleUpdateMatches] = useState<
+    Map<string, { existing: NonNullable<CheckExistingResult["existing"]>; file: File }>
+  >(new Map());
   // Candidates already saved in this project, by normalized name — the one
   // signal hash/filename matching can't catch (two different resume files
   // for the same person). Populated during the pre-check, compared against
@@ -352,12 +368,19 @@ function ScreenTab({ project, onScreeningsSaved }: {
       const byFileName = new Map(classifications.map((c) => [c.fileName, c]));
       const newFiles: File[] = [];
       const matched: { match: CheckExistingResult; file: File }[] = [];
+      const possibleUpdateByFileName = new Map<string, { existing: NonNullable<CheckExistingResult["existing"]>; file: File }>();
       for (const f of files) {
         const c = byFileName.get(f.name);
-        if (c && c.existing && (c.status === "duplicate" || c.status === "possible_update")) {
+        if (c && c.existing && c.status === "duplicate") {
+          // Exact content match — genuinely nothing new to learn, safe to skip scoring.
           matched.push({ match: c, file: f });
         } else {
+          // "possible_update" (filename-only signal) and "new" both get
+          // scored normally — filename alone never withholds a real result.
           newFiles.push(f);
+          if (c && c.existing && c.status === "possible_update") {
+            possibleUpdateByFileName.set(f.name, { existing: c.existing, file: f });
+          }
         }
       }
 
@@ -368,6 +391,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
       setResults(scored);
       setFileErrors(errors);
       setExistingMatches(matched);
+      setPossibleUpdateMatches(possibleUpdateByFileName);
       setExistingCandidates(candidates);
       setNameMatches(findNameMatches(scored, candidates));
       setRejectionHistoryBaseline(rejections);
@@ -441,6 +465,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
     setFileErrors([]);
     setFiles([]);
     setExistingMatches([]);
+    setPossibleUpdateMatches(new Map());
     setExistingCandidates([]);
     setNameMatches(new Map());
   }
@@ -482,6 +507,9 @@ function ScreenTab({ project, onScreeningsSaved }: {
               jdAnalysis={project.jdAnalysis}
               onStatusChange={handleStatusChange}
               nameMatch={nameMatches.get(result.fileName)}
+              filenameMatch={possibleUpdateMatches.get(result.fileName)?.existing}
+              filenameMatchFile={possibleUpdateMatches.get(result.fileName)?.file}
+              roleContext={project.name}
               rejectionHistory={rejectionMatches.get(result.fileName)}
               belowThreshold={result.score < project.scoreThreshold}
               otherActiveCount={otherActiveCount}
