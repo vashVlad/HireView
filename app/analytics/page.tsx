@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
+import { PageHeader } from "@/components/PageHeader";
 
 interface AnalyticsData {
   totalScreened: number;
@@ -16,14 +17,24 @@ interface AnalyticsData {
   recruiterList: { id: string; email: string; role: string }[];
 }
 
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+// Matches the stat-card pattern from the admin/users redesign: soft accent
+// wash on hover + a small lift, rather than a flat static box.
+function StatCard({
+  label, value, sub, icon, accent,
+}: {
+  label: string; value: string; sub?: string; icon: React.ReactNode; accent: string;
+}) {
   return (
-    <div className="flex flex-col gap-1 rounded-2xl border border-zinc-200 bg-white px-6 py-5 dark:border-zinc-800 dark:bg-zinc-900">
-      <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-        {label}
-      </span>
-      <span className="text-3xl font-bold tabular-nums text-zinc-900 dark:text-zinc-50">{value}</span>
-      {sub && <span className="text-xs text-zinc-400 dark:text-zinc-500">{sub}</span>}
+    <div className="group relative overflow-hidden rounded-2xl border border-zinc-200 bg-white p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900">
+      <div className={`pointer-events-none absolute inset-0 bg-gradient-to-br opacity-0 transition-opacity duration-200 group-hover:opacity-100 ${accent}`} />
+      <div className="relative flex items-center gap-2.5">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={accent.split(" ").slice(-2).join(" ")}>
+          {icon}
+        </svg>
+        <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</span>
+      </div>
+      <p className="relative mt-2 text-2xl font-bold tabular-nums text-zinc-900 dark:text-zinc-100">{value}</p>
+      {sub && <p className="relative mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">{sub}</p>}
     </div>
   );
 }
@@ -101,38 +112,35 @@ export default function AnalyticsPage() {
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/analytics" />
 
-      <main className="mx-auto max-w-5xl px-6 py-10">
-        <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">Analytics</h1>
-            <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-              Team-wide screening activity. Admin only.
-            </p>
-          </div>
-
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            {data && data.recruiterList.length > 1 && (
-              <select
-                value={recruiterId}
-                onChange={(e) => setRecruiterId(e.target.value)}
-                className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-              >
-                <option value="">All recruiters</option>
-                {data.recruiterList.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.email}
-                  </option>
-                ))}
-              </select>
-            )}
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
-              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" />
-            <span className="text-zinc-400">→</span>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
-              className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" />
-          </div>
-        </div>
+      <main className="mx-auto max-w-6xl px-6 py-10">
+        <PageHeader
+          icon={<><path d="M3 3v18h18" strokeLinecap="round" strokeLinejoin="round" /><path d="M18 17V9M13 17V5M8 17v-3" strokeLinecap="round" strokeLinejoin="round" /></>}
+          title="Analytics"
+          subtitle="Team-wide screening activity. Admin only."
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              {data && data.recruiterList.length > 1 && (
+                <select
+                  value={recruiterId}
+                  onChange={(e) => setRecruiterId(e.target.value)}
+                  className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                >
+                  <option value="">All recruiters</option>
+                  {data.recruiterList.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.email}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+                className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" />
+              <span className="text-zinc-400">→</span>
+              <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
+                className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" />
+            </div>
+          }
+        />
 
         {error && (
           <div className="mb-6 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
@@ -156,21 +164,29 @@ export default function AnalyticsPage() {
                 label="Resumes screened"
                 value={data.totalScreened.toLocaleString()}
                 sub="total processed by AI"
+                icon={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round" /><path d="M14 2v6h6" strokeLinecap="round" strokeLinejoin="round" /></>}
+                accent="from-violet-500/10 to-transparent text-violet-600 dark:text-violet-400"
               />
               <StatCard
                 label="Passed to pipeline"
                 value={data.passedToPipeline.toLocaleString()}
                 sub={data.totalScreened > 0 ? `${data.passRate}% pass rate` : "no data yet"}
+                icon={<path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />}
+                accent="from-emerald-500/10 to-transparent text-emerald-600 dark:text-emerald-400"
               />
               <StatCard
                 label="Filtered out"
                 value={(data.totalScreened - data.passedToPipeline).toLocaleString()}
                 sub="recruiter never saw these"
+                icon={<><circle cx="12" cy="12" r="10" /><path d="M8 12h8" strokeLinecap="round" /></>}
+                accent="from-rose-500/10 to-transparent text-rose-600 dark:text-rose-400"
               />
               <StatCard
                 label="Time saved"
                 value={timeSavedHours > 0 ? `~${timeSavedHours}h` : "—"}
                 sub="@ 15 min per resume"
+                icon={<path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" strokeLinecap="round" strokeLinejoin="round" />}
+                accent="from-sky-500/10 to-transparent text-sky-600 dark:text-sky-400"
               />
             </div>
 

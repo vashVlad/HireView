@@ -8,6 +8,8 @@ import { InsightList } from "@/components/InsightList";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
+import { PageHeader } from "@/components/PageHeader";
+import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { StatusStageControl } from "@/components/StatusStageControl";
 import {
   CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS,
@@ -101,7 +103,17 @@ function CandidateCard({
 
   return (
     <li id={`candidate-${s.id}`}
-      className="rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900">
+      className={`rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${
+        // Card Visuals, 2026-07-15 (Vlad's ask): archived candidates are
+        // "toned out" so the eye skips past them in a mixed list — darker
+        // border/bg, reduced opacity + saturation. Archived-only per
+        // confirmed scope (not "undefined" status, which doesn't apply to
+        // CandidateStatus anyway). Hover restores near-full opacity so the
+        // card is still fully readable on demand.
+        // 2026-07-15 follow-up: an opened card shouldn't stay dimmed either —
+        // `expanded` fully clears the toned-out treatment while reading it.
+        s.status === "archived" && !expanded ? "opacity-50 saturate-[0.6] hover:opacity-90" : ""
+      }`}>
       {/* Row */}
       <div role="button" tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
@@ -463,39 +475,43 @@ export default function CandidatesPage() {
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
+    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/candidates" />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
-        {/* Header */}
-        <div className="mb-8 flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1">
-            <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">All Candidates</h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400">
-              {loading ? "Loading..." : projectFilter && projectFilter !== -1
-                ? `${filtered.length} candidate${filtered.length !== 1 ? "s" : ""} in ${projects.find((p) => p.id === projectFilter)?.name ?? "this role"}`
-                : projectFilter === -1
-                ? `${filtered.length} candidate${filtered.length !== 1 ? "s" : ""} with no role`
-                : `${screenings.length} candidate${screenings.length !== 1 ? "s" : ""} across all roles`}
-            </p>
-          </div>
-          {projects.length > 0 && (
-            <select
-              value={projectFilter ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                setProjectFilter(v === "" ? null : v === "-1" ? -1 : parseInt(v, 10));
-              }}
-              className="max-w-[200px] truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 shadow-sm outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-            >
-              <option value="">All roles</option>
-              {projects.map((p) => (
-                <option key={p.id} value={String(p.id)}>{p.name}</option>
-              ))}
-              <option value="-1">No role</option>
-            </select>
-          )}
-        </div>
+        <PageHeader
+          icon={<>
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" strokeLinejoin="round" />
+          </>}
+          title="All Candidates"
+          subtitle={
+            loading ? "Loading..." : projectFilter && projectFilter !== -1
+              ? `${filtered.length} candidate${filtered.length !== 1 ? "s" : ""} in ${projects.find((p) => p.id === projectFilter)?.name ?? "this role"}`
+              : projectFilter === -1
+              ? `${filtered.length} candidate${filtered.length !== 1 ? "s" : ""} with no role`
+              : `${screenings.length} candidate${screenings.length !== 1 ? "s" : ""} across all roles`
+          }
+          action={
+            projects.length > 0 ? (
+              <select
+                value={projectFilter ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setProjectFilter(v === "" ? null : v === "-1" ? -1 : parseInt(v, 10));
+                }}
+                className="max-w-[200px] truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 shadow-sm outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                <option value="">All roles</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={String(p.id)}>{p.name}</option>
+                ))}
+                <option value="-1">No role</option>
+              </select>
+            ) : undefined
+          }
+        />
 
         {/* Filters */}
         <div className="mb-6 flex flex-col gap-3">
@@ -596,6 +612,7 @@ export default function CandidatesPage() {
           </ul>
         )}
       </main>
+      <ScrollToTopButton />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 import * as XLSX from "xlsx";
 import Link from "next/link";
-import { use, useEffect, useRef, useState } from "react";
+import { Fragment, use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlreadyScreenedCard } from "@/components/AlreadyScreenedCard";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
@@ -13,6 +13,7 @@ import { ResultCard, type FitSuggestion } from "@/components/ResultCard";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
+import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusStageControl } from "@/components/StatusStageControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
@@ -713,10 +714,20 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     })
     .slice()
     .sort((a, b) => {
+      // Archival Logic, 2026-07-15 (Vlad's ask): archived candidates always
+      // sink below every active candidate, regardless of score sort, so the
+      // main pipeline list only ever contains active candidates and the
+      // Archived section (rendered via a divider below, see the render map)
+      // reads as a visually separated block further down the page. Within
+      // each group, the existing score sort still applies.
+      const aArchived = a.status === "archived" ? 1 : 0;
+      const bArchived = b.status === "archived" ? 1 : 0;
+      if (aArchived !== bArchived) return aArchived - bArchived;
       if (sortOrder === "desc") return b.score - a.score;
       if (sortOrder === "asc") return a.score - b.score;
       return 0;
     });
+  const archivedCount = filteredScreenings.filter((s) => s.status === "archived").length;
 
   function getNotesText(s: ScreeningRecord) {
     return notesMap[s.id]?.text ?? s.notes ?? "";
@@ -836,10 +847,38 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-500">No candidates match your filters.</p>
       )}
     <ul className="flex flex-col gap-3">
-      {filteredScreenings.map((s) => {
+      {filteredScreenings.map((s, idx) => {
         const expanded = expandedId === s.id;
+        // Archival Logic, 2026-07-15: drop a section divider right before the
+        // first archived card in the (now archived-sorted-last) list, so the
+        // Archived group reads as its own labeled section rather than being
+        // mixed into the main pipeline. No divider at all if nothing's
+        // archived, or if statusFilter has already narrowed the list to only
+        // archived cards (idx 0 would be archived — divider still renders,
+        // which is fine, it just labels the single-group list).
+        const isFirstArchived = s.status === "archived" && filteredScreenings[idx - 1]?.status !== "archived";
         return (
-          <li key={s.id} data-candidate-id={s.id} className="rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900">
+          <Fragment key={s.id}>
+          {isFirstArchived && (
+            <li aria-hidden className="pointer-events-none flex items-center gap-3 px-1 pt-2 select-none">
+              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                Archived ({archivedCount})
+              </span>
+              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+            </li>
+          )}
+          <li data-candidate-id={s.id} className={`rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${
+            // Card Visuals, 2026-07-15 (Vlad's ask): archived candidates are
+            // "toned out" — darker/lower-opacity, desaturated — so the main
+            // pipeline visually recedes for them. Archived-only per confirmed
+            // scope. Hover restores near-full opacity for readability.
+            // 2026-07-15 follow-up: don't dim a card the user has actually
+            // opened — reading an expanded card's details through 50%
+            // opacity was the actual complaint, so `expanded` clears the
+            // toned-out treatment entirely while it's open.
+            s.status === "archived" && !expanded ? "opacity-50 saturate-[0.6] hover:opacity-90" : ""
+          }`}>
             <div role="button" tabIndex={0}
               onClick={() => setExpandedId(expanded ? null : s.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedId(expanded ? null : s.id); }}
@@ -1160,6 +1199,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               </div>
             )}
           </li>
+          </Fragment>
         );
       })}
     </ul>
@@ -1559,7 +1599,21 @@ function DrawerBody({
       <div>
         <FieldLabel label="Interview date" fkey="interviewDate" />
         <input type="date" value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
-          onBlur={(e) => saveTrackerField({ interviewDate: e.target.value }, "interviewDate")}
+          onBlur={(e) => {
+            const newDate = e.target.value;
+            // Interview Scheduling Automation, 2026-07-15 (Vlad's ask): saving
+            // a date auto-flips the Scheduled toggle on, removing the manual
+            // double-step of entering a date AND separately clicking the
+            // toggle. One-directional on purpose — clearing the date does NOT
+            // auto-unschedule, since a confirmed interview's date might need
+            // to be cleared for re-confirmation without losing "scheduled".
+            if (newDate && !scheduled) {
+              setScheduled(true);
+              saveTrackerField({ interviewDate: newDate, scheduled: true }, "interviewDate");
+            } else {
+              saveTrackerField({ interviewDate: newDate }, "interviewDate");
+            }
+          }}
           className={inputCls} />
       </div>
 
@@ -2109,7 +2163,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   if (loading) {
     return (
-      <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
+      <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
         <SiteHeader active="/projects" />
         <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-10">
           <span className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
@@ -2120,7 +2174,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
   if (notFound || !project) {
     return (
-      <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
+      <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
         <SiteHeader active="/projects" />
         <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-4 px-6 py-10">
           <p className="text-zinc-500 dark:text-zinc-400">Role not found.</p>
@@ -2131,10 +2185,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
+    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/projects" />
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-10">
         {/* Header */}
         <div className="mb-8 flex flex-col gap-1">
           <Link href="/projects" className="mb-1 inline-flex items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300">
@@ -2225,6 +2279,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           />
         )}
       </main>
+      {tab === "pipeline" && <ScrollToTopButton />}
     </div>
   );
 }

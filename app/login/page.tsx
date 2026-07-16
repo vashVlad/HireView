@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getBrowserSupabaseClient } from "@/lib/supabase-browser";
+import { Logo } from "@/components/Logo";
 
 function LoginForm() {
   const router = useRouter();
@@ -71,7 +72,8 @@ function LoginForm() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950">
       <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <Logo size={44} rounded="rounded-2xl" className="mb-3" />
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">HireView</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
             {showRequest ? "Request access" : "Sign in to your account"}
