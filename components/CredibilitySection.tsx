@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { CredibilityAssessment, CredibilityRow, CredibilitySignal } from "@/lib/types";
+import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals } from "@/lib/types";
 
 const SIGNAL_CONFIG: Record<CredibilitySignal, { label: string; className: string }> = {
   clean: {
@@ -18,7 +18,41 @@ const SIGNAL_CONFIG: Record<CredibilitySignal, { label: string; className: strin
   },
 };
 
-function CredibilityRowItem({ row }: { row: CredibilityRow }) {
+const ACTIVITY_CONFIG = {
+  active:   { label: "Active",            dot: "bg-emerald-400", text: "text-emerald-700 dark:text-emerald-400" },
+  moderate: { label: "Moderate activity", dot: "bg-amber-400",   text: "text-amber-700 dark:text-amber-400" },
+  minimal:  { label: "Minimal activity",  dot: "bg-zinc-400",    text: "text-zinc-500 dark:text-zinc-400" },
+} as const;
+
+function LinkedInSignalsPanel({ signals }: { signals: LinkedInSignals }) {
+  const cfg = ACTIVITY_CONFIG[signals.activity] ?? ACTIVITY_CONFIG.moderate;
+
+  const chips: string[] = [];
+  if (signals.connectionCount) chips.push(`${signals.connectionCount} connections`);
+  chips.push(
+    signals.recommendationCount === 0
+      ? "0 recommendations"
+      : `${signals.recommendationCount} recommendation${signals.recommendationCount !== 1 ? "s" : ""}`
+  );
+  chips.push(signals.hasSummary ? "Summary present" : "No summary");
+  if (signals.recentCertDate) chips.push(`Cert ${signals.recentCertDate}`);
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-800/30">
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+        Activity
+      </span>
+      <span className={`flex shrink-0 items-center gap-1.5 text-xs font-semibold ${cfg.text}`}>
+        <span className={`h-2 w-2 rounded-full ${cfg.dot}`} />
+        {cfg.label}
+      </span>
+      <span className="text-zinc-300 dark:text-zinc-600">·</span>
+      <span className="text-xs text-zinc-500 dark:text-zinc-400">{chips.join(" · ")}</span>
+    </div>
+  );
+}
+
+function CredibilityRowItem({ row, isLinkedIn }: { row: CredibilityRow; isLinkedIn?: boolean }) {
   const isMatch = row.status === "match";
   const isDiscrepancy = row.status === "discrepancy";
   // Material = real, hard-to-explain mismatch worth a follow-up question.
@@ -87,7 +121,7 @@ function CredibilityRowItem({ row }: { row: CredibilityRow }) {
               <span className="text-zinc-600 dark:text-zinc-300">{row.resume}</span>
             </span>
             <span>
-              <span className="font-medium text-zinc-500 dark:text-zinc-400">Cross-ref: </span>
+              <span className="font-medium text-zinc-500 dark:text-zinc-400">{isLinkedIn ? "LinkedIn: " : "Cross-ref: "}</span>
               <span className="text-zinc-600 dark:text-zinc-300">{row.crossRef}</span>
             </span>
           </div>
@@ -110,6 +144,7 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
   const flags = rows.filter((r) => r.status === "discrepancy");
   const materialFlags = flags.filter((r) => r.severity === "material");
   const matches = rows.filter((r) => r.status === "match");
+  const isLinkedIn = !!assessment.linkedInSignals;
 
   const activeRows = tab === "flags" ? flags : matches;
 
@@ -121,8 +156,13 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-3 px-4 py-3 text-left"
       >
-        <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+        <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
           Credibility
+          {isLinkedIn && (
+            <span className="rounded-full bg-blue-100 px-1.5 py-px text-[9px] font-bold normal-case tracking-normal text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
+              LinkedIn
+            </span>
+          )}
         </span>
         <div className="flex items-center gap-1.5">
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
@@ -194,13 +234,18 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
           {/* Rows */}
           <div className="flex flex-col gap-1.5">
             {activeRows.length > 0 ? (
-              activeRows.map((row, i) => <CredibilityRowItem key={i} row={row} />)
+              activeRows.map((row, i) => <CredibilityRowItem key={i} row={row} isLinkedIn={isLinkedIn} />)
             ) : (
               <p className="py-2 text-center text-xs text-zinc-400 dark:text-zinc-500">
                 {tab === "flags" ? "No flags — everything checked out." : "No verified matches."}
               </p>
             )}
           </div>
+
+          {/* LinkedIn signals panel — only when cross-ref was a LinkedIn PDF */}
+          {isLinkedIn && assessment.linkedInSignals && (
+            <LinkedInSignalsPanel signals={assessment.linkedInSignals} />
+          )}
 
           {/* Summary — only shown when not lifted into parent */}
           {showSummary && (
