@@ -478,7 +478,7 @@ export default function CandidatesPage() {
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/candidates" />
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-10">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-10">
         <PageHeader
           icon={<>
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
