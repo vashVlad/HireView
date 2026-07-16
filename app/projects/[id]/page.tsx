@@ -309,6 +309,20 @@ function ScreenTab({ project, onScreeningsSaved }: {
     } catch { /* non-fatal */ }
   }
 
+  // Mirrors handleStatusChange above — added 2026-07-15 so the post-screening
+  // ResultCard's archive-reason picker (StatusSelect) has somewhere to save
+  // to, same as StatusStageControl's reason segment on Pipeline/All Candidates.
+  async function handleArchiveReasonChange(id: number, archiveReason: string) {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, archiveReason } : r)));
+    try {
+      await fetch(`/api/history/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archiveReason }),
+      });
+    } catch { /* non-fatal */ }
+  }
+
   // Sends exactly the files given to the real scoring route, unchanged from
   // how it's always been called — this function is the only thing that
   // decides which files reach it, so /api/screen-resumes and scoreCandidate
@@ -494,6 +508,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
               rank={i + 1}
               jdAnalysis={project.jdAnalysis}
               onStatusChange={handleStatusChange}
+              onArchiveReasonChange={handleArchiveReasonChange}
               nameMatch={nameMatches.get(result.fileName)}
               roleContext={project.name}
               rejectionHistory={rejectionMatches.get(result.fileName)}
@@ -829,7 +844,10 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               onClick={() => setExpandedId(expanded ? null : s.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedId(expanded ? null : s.id); }}
               className="flex w-full cursor-pointer items-center gap-3 px-5 py-4 text-left">
-              <ScoreBadge score={s.score} />
+              <ScoreBadge
+                score={s.score}
+                adjustedScore={credibilityMap[s.id]?.scoreDelta ? s.score + credibilityMap[s.id].scoreDelta! : undefined}
+              />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden">
                 {/* Name row */}
                 <div className="flex min-w-0 items-center gap-2">
@@ -1025,9 +1043,19 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 <CrossReferenceChecker
                   screeningId={s.id}
                   currentAssessment={credibilityMap[s.id]}
-                  onComplete={(assessment) => {
-                    setCredibilityMap((prev) => ({ ...prev, [s.id]: assessment }));
-                    fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
+                  onComplete={async (assessment) => {
+                    try {
+                      const res = await fetch(`/api/history/${s.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ credibility: assessment }),
+                      });
+                      if (!res.ok) return false;
+                      setCredibilityMap((prev) => ({ ...prev, [s.id]: assessment }));
+                      return true;
+                    } catch {
+                      return false;
+                    }
                   }}
                 />
 

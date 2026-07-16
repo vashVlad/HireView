@@ -48,8 +48,16 @@ export async function GET(
   const fraudSignals: FraudSignals = {
     duplicateFlag: row.duplicate_flag ?? false,
     ...(row.history_alert_type != null ? { historyAlertType: row.history_alert_type } : {}),
+    // Only "material" discrepancies feed the fraud-aware prompt — "minor"
+    // ones (staffing-agency-vs-client naming, title phrasing, LinkedIn's
+    // month-only dates, etc.) are explainable formatting differences, not
+    // fraud signals, and probing them in an interview would be a false
+    // accusation. Added 2026-07-15 alongside the severity field itself
+    // (lib/assessCredibility.ts) — rows saved before that field existed have
+    // severity undefined and are excluded here by the same check, which is
+    // the conservative direction (under- rather than over-flagging).
     credibilityDiscrepancies: (row.credibility?.rows ?? [])
-      .filter((r) => r.status === "discrepancy")
+      .filter((r) => r.status === "discrepancy" && r.severity === "material")
       .map((r) => `${r.field} — resume says "${r.resume}", cross-reference says "${r.crossRef}"`),
   };
 

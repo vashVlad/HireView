@@ -30,6 +30,7 @@ export function ResultCard({
   roleContext,
   jdAnalysis,
   onStatusChange,
+  onArchiveReasonChange,
   belowThreshold = false,
   onFindBetterFit,
   onCheckCrossProjectPromise,
@@ -44,6 +45,14 @@ export function ResultCard({
   roleContext?: string;
   jdAnalysis?: JDAnalysis | null;
   onStatusChange?: (id: number, status: CandidateStatus) => void;
+  /**
+   * Archive-reason picker shown on the status pill once status is
+   * "archived" — mirrors StatusStageControl's reason segment used on
+   * Pipeline/All Candidates cards. Vlad's ask, 2026-07-15: this post-
+   * screening card previously showed only the bare status with no way to
+   * capture why a candidate was archived right after scoring.
+   */
+  onArchiveReasonChange?: (id: number, archiveReason: string) => void;
   /**
    * Every screened candidate is saved regardless of score — this just
    * decides whether to surface the cross-project fit suggestion (a
@@ -81,6 +90,7 @@ export function ResultCard({
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
     result.credibility ?? null
   );
+  const [archiveReason, setArchiveReason] = useState<string | undefined>(result.archiveReason);
   const [showQuestion, setShowQuestion] = useState(false);
   const [savedId] = useState<number | undefined>(result.id);
   const [showNameCompare, setShowNameCompare] = useState(false);
@@ -189,7 +199,11 @@ export function ResultCard({
     <li className={`animate-fade-in-up rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${solo ? "p-10" : "p-5"}`}>
       {/* Header: centered score + name */}
       <div className="flex flex-col items-center gap-3 text-center">
-        <ScoreBadge score={result.score} size={solo ? "lg" : "md"} />
+        <ScoreBadge
+          score={result.score}
+          size={solo ? "lg" : "md"}
+          adjustedScore={credibility?.scoreDelta ? result.score + credibility.scoreDelta : undefined}
+        />
         <div className="flex flex-col items-center gap-2">
           <div className="flex flex-wrap items-center justify-center gap-2">
             <span className={`font-semibold text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>#{rank}</span>
@@ -203,6 +217,11 @@ export function ResultCard({
               <StatusSelect
                 status={result.status}
                 onChange={(status) => onStatusChange(savedId, status)}
+                archiveReason={archiveReason}
+                onArchiveReasonChange={(reason) => {
+                  setArchiveReason(reason);
+                  onArchiveReasonChange?.(savedId, reason);
+                }}
               />
             </div>
           )}
@@ -367,13 +386,19 @@ export function ResultCard({
             screeningId={savedId!}
             roleContext={roleContext}
             currentAssessment={credibility ?? undefined}
-            onComplete={(assessment) => {
-              setCredibility(assessment);
-              fetch(`/api/history/${savedId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ credibility: assessment }),
-              }).catch(() => {});
+            onComplete={async (assessment) => {
+              try {
+                const res = await fetch(`/api/history/${savedId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ credibility: assessment }),
+                });
+                if (!res.ok) return false;
+                setCredibility(assessment);
+                return true;
+              } catch {
+                return false;
+              }
             }}
           />
         )}

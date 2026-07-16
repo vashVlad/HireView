@@ -27,11 +27,31 @@ function getScoreStyles(score: number) {
   };
 }
 
-export function ScoreBadge({ score, size = "md" }: { score: number; size?: "md" | "lg" }) {
-  const styles = getScoreStyles(score);
+export function ScoreBadge({
+  score,
+  size = "md",
+  adjustedScore,
+}: {
+  score: number;
+  size?: "md" | "lg";
+  /**
+   * Post-credibility-check score (score + a negative scoreDelta). When
+   * present and lower than score, the ring renders both: the original
+   * score's reach in a muted rose arc, and the adjusted score's reach in
+   * the normal tier color drawn on top of it — same circle, before/after in
+   * two colors, per Vlad's ask 2026-07-15. The big number shown is always
+   * the adjusted score, since that's the one that reflects what's actually
+   * been verified. Omit or pass === score for the plain single-ring badge.
+   */
+  adjustedScore?: number;
+}) {
+  const hasAdjustment = adjustedScore !== undefined && adjustedScore < score;
+  const displayScore = hasAdjustment ? adjustedScore : score;
+  const styles = getScoreStyles(displayScore);
   const radius = size === "lg" ? 44 : 26;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (score / 100) * circumference;
+  const offset = circumference - (displayScore / 100) * circumference;
+  const originalOffset = circumference - (score / 100) * circumference;
   const dim = size === "lg" ? "h-28 w-28" : "h-16 w-16";
   const vb = size === "lg" ? "0 0 100 100" : "0 0 60 60";
   const cx = size === "lg" ? 50 : 30;
@@ -42,13 +62,31 @@ export function ScoreBadge({ score, size = "md" }: { score: number; size?: "md" 
     <div className={`relative flex ${dim} shrink-0 items-center justify-center rounded-full shadow-lg ${styles.glow}`}>
       <svg className={`absolute ${dim} -rotate-90`} viewBox={vb}>
         <circle cx={cx} cy={cx} r={radius} fill="none" strokeWidth={sw} className="stroke-zinc-100 dark:stroke-zinc-800" />
+        {hasAdjustment && (
+          // "Before" arc — the original fit score's full reach, in a muted
+          // rose tone. Drawn first so the "after" arc paints over the shared
+          // portion, leaving only the deducted tail (adjustedScore -> score)
+          // visible in rose — that tail is the credibility deduction.
+          <circle
+            cx={cx} cy={cx} r={radius} fill="none" strokeWidth={sw} strokeLinecap="round"
+            strokeDasharray={circumference} strokeDashoffset={originalOffset}
+            className="stroke-rose-300 dark:stroke-rose-500/40"
+          />
+        )}
         <circle
           cx={cx} cy={cx} r={radius} fill="none" strokeWidth={sw} strokeLinecap="round"
           strokeDasharray={circumference} strokeDashoffset={offset}
           className={`transition-all duration-700 ease-out ${styles.ring}`}
         />
       </svg>
-      <span className={`${textSize} font-semibold tabular-nums ${styles.text}`}>{score}</span>
+      <div className="flex flex-col items-center">
+        <span className={`${textSize} font-semibold tabular-nums ${styles.text}`}>{displayScore}</span>
+        {hasAdjustment && (
+          <span className="text-[10px] font-semibold tabular-nums text-rose-500 dark:text-rose-400">
+            {score}&#x2192;{displayScore}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
