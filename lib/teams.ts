@@ -76,6 +76,15 @@ export async function listTeamsWithMembers(): Promise<TeamWithMembers[]> {
   }));
 }
 
+/** Renames a team. Added 2026-07-15 for the admin Team/Projects page — team names were previously create/delete only. */
+export async function renameTeam(teamId: number, name: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Team name cannot be empty");
+  const { error } = await supabase.from("teams").update({ name: trimmed }).eq("id", teamId);
+  if (error) throw error;
+}
+
 export async function addTeamMember(teamId: number, userId: string): Promise<void> {
   const supabase = getSupabaseClient();
   const { error } = await supabase
