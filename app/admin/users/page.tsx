@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
@@ -104,6 +105,11 @@ export default function UsersPage() {
   // exclusivity automatic.
   const [openMemberPickerTeamId, setOpenMemberPickerTeamId] = useState<number | null>(null);
   const [openProjectPickerTeamId, setOpenProjectPickerTeamId] = useState<number | null>(null);
+  // Fixed-position rects captured at button-click time so the portalled
+  // dropdowns float above everything regardless of ancestor containing blocks
+  // (the animate-fade-in-up <li> creates one via its transform keyframe).
+  const [memberPickerPos, setMemberPickerPos] = useState<{ top: number; left: number } | null>(null);
+  const [projectPickerPos, setProjectPickerPos] = useState<{ top: number; right: number } | null>(null);
 
   // Projects — for the drag-and-drop team assignment panel below.
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -184,6 +190,19 @@ export default function UsersPage() {
     }
     document.addEventListener("mousedown", handleDocMouseDown);
     return () => document.removeEventListener("mousedown", handleDocMouseDown);
+  }, []);
+
+  // Close portalled pickers when the page scrolls — they're fixed-position
+  // so they'd otherwise float in place while content moves underneath.
+  useEffect(() => {
+    function handleScroll() {
+      setOpenMemberPickerTeamId(null);
+      setOpenProjectPickerTeamId(null);
+      setMemberPickerPos(null);
+      setProjectPickerPos(null);
+    }
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   async function handleCreateTeam(e: React.FormEvent) {
@@ -797,11 +816,18 @@ export default function UsersPage() {
                         )}
                       </div>
                       {available.length > 0 && (
-                        <div data-team-picker className="relative z-50 mt-3 inline-block">
+                        <div data-team-picker className="mt-3 inline-block">
                           <button
-                            onClick={() =>
-                              setOpenMemberPickerTeamId((cur) => (cur === team.id ? null : team.id))
-                            }
+                            onClick={(e) => {
+                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                              if (openMemberPickerTeamId === team.id) {
+                                setOpenMemberPickerTeamId(null);
+                                setMemberPickerPos(null);
+                              } else {
+                                setOpenMemberPickerTeamId(team.id);
+                                setMemberPickerPos({ top: rect.bottom + 6, left: rect.left });
+                              }
+                            }}
                             className={`flex items-center gap-1 rounded-full border border-dashed px-2.5 py-1 text-xs font-medium transition-colors ${
                               openMemberPickerTeamId === team.id
                                 ? `${palette.border} ${palette.soft} ${palette.text}`
@@ -813,25 +839,6 @@ export default function UsersPage() {
                             </svg>
                             Add member
                           </button>
-                          {openMemberPickerTeamId === team.id && (
-                            <div className="absolute left-0 top-full z-50 mt-1.5 w-60 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-                              <ul className="max-h-52 overflow-y-auto">
-                                {available.map((u) => (
-                                  <li key={u.id}>
-                                    <button
-                                      onClick={() => handleAddMember(team.id, u.id)}
-                                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-700/60"
-                                    >
-                                      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white ${avatarColor(u.email)}`}>
-                                        {avatarInitial(u.email)}
-                                      </span>
-                                      <span className="truncate">{u.email}</span>
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
                         </div>
                       )}
 
@@ -858,11 +865,18 @@ export default function UsersPage() {
                               project's current team, so an already-assigned one would
                               be a no-op here). */}
                           {projects.some((p) => p.teamId !== team.id) && (
-                            <div data-team-picker className="relative z-50">
+                            <div data-team-picker className="inline-block">
                               <button
-                                onClick={() =>
-                                  setOpenProjectPickerTeamId((cur) => (cur === team.id ? null : team.id))
-                                }
+                                onClick={(e) => {
+                                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                  if (openProjectPickerTeamId === team.id) {
+                                    setOpenProjectPickerTeamId(null);
+                                    setProjectPickerPos(null);
+                                  } else {
+                                    setOpenProjectPickerTeamId(team.id);
+                                    setProjectPickerPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+                                  }
+                                }}
                                 title="Add a project"
                                 className={`flex h-4 w-4 items-center justify-center rounded-full border border-dashed transition-colors ${
                                   openProjectPickerTeamId === team.id
@@ -874,25 +888,6 @@ export default function UsersPage() {
                                   <path d="M12 5v14M5 12h14" strokeLinecap="round" />
                                 </svg>
                               </button>
-                              {openProjectPickerTeamId === team.id && (
-                                <div className="absolute right-0 top-full z-50 mt-1.5 w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-                                  <ul className="max-h-52 overflow-y-auto">
-                                    {projects.filter((p) => p.teamId !== team.id).map((p) => (
-                                      <li key={p.id}>
-                                        <button
-                                          onClick={() => handleAssignProject(p.id, team.id)}
-                                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-700/60"
-                                        >
-                                          <span className="truncate">{p.name}</span>
-                                          <span className="shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500">
-                                            {p.teamName ?? "Unassigned"}
-                                          </span>
-                                        </button>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
                             </div>
                           )}
                         </div>
@@ -1039,6 +1034,67 @@ export default function UsersPage() {
           </div>
         </div>
       </div>
+
+      {/* Portalled pickers — rendered outside the team <li> entirely so the
+          animate-fade-in-up containing-block never clips or misplaces them. */}
+      {openMemberPickerTeamId !== null && memberPickerPos && (() => {
+        const teamId = openMemberPickerTeamId;
+        const memberIds = new Set(teams.find((t) => t.id === teamId)?.members.map((m) => m.userId) ?? []);
+        const available = users.filter((u) => !memberIds.has(u.id));
+        return createPortal(
+          <div
+            data-team-picker
+            style={{ position: "fixed", top: memberPickerPos.top, left: memberPickerPos.left, zIndex: 9999 }}
+            className="w-60 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800"
+          >
+            <ul className="max-h-64 overflow-y-auto">
+              {available.map((u) => (
+                <li key={u.id}>
+                  <button
+                    onClick={() => handleAddMember(teamId, u.id)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-700/60"
+                  >
+                    <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white ${avatarColor(u.email)}`}>
+                      {avatarInitial(u.email)}
+                    </span>
+                    <span className="truncate">{u.email}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body
+        );
+      })()}
+
+      {openProjectPickerTeamId !== null && projectPickerPos && (() => {
+        const teamId = openProjectPickerTeamId;
+        const eligible = projects.filter((p) => p.teamId !== teamId);
+        return createPortal(
+          <div
+            data-team-picker
+            style={{ position: "fixed", top: projectPickerPos.top, right: projectPickerPos.right, zIndex: 9999 }}
+            className="w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800"
+          >
+            <ul className="max-h-64 overflow-y-auto">
+              {eligible.map((p) => (
+                <li key={p.id}>
+                  <button
+                    onClick={() => handleAssignProject(p.id, teamId)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs text-zinc-700 transition-colors hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-700/60"
+                  >
+                    <span className="truncate">{p.name}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500">
+                      {p.teamName ?? "Unassigned"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body
+        );
+      })()}
     </div>
   );
 }
