@@ -69,10 +69,10 @@ export function ScoreBadge({
             className="stroke-amber-400 transition-all duration-700 ease-out"
           />
         </svg>
-        <div className="flex flex-col items-center">
-          <span className={`${textSize} font-semibold tabular-nums text-zinc-900 dark:text-zinc-50`}>{displayScore}</span>
+        <div className="flex flex-col items-center justify-center gap-0.5">
+          <span className={`${textSize} font-semibold leading-none tabular-nums text-zinc-900 dark:text-zinc-50`}>{displayScore}</span>
           {hasAdjustment && (
-            <span className="text-[10px] font-semibold tabular-nums text-red-500 dark:text-red-400">
+            <span className="whitespace-nowrap text-[9px] font-semibold leading-none tabular-nums text-red-500 dark:text-red-400">
               {score}&#x2192;{displayScore}
             </span>
           )}
