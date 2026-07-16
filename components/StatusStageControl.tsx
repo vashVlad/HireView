@@ -95,7 +95,8 @@ export function StatusStageControl({
           <select
             value={archiveReason ?? ""}
             onChange={(e) => { if (e.target.value) onArchiveReasonChange!(e.target.value); }}
-            className={`cursor-pointer appearance-none bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason ? "" : "opacity-60"}`}
+            title={archiveReason || "Reason"}
+            className={`w-16 max-w-16 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason ? "" : "opacity-60"}`}
           >
             <option value="" disabled>Reason</option>
             {ARCHIVE_REASONS.map((r) => (

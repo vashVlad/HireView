@@ -21,14 +21,29 @@ const SIGNAL_CONFIG: Record<CredibilitySignal, { label: string; className: strin
 function CredibilityRowItem({ row }: { row: CredibilityRow }) {
   const isMatch = row.status === "match";
   const isDiscrepancy = row.status === "discrepancy";
+  // Material = real, hard-to-explain mismatch worth a follow-up question.
+  // Minor = explainable formatting/context difference (staffing-agency naming,
+  // title phrasing, LinkedIn's month-only dates, etc.) — still surfaced, but
+  // styled less alarmingly so it doesn't read the same as a real red flag.
+  // Rows from before this field existed (severity undefined) fall back to
+  // the old amber treatment. Added 2026-07-15 alongside the accuracy pass on
+  // lib/assessCredibility.ts.
+  const isMaterial = isDiscrepancy && row.severity === "material";
+  const isMinor = isDiscrepancy && row.severity !== "material";
 
-  const containerClass = isDiscrepancy
-    ? "border-l-2 border-amber-400 bg-amber-50 dark:border-amber-500/70 dark:bg-amber-500/8"
+  const containerClass = isMaterial
+    ? "border-l-2 border-rose-400 bg-rose-50 dark:border-rose-500/70 dark:bg-rose-500/8"
+    : isMinor
+    ? "border-l-2 border-amber-300 bg-amber-50/60 dark:border-amber-500/50 dark:bg-amber-500/6"
     : isMatch
     ? "border-l-2 border-emerald-400 bg-emerald-50/40 dark:border-emerald-500/50 dark:bg-emerald-500/5"
     : "border-l-2 border-zinc-300 bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800/30";
 
-  const icon = isDiscrepancy ? (
+  const icon = isMaterial ? (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-rose-500 dark:text-rose-400">
+      <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ) : isDiscrepancy ? (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-amber-500 dark:text-amber-400">
       <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -43,7 +58,9 @@ function CredibilityRowItem({ row }: { row: CredibilityRow }) {
     </svg>
   );
 
-  const fieldClass = isDiscrepancy
+  const fieldClass = isMaterial
+    ? "font-semibold text-rose-800 dark:text-rose-300"
+    : isDiscrepancy
     ? "font-semibold text-amber-800 dark:text-amber-300"
     : isMatch
     ? "font-medium text-zinc-700 dark:text-zinc-300"
@@ -53,7 +70,14 @@ function CredibilityRowItem({ row }: { row: CredibilityRow }) {
     <div className={`flex gap-2.5 rounded-lg px-3 py-2.5 ${containerClass}`}>
       <span className="mt-0.5 shrink-0">{icon}</span>
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className={`text-xs ${fieldClass}`}>{row.field}</span>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-xs ${fieldClass}`}>{row.field}</span>
+          {isMinor && (
+            <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">
+              Minor
+            </span>
+          )}
+        </div>
         {isMatch ? (
           <span className="text-xs text-zinc-500 dark:text-zinc-400">{row.resume}</span>
         ) : (
@@ -75,11 +99,16 @@ function CredibilityRowItem({ row }: { row: CredibilityRow }) {
 
 export function CredibilitySection({ assessment, showSummary = true }: { assessment: CredibilityAssessment; showSummary?: boolean }) {
   const { label, className } = SIGNAL_CONFIG[assessment.overallSignal] ?? SIGNAL_CONFIG.minor_concerns;
-  const [open, setOpen] = useState(false);
+  // Open by default once a result exists — Vlad's ask, 2026-07-15: previously
+  // defaulted closed, so every credibility result required an extra click to
+  // even see, everywhere this renders (ResultCard, Pipeline, All Candidates).
+  // The toggle button in the header still lets the recruiter close it.
+  const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<"flags" | "matches">("flags");
 
   const rows = assessment.rows ?? [];
   const flags = rows.filter((r) => r.status === "discrepancy");
+  const materialFlags = flags.filter((r) => r.severity === "material");
   const matches = rows.filter((r) => r.status === "match");
 
   const activeRows = tab === "flags" ? flags : matches;
@@ -97,7 +126,9 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
         </span>
         <div className="flex items-center gap-1.5">
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
-            flags.length > 0
+            materialFlags.length > 0
+              ? "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400"
+              : flags.length > 0
               ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
               : "bg-zinc-100 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400"
           }`}>
@@ -106,6 +137,11 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
           <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400">
             {matches.length} match{matches.length !== 1 ? "es" : ""}
           </span>
+          {!!assessment.scoreDelta && (
+            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-rose-700 dark:bg-rose-500/20 dark:text-rose-400">
+              {assessment.scoreDelta} score
+            </span>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-2">
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${className}`}>

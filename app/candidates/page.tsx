@@ -107,7 +107,10 @@ function CandidateCard({
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpanded((v) => !v); }}
         className="flex w-full cursor-pointer items-center gap-3 px-5 py-4 text-left">
-        <ScoreBadge score={s.score} />
+        <ScoreBadge
+          score={s.score}
+          adjustedScore={credibility?.scoreDelta ? s.score + credibility.scoreDelta : undefined}
+        />
 
         <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
           {/* Name row */}
@@ -266,10 +269,20 @@ function CandidateCard({
           <CrossReferenceChecker
             screeningId={s.id}
             currentAssessment={credibility}
-            onComplete={(assessment) => {
-              setCredibility(assessment);
-              onCredibilityComplete(s.id, assessment);
-              fetch(`/api/history/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credibility: assessment }) }).catch(() => {});
+            onComplete={async (assessment) => {
+              try {
+                const res = await fetch(`/api/history/${s.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ credibility: assessment }),
+                });
+                if (!res.ok) return false;
+                setCredibility(assessment);
+                onCredibilityComplete(s.id, assessment);
+                return true;
+              } catch {
+                return false;
+              }
             }}
           />
 

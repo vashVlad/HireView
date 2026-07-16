@@ -8,7 +8,18 @@ interface CrossReferenceCheckerProps {
   screeningId: number;
   roleContext?: string;
   currentAssessment?: CredibilityAssessment;
-  onComplete: (assessment: CredibilityAssessment) => void;
+  /**
+   * Return true/false (or a Promise of one) to report whether the result was
+   * actually persisted — callers that PATCH to /api/history/[id] should
+   * return the fetch's success/failure so a dropped save shows up in the UI
+   * instead of silently vanishing on next reload. Returning void/undefined
+   * (the nameMatch-compare caller, which is intentionally ephemeral and
+   * never persisted) is treated as success — no behavior change there.
+   * Added 2026-07-15: Vlad reported credibility checks that appeared to work
+   * but the earlier fetch(...).catch(() => {}) swallowed PATCH failures with
+   * zero indication anything had gone wrong.
+   */
+  onComplete: (assessment: CredibilityAssessment) => void | boolean | Promise<boolean>;
   /**
    * Pre-fills the cross-reference slot instead of requiring a manual pick —
    * used when the "document" to compare against is a file already in hand
@@ -101,8 +112,15 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
   const [file, setFile] = useState<File | null>(initialFile ?? null);
   const [checkState, setCheckState] = useState<CheckState>("idle");
   const [error, setError] = useState<string | null>(null);
+  // Holds a completed assessment that Claude produced but that failed to
+  // persist (onComplete returned false) — kept separate from
+  // currentAssessment (the parent's confirmed-saved copy) so the UI can show
+  // both "here's what we found" and "this hasn't been saved yet" instead of
+  // silently discarding the result or pretending it saved.
+  const [unsavedAssessment, setUnsavedAssessment] = useState<CredibilityAssessment | null>(null);
 
   const hasCrossRefTarget = crossRefScreeningId !== undefined || file !== null;
+  const displayAssessment = unsavedAssessment ?? currentAssessment;
 
   function pickFile(files: FileList) {
     // Was `/\.(pdf|docx)$/i` — silently dropped .doc files (drag-and-drop
@@ -116,6 +134,11 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
     } else if (files.length > 0) {
       setError("Only PDF and Word (.doc/.docx) files are supported.");
     }
+  }
+
+  async function reportComplete(assessment: CredibilityAssessment): Promise<boolean> {
+    const result = onComplete(assessment);
+    return result === undefined ? true : await result;
   }
 
   async function runCheck() {
@@ -143,30 +166,66 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
         throw new Error(body?.error ?? "Credibility check failed");
       }
       const data = await res.json();
-      setFile(null);
-      setCheckState("idle");
-      onComplete(data.assessment as CredibilityAssessment);
+      const assessment = data.assessment as CredibilityAssessment;
+      const saved = await reportComplete(assessment);
+      if (saved) {
+        setFile(null);
+        setCheckState("idle");
+        setUnsavedAssessment(null);
+      } else {
+        setUnsavedAssessment(assessment);
+        setCheckState("error");
+        setError("Check completed, but the result couldn't be saved — it will be lost on reload. Retry saving below.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setCheckState("error");
     }
   }
 
-  // ── Existing result — show it with a re-run area below ────────────────────
-  if (currentAssessment) {
+  async function retrySave() {
+    if (!unsavedAssessment || checkState === "checking") return;
+    setCheckState("checking");
+    const saved = await reportComplete(unsavedAssessment);
+    if (saved) {
+      setUnsavedAssessment(null);
+      setCheckState("idle");
+      setError(null);
+    } else {
+      setCheckState("error");
+      setError("Still couldn't save — check your connection and try again.");
+    }
+  }
+
+  // ── Existing (or just-run) result — show it with a re-run area below ──────
+  if (displayAssessment) {
     return (
       <div className="flex flex-col gap-3">
         <div className="relative">
-          <CredibilitySection assessment={currentAssessment} showSummary={false} />
+          <CredibilitySection assessment={displayAssessment} showSummary={false} />
           {checkState === "checking" && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/70 dark:bg-zinc-900/70">
               <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border border-zinc-300 border-t-zinc-600 dark:border-zinc-600 dark:border-t-zinc-300" />
-                Re-checking…
+                {unsavedAssessment ? "Saving…" : "Re-checking…"}
               </div>
             </div>
           )}
         </div>
+
+        {unsavedAssessment && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 dark:border-rose-500/30 dark:bg-rose-500/10">
+            <p className="text-xs text-rose-700 dark:text-rose-400">Not saved yet — will be lost if you leave this page.</p>
+            <button
+              type="button"
+              onClick={retrySave}
+              disabled={checkState === "checking"}
+              className="shrink-0 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {checkState === "checking" ? "Saving…" : "Retry save"}
+            </button>
+          </div>
+        )}
 
         {/* Re-run area */}
         <div className="flex flex-col gap-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-3 dark:border-zinc-800 dark:bg-zinc-800/30">
@@ -178,7 +237,7 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
           ) : (
             <FileSlot file={file} onPick={pickFile} onClear={() => setFile(null)} />
           )}
-          {error && <p className="text-xs text-rose-500 dark:text-rose-400">{error}</p>}
+          {error && !unsavedAssessment && <p className="text-xs text-rose-500 dark:text-rose-400">{error}</p>}
           <button
             type="button"
             onClick={runCheck}

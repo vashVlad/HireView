@@ -79,8 +79,32 @@ export interface CredibilityRow {
   field: string;
   resume: string;
   crossRef: string;
+  /**
+   * Model scratch space, generated BEFORE status in the tool schema —
+   * forces the arithmetic/reasoning for a row (especially the education
+   * year-subtraction rule) to happen before the status decision, not after.
+   * Added 2026-07-15 after live-testing found Claude filling this same
+   * reasoning into `note` (which comes after `status` in field order) and
+   * correctly computing e.g. "2024−2023=1, in range, match" there — but
+   * still emitting status: "discrepancy" anyway, because by the time it
+   * generated `note` the `status` field was already committed. Not surfaced
+   * in the UI (CredibilitySection.tsx never reads it) — purely a generation-
+   * order fix, not a new user-facing field.
+   */
+  reasoning?: string;
   status: "match" | "discrepancy" | "cannot_verify";
   note?: string;
+  /**
+   * Only meaningful when status === "discrepancy". Added 2026-07-15 to fix
+   * over-flagging (title phrasing, staffing-agency-vs-client naming, LinkedIn's
+   * month-only date granularity, education year-vs-range comparisons were all
+   * being flagged as full "discrepancy" rows with no way to tell them apart
+   * from a genuinely different employer or a real multi-month gap).
+   * "material" = a real, hard-to-explain mismatch worth a follow-up question.
+   * "minor" = explainable by common resume/LinkedIn formatting differences —
+   * still shown to the recruiter, but doesn't count toward scoreDelta.
+   */
+  severity?: "material" | "minor";
 }
 
 export type CredibilitySignal = "clean" | "minor_concerns" | "significant_concerns";
@@ -91,6 +115,16 @@ export interface CredibilityAssessment {
   industryNote: string;
   resumeDelta?: string;
   overallSignal: CredibilitySignal;
+  /**
+   * Points to subtract from the resume's fit score to reflect credibility
+   * findings — always <= 0. Computed deterministically in code from the
+   * count of severity: "material" discrepancy rows (see
+   * computeCredibilityScoreDelta in lib/assessCredibility.ts), NOT decided by
+   * the model directly, so the number stays consistent and auditable across
+   * runs. Capped so a credibility check can never invert a strong fit score.
+   * Added 2026-07-15, Vlad's ask — shown as a split-color ring on ScoreBadge.
+   */
+  scoreDelta?: number;
 }
 
 export interface CandidateResult {
@@ -107,6 +141,13 @@ export interface CandidateResult {
   recommendation: Recommendation;
   status?: CandidateStatus;
   credibility?: CredibilityAssessment;
+  /**
+   * Mirrors ScreeningRecord.archiveReason — needed here too because the
+   * post-screening ResultCard (app/projects/[id]/page.tsx's Screen tab) lets
+   * a recruiter archive a candidate right after scoring, before it's a
+   * ScreeningRecord read back from the DB. Added 2026-07-15.
+   */
+  archiveReason?: string;
 }
 
 export interface ScreenResumesResponse {
