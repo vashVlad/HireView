@@ -1570,51 +1570,33 @@ function DrawerBody({
         View full screening result
       </button>
 
-      {/* Scheduled toggle */}
-      <button
-        type="button"
-        onClick={() => {
-          const next = !scheduled;
-          setScheduled(next);
-          saveTrackerField({ scheduled: next }, "scheduled");
-        }}
-        className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
-          scheduled
-            ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10"
-            : "border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10"
-        }`}>
-        <span className={`relative flex h-3 w-3 shrink-0 ${scheduled ? "" : "animate-pulse"}`}>
-          {!scheduled && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />}
-          <span className={`relative inline-flex h-3 w-3 rounded-full ${scheduled ? "bg-emerald-400" : "bg-amber-400"}`} />
-        </span>
-        <div>
-          <p className={`text-sm font-semibold ${scheduled ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
-            {scheduled ? "Interview scheduled" : "Not yet scheduled"}
-          </p>
-          <p className="text-[11px] text-zinc-400 dark:text-zinc-500">Click to toggle</p>
+      {/* Interview scheduling — combined indicator + date picker */}
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3 shrink-0">
+              {!interviewDate && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              )}
+              <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400" />
+            </span>
+            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+              {interviewDate ? "Interview scheduled" : "Schedule interview"}
+            </p>
+          </div>
+          <input
+            type="date"
+            value={interviewDate}
+            onChange={(e) => setInterviewDate(e.target.value)}
+            onBlur={(e) => {
+              const newDate = e.target.value;
+              const isScheduled = !!newDate;
+              setScheduled(isScheduled);
+              saveTrackerField({ interviewDate: newDate, scheduled: isScheduled }, "interviewDate");
+            }}
+            className="cursor-pointer bg-transparent text-xs font-medium text-emerald-700 outline-none [color-scheme:light] dark:text-emerald-400 dark:[color-scheme:dark]"
+          />
         </div>
-      </button>
-
-      {/* Interview date */}
-      <div>
-        <FieldLabel label="Interview date" fkey="interviewDate" />
-        <input type="date" value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)}
-          onBlur={(e) => {
-            const newDate = e.target.value;
-            // Interview Scheduling Automation, 2026-07-15 (Vlad's ask): saving
-            // a date auto-flips the Scheduled toggle on, removing the manual
-            // double-step of entering a date AND separately clicking the
-            // toggle. One-directional on purpose — clearing the date does NOT
-            // auto-unschedule, since a confirmed interview's date might need
-            // to be cleared for re-confirmation without losing "scheduled".
-            if (newDate && !scheduled) {
-              setScheduled(true);
-              saveTrackerField({ interviewDate: newDate, scheduled: true }, "interviewDate");
-            } else {
-              saveTrackerField({ interviewDate: newDate }, "interviewDate");
-            }
-          }}
-          className={inputCls} />
       </div>
 
       {/* Lever URL */}
