@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { assessCredibility } from "@/lib/assessCredibility";
+import { assessCredibility, detectLinkedIn } from "@/lib/assessCredibility";
 import { extractResumeText } from "@/lib/parseResume";
 import { getScreeningResume, updateScreening } from "@/lib/screenings";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
@@ -130,10 +130,16 @@ export async function POST(request: NextRequest) {
     throw err;
   }
 
+  // Phase 2.4: LinkedIn-specific prompting. Only meaningful for an uploaded
+  // file — candidate-vs-candidate comparisons (crossRefScreeningId mode) are
+  // always resume-vs-resume, never LinkedIn, so skip detection there.
+  const isLinkedIn = hasCrossRefDoc ? detectLinkedIn(crossRefText) : false;
+
   const assessment = await assessCredibility({
     resumeText,
     crossRefText,
     roleContext: typeof roleContext === "string" ? roleContext : undefined,
+    isLinkedIn,
   });
 
   // Persist cross-reference doc path (reuses linkedin_pdf_path column — no schema change)

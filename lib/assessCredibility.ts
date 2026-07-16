@@ -1,6 +1,21 @@
 import { getAnthropicClient, CLAUDE_MODEL } from "./anthropic";
 import type { CredibilityAssessment, CredibilityRow } from "./types";
 
+/**
+ * Heuristic LinkedIn PDF detector — runs on extracted text before the
+ * credibility call so the prompt can be tailored without a second Claude
+ * round-trip. LinkedIn PDFs reliably contain at least one of: a profile
+ * URL, a connection count, or the "Skills & Endorsements" section header.
+ * Phase 2.4.
+ */
+export function detectLinkedIn(text: string): boolean {
+  return (
+    /linkedin\.com\/in\//i.test(text) ||
+    /\d{1,4}\+?\s*connections?\b/i.test(text) ||
+    /\bSkills\s*&\s*Endorsements\b/i.test(text)
+  );
+}
+
 const CREDIBILITY_TOOL = {
   name: "submit_credibility_assessment",
   description: "Submit the structured credibility assessment comparing resume against a cross-reference document.",
@@ -10,7 +25,7 @@ const CREDIBILITY_TOOL = {
       rows: {
         type: "array",
         description:
-          "Row-by-row comparison of resume vs cross-reference document. Include one row per employment record (current role + each past role) plus one row for education if verifiable. Also include one row for each cross-reference entry that has NO resume counterpart at all (see 'Undisclosed employment' guidance below) — those are real rows too, not something to skip. Aim for 5-10 rows total.",
+          "Row-by-row comparison of resume vs cross-reference document. Include one row per employment record (current role + each past role) plus one row for education if verifiable. Also include one row for each cross-reference EMPLOYMENT entry that has NO resume counterpart at all (see 'Undisclosed employment' guidance below) — those are real rows too, not something to skip. This 'undisclosed' reverse-check is employment-only — do NOT apply it to education. Education gets exactly one row per degree: if the resume's education claim and the cross-reference's education record refer to the same underlying credential and don't match, that mismatch is ONE row, never two — do not also add a second 'undisclosed education' row for the same cross-reference degree entry just because it lacks its own exact resume counterpart; it's already covered by the mismatch row. Aim for 5-10 rows total.",
         items: {
           type: "object",
           properties: {
@@ -68,6 +83,36 @@ const CREDIBILITY_TOOL = {
         enum: ["clean", "minor_concerns", "significant_concerns"],
         description: "Derive this from the rows, don't judge independently: significant_concerns if at least one row has severity 'material'; minor_concerns if there are discrepancy rows but all are severity 'minor'; clean if there are no discrepancy rows at all.",
       },
+      linkedInSignals: {
+        type: "object" as const,
+        description:
+          "Populate ONLY when the cross-reference is a LinkedIn profile PDF (recognizable by 'linkedin.com/in/' URLs, connection counts, endorsement sections). Omit entirely for resume-vs-resume comparisons — do not emit null or empty objects. Phase 2.4.",
+        properties: {
+          activity: {
+            type: "string" as const,
+            enum: ["active", "moderate", "minimal"],
+            description:
+              "Profile activity verdict. active = 500+ connections OR 3+ recommendations OR (summary present AND recent cert/course within the last 12 months). minimal = under 100 connections AND 0 recommendations AND no summary. moderate = everything else.",
+          },
+          connectionCount: {
+            type: "string" as const,
+            description: "Connection count as shown in the PDF, e.g. '500+' or '47'. Omit if not visible.",
+          },
+          recommendationCount: {
+            type: "number" as const,
+            description: "Number of written recommendations received. 0 if the Recommendations section is absent or empty.",
+          },
+          hasSummary: {
+            type: "boolean" as const,
+            description: "True if the About/Summary section exists and has meaningful content (not empty or placeholder text).",
+          },
+          recentCertDate: {
+            type: "string" as const,
+            description: "Most recent certification or LinkedIn Learning course date in YYYY-MM format, if visible. Omit if none.",
+          },
+        },
+        required: ["activity", "recommendationCount", "hasSummary"],
+      },
     },
     required: ["rows", "trajectoryNote", "industryNote", "overallSignal"],
   },
@@ -92,21 +137,28 @@ export async function assessCredibility(params: {
   resumeText: string;
   crossRefText?: string;
   roleContext?: string;
+  /** Detected server-side via detectLinkedIn() — enables LinkedIn-specific prompting and signal extraction. Phase 2.4. */
+  isLinkedIn?: boolean;
 }): Promise<CredibilityAssessment> {
-  const { resumeText, crossRefText, roleContext } = params;
+  const { resumeText, crossRefText, roleContext, isLinkedIn } = params;
 
   const roleNote = roleContext
     ? `The recruiter is screening for: ${roleContext}. Use this to contextualize whether the candidate's industry background is relevant.`
     : "";
 
   const hasCrossRef = Boolean(crossRefText);
+  const crossRefLabel = isLinkedIn ? "LinkedIn profile" : "cross-reference document";
 
   const comparisonInstruction = hasCrossRef
-    ? "Compare the resume against the cross-reference document line by line. The cross-reference may be a LinkedIn profile PDF, a second resume version, or any other verification document."
+    ? `Compare the resume against the ${crossRefLabel} line by line.${isLinkedIn ? " The cross-reference is a LinkedIn profile PDF — see instruction 7 for LinkedIn-specific signals to extract." : " The cross-reference may be a second resume version or any other verification document."}`
     : "No cross-reference document was provided — set rows to an empty array. Analyze the resume on its own for trajectory and industry signals.";
 
   const crossRefSection = hasCrossRef
     ? `\n\nCROSS-REFERENCE DOCUMENT:\n${crossRefText}`
+    : "";
+
+  const linkedInStep = isLinkedIn && hasCrossRef
+    ? `7. Since the cross-reference is a LinkedIn profile PDF, populate linkedInSignals with profile activity signals — NOT skill comparison (the rows above already handle that). Extract: the connection count if visible (e.g. "500+" or "47"), the number of written recommendations received (0 if absent), whether the About/Summary section exists and has meaningful content, and the most recent certification or LinkedIn Learning course date if visible (YYYY-MM). Then derive the activity verdict using these criteria exactly: active = 500+ connections OR 3+ recommendations OR (summary present AND recent cert/course within the last 12 months); minimal = under 100 connections AND 0 recommendations AND no summary; moderate = everything else. An active LinkedIn presence is harder to fabricate and corroborates the resume; a minimal profile on a claimed senior is worth noting but not disqualifying on its own.`
     : "";
 
   const userContent = `You are a recruiting assistant performing a credibility check on a candidate. This recruiter works in IT staffing/consulting, so staffing-agency-vs-client-site naming patterns are common and expected — do not treat them as suspicious on their own.
@@ -116,12 +168,13 @@ ${roleNote}
 ${comparisonInstruction}
 
 Your job:
-1. ${hasCrossRef ? "Flag every cross-reference field as match, discrepancy (tagged severity: material or minor), or cannot_verify, using the tolerance rules in the tool schema. Be precise about severity — over-flagging stylistic differences as full discrepancies erodes trust in this tool as much as missing a real one does." : "Skip cross-reference comparison — leave rows empty."}
-2. ${hasCrossRef ? "Also check the reverse direction: does the cross-reference document show any employment that the resume doesn't present as employment at all? Add a row for each — see the 'Undisclosed employment' field-naming convention in the tool schema. Default these to minor severity: most resumes only list recent/relevant roles and simply omit older jobs, which is completely normal, not concealment. Only mark one material if it plausibly OVERLAPS in time with a role the resume DOES list (undisclosed concurrent employment — the actual fraud-relevant pattern) or if the resume already mentions the same activity elsewhere in a way that contradicts the cross-reference. If the resume mentions the same activity in a non-employment section (portfolio, side projects), say so in the note and keep it minor." : ""}
-3. ${hasCrossRef ? "For education rows specifically, do plain integer-year subtraction — do NOT estimate months, this is a category error since the resume side has no month. Extract resumeYear (the resume's bare year, e.g. 'Expected 2029' → 2029, treated exactly like a confirmed year) and the cross-reference's startYear/endYear (drop any month, e.g. 'January 2021 – November 2023' → 2021 and 2023). Compute resumeYear − startYear and resumeYear − endYear. If EITHER value is in {-1, 0, 1} — status: match, never a discrepancy, never even minor, full stop. Worked examples, compute don't estimate: 'Expected 2029' vs 'January 2026 – December 2029' → 2029−2029=0 → match. '2024' vs a range ending 'November 2023' → 2024−2023=1 → match (the November doesn't change the year-subtraction result — do not reason about 'how many months' this represents). Only mark a discrepancy when BOTH subtractions land outside {-1, 0, 1}: exactly ±2 years is minor, ±3 or more is material." : ""}
+1. ${hasCrossRef ? `Flag every ${crossRefLabel} field as match, discrepancy (tagged severity: material or minor), or cannot_verify, using the tolerance rules in the tool schema. Be precise about severity — over-flagging stylistic differences as full discrepancies erodes trust in this tool as much as missing a real one does.` : "Skip cross-reference comparison — leave rows empty."}
+2. ${hasCrossRef ? "Also check the reverse direction, EMPLOYMENT ONLY: does the cross-reference document show any employment that the resume doesn't present as employment at all? Add a row for each — see the 'Undisclosed employment' field-naming convention in the tool schema. Default these to minor severity: most resumes only list recent/relevant roles and simply omit older jobs, which is completely normal, not concealment. Only mark one material if it plausibly OVERLAPS in time with a role the resume DOES list (undisclosed concurrent employment — the actual fraud-relevant pattern) or if the resume already mentions the same activity elsewhere in a way that contradicts the cross-reference. If the resume mentions the same activity in a non-employment section (portfolio, side projects), say so in the note and keep it minor. Do NOT run this reverse-check on education — education is handled entirely by instruction 3 below, as a single row, never a pair." : ""}
+3. ${hasCrossRef ? "For education, produce exactly ONE row per degree — never a second row for the same cross-reference degree entry just because it also lacks its own resume counterpart; a resume education claim that doesn't match the cross-reference's education record is a single mismatch, not two separate flags about the same underlying credential. Do plain integer-year subtraction — do NOT estimate months, this is a category error since the resume side has no month. Extract resumeYear (the resume's bare year, e.g. 'Expected 2029' → 2029, treated exactly like a confirmed year) and the cross-reference's startYear/endYear (drop any month, e.g. 'January 2021 – November 2023' → 2021 and 2023). Compute resumeYear − startYear and resumeYear − endYear. If EITHER value is in {-1, 0, 1} — status: match, never a discrepancy, never even minor, full stop. Worked examples, compute don't estimate: 'Expected 2029' vs 'January 2026 – December 2029' → 2029−2029=0 → match. '2024' vs a range ending 'November 2023' → 2024−2023=1 → match (the November doesn't change the year-subtraction result — do not reason about 'how many months' this represents). Only mark a discrepancy when BOTH subtractions land outside {-1, 0, 1}: exactly ±2 years is minor, ±3 or more is material." : ""}
 4. Note what sectors the candidate has actually worked in and whether that's relevant.
 5. Read the career trajectory for consistency and signs of inflation.
 6. If the cross-reference document appears to be a second resume version, include resumeDelta describing what changed and whether it looks like honest tailoring or suspicious rearrangement. Otherwise omit resumeDelta.
+${linkedInStep}
 
 Be precise and brief. trajectoryNote and industryNote must be one sentence each — no exceptions. Do not write paragraphs.
 

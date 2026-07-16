@@ -109,6 +109,24 @@ export interface CredibilityRow {
 
 export type CredibilitySignal = "clean" | "minor_concerns" | "significant_concerns";
 
+/**
+ * LinkedIn profile activity signals extracted when the cross-reference
+ * document is a LinkedIn PDF. Not present for resume-vs-resume comparisons.
+ * Phase 2.4 — revised from skill-alignment to activity assessment.
+ */
+export interface LinkedInSignals {
+  /** Verdict derived from the signals below — code-readable summary. */
+  activity: "active" | "moderate" | "minimal";
+  /** Connection count as shown in the PDF, e.g. "500+" or "47". Omitted if not visible. */
+  connectionCount?: string;
+  /** Number of written recommendations received. 0 if section absent. */
+  recommendationCount: number;
+  /** True if the About/Summary section exists and has meaningful content. */
+  hasSummary: boolean;
+  /** Most recent certification or LinkedIn Learning course date (YYYY-MM), if visible. */
+  recentCertDate?: string;
+}
+
 export interface CredibilityAssessment {
   rows: CredibilityRow[];
   trajectoryNote: string;
@@ -125,6 +143,8 @@ export interface CredibilityAssessment {
    * Added 2026-07-15, Vlad's ask — shown as a split-color ring on ScoreBadge.
    */
   scoreDelta?: number;
+  /** Populated only when the cross-reference document is a LinkedIn profile PDF. Phase 2.4. */
+  linkedInSignals?: LinkedInSignals;
 }
 
 export interface CandidateResult {
