@@ -39,3 +39,25 @@ body {
 .animate-fade-in-up {
   animation: fade-in-up 0.4s ease-out both;
 }
+
+/* Added 2026-07-15 for the admin Team page redesign — plays once when a
+   project chip mounts fresh inside a team's drop zone (i.e. right after a
+   successful drag-and-drop assign), giving the drop a tactile "landed"
+   confirmation instead of the chip just silently appearing. */
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 0.25s ease-out both;
+}

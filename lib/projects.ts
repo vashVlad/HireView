@@ -82,7 +82,22 @@ export async function getProject(id: number): Promise<Project | null> {
 
 export async function updateProject(
   id: number,
-  fields: { name?: string; jobDescription?: string; jdAnalysis?: JDAnalysis; status?: ProjectStatus; scoreThreshold?: number }
+  fields: {
+    name?: string;
+    jobDescription?: string;
+    jdAnalysis?: JDAnalysis;
+    status?: ProjectStatus;
+    scoreThreshold?: number;
+    /**
+     * Move a project to a different team, or unassign it (null). Added
+     * 2026-07-15 for the admin drag-and-drop Team/Projects page — previously
+     * a project's team was set once at creation (auto-assigned to the
+     * creator's primary team) with no way to change it. Admin-only at the
+     * API-route level (see app/api/projects/[id]/route.ts) — not enforced
+     * here since this is the shared data-layer function.
+     */
+    teamId?: number | null;
+  }
 ): Promise<void> {
   const supabase = getSupabaseClient();
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -91,6 +106,7 @@ export async function updateProject(
   if (fields.jdAnalysis !== undefined) payload.jd_analysis = fields.jdAnalysis;
   if (fields.status !== undefined) payload.status = fields.status;
   if (fields.scoreThreshold !== undefined) payload.score_threshold = Math.max(0, Math.min(100, fields.scoreThreshold));
+  if (fields.teamId !== undefined) payload.team_id = fields.teamId;
   const { error } = await supabase.from("projects").update(payload).eq("id", id);
   if (error) throw error;
 }
