@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserSupabaseClient } from "@/lib/supabase-browser";
 import { ThemeToggle } from "./ThemeToggle";
+import { Logo } from "./Logo";
 
 const NAV_ITEMS = [
   { href: "/projects", label: "Projects" },
@@ -71,14 +72,12 @@ export function SiteHeader({ active }: { active: NavHref }) {
   return (
     <header className="border-b border-zinc-200/70 dark:border-zinc-800/70">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-5">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white shadow-md shadow-violet-500/30">
-            H
-          </div>
+        <Link href="/projects" className="flex items-center gap-3">
+          <Logo size={36} />
           <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             HireView
           </h1>
-        </div>
+        </Link>
         <div className="flex items-center gap-3">
           <nav className="flex items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
             {NAV_ITEMS.map((item) => {

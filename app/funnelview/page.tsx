@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import * as XLSX from "xlsx";
 import { SiteHeader } from "@/components/SiteHeader";
+import { PageHeader } from "@/components/PageHeader";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import type { FunnelData } from "@/lib/funnelview/types";
 
@@ -111,6 +112,19 @@ export default function FunnelViewPage() {
       }
     : (data?.sourceSplit ?? { inbound: 0, outbound: 0 });
 
+  // Recruiter(s) working the active view — surfaced prominently in the Funnel
+  // card header rather than only buried in the candidate table below. Added
+  // 2026-07-15, Vlad's ask: "ensure the assigned recruiter is clearly visible
+  // on the funnel view page." Dedup by email since a role can have candidates
+  // screened by more than one recruiter (e.g. a handoff mid-role).
+  const activeRecruiters = Array.from(
+    new Map(
+      activeCandidates
+        .filter((c): c is typeof c & { recruiterEmail: string } => c.recruiterEmail != null)
+        .map((c) => [c.recruiterEmail, c.recruiterEmail])
+    ).values()
+  ).sort();
+
   const filteredCandidates = activeCandidates.filter((c) => {
     if (!showArchived && (c.status === "archived" || c.trackerStage === "Reject")) return false;
     return true;
@@ -185,39 +199,38 @@ export default function FunnelViewPage() {
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/funnelview" />
 
-      <main className="mx-auto max-w-5xl px-6 py-10">
-        <div className="mb-8 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">FunnelView</h1>
-            <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-              Full candidate funnel, live from HireView data. Admin only.
-            </p>
-          </div>
-          {data && (
-            <div className="flex shrink-0 items-center gap-2">
-              {roleOptions.length > 0 && (
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value === "" ? "" : Number(e.target.value))}
-                  className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+      <main className="mx-auto max-w-6xl px-6 py-10">
+        <PageHeader
+          icon={<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3Z" strokeLinecap="round" strokeLinejoin="round" />}
+          title="FunnelView"
+          subtitle="Full candidate funnel, live from HireView data. Admin only."
+          action={
+            data ? (
+              <div className="flex shrink-0 items-center gap-2">
+                {roleOptions.length > 0 && (
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                  >
+                    <option value="">All roles</option>
+                    {roleOptions.map((project) => (
+                      <option key={project.projectId} value={project.projectId}>
+                        {project.projectName}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  onClick={handleExport}
+                  className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700"
                 >
-                  <option value="">All roles</option>
-                  {roleOptions.map((project) => (
-                    <option key={project.projectId} value={project.projectId}>
-                      {project.projectName}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button
-                onClick={handleExport}
-                className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-700"
-              >
-                Export Excel Report
-              </button>
-            </div>
-          )}
-        </div>
+                  Export Excel Report
+                </button>
+              </div>
+            ) : undefined
+          }
+        />
 
         {error && (
           <div className="mb-6 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
@@ -234,12 +247,33 @@ export default function FunnelViewPage() {
           <div className="flex flex-col gap-8">
             {/* Funnel */}
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-              <div className="mb-4 flex items-center justify-between">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                   Funnel {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}
                 </h2>
                 <span className="text-xs text-zinc-400 dark:text-zinc-500">count · % of previous stage</span>
               </div>
+              {activeRecruiters.length > 0 && (
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
+                    {activeRecruiters.length === 1 ? "Recruiter" : "Recruiters"}
+                  </span>
+                  {activeRecruiters.map((email) => (
+                    <span
+                      key={email}
+                      title={email}
+                      className="flex items-center gap-1.5 rounded-full bg-zinc-100 py-1 pl-1 pr-2.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                    >
+                      <span
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(email)}`}
+                      >
+                        {avatarInitial(email)}
+                      </span>
+                      <span className="max-w-[10rem] truncate">{email}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
               {activeTotalScreened === 0 && activeStages.every((s) => s.count === 0) ? (
                 <p className="py-6 text-center text-sm text-zinc-400">
                   No screening activity yet{activeProject ? " for this role" : ""} — the funnel fills in as candidates are screened.

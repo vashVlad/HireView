@@ -128,10 +128,17 @@ Be precise and brief. trajectoryNote and industryNote must be one sentence each 
 RESUME:
 ${resumeText}${crossRefSection}`;
 
+  // Prompt caching, 2026-07-15 (perf pass) — CREDIBILITY_TOOL is a large,
+  // fully static schema (same tolerance rules/examples on every call
+  // regardless of candidate). scoreCandidate.ts already caches its
+  // equivalent static blocks; this endpoint was missing the same treatment.
+  // Doesn't speed up a lone check, but a recruiter cross-referencing several
+  // candidates back-to-back for the same role — the normal usage pattern —
+  // gets the schema served from cache instead of reprocessed each time.
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
     max_tokens: 2000,
-    tools: [CREDIBILITY_TOOL],
+    tools: [{ ...CREDIBILITY_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "submit_credibility_assessment" },
     messages: [{ role: "user", content: userContent }],
   });

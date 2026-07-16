@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
+import { PageHeader } from "@/components/PageHeader";
 import type { JDAnalysis, ProjectSummary } from "@/lib/types";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 
@@ -431,14 +432,22 @@ export default function ProjectsPage() {
   const archived = projects.filter((p) => p.status !== "active");
 
   return (
-    <div className="flex flex-1 flex-col bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-black">
+    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/projects" />
 
       {showNewRole && (
         <NewRoleModal onClose={() => setShowNewRole(false)} onCreated={handleRoleCreated} />
       )}
 
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-6 py-10">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-10">
+        <PageHeader
+          icon={<>
+            <rect x="2" y="7" width="20" height="14" rx="3" />
+            <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" strokeLinecap="round" />
+          </>}
+          title="Projects"
+          subtitle="Every open role and its screening pipeline, in one place."
+        />
         {loading ? (
           <div className="flex flex-1 items-center justify-center py-20">
             <span className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
