@@ -39,18 +39,21 @@ export const ARCHIVE_REASONS = [
   "Domain knowledge",
   "Failed cross-reference check",
   "Not interested",
+  "Role alignment",
 ] as const;
 
 /**
  * Reason auto-filled on screenings saved directly as "archived" for falling
  * below the project's score threshold (see saveScreening's auto-archive
- * branch, lib/screenings.ts) — distinct from the fixed ARCHIVE_REASONS list
- * above since no recruiter made this call by hand. Free text on
- * screenings.archive_reason, so this doesn't need to be one of the picker
- * options; the picker can still overwrite it later if a recruiter reviews
- * the candidate and picks a real reason. Added 2026-07-16.
+ * branch, lib/screenings.ts) — a real 5th ARCHIVE_REASONS option (not free
+ * text) so it renders correctly selected in the picker instead of showing
+ * blank, and a recruiter can still change it to one of the other 4 reasons
+ * later if they review the candidate and a more specific reason applies.
+ * Corrected 2026-07-17 — an earlier reconstruction pass used "Below score
+ * threshold" here, which isn't in ARCHIVE_REASONS at all and rendered
+ * unselected in the picker; Claude Code's build-verification pass caught it.
  */
-export const DEFAULT_AUTO_ARCHIVE_REASON = "Below score threshold";
+export const DEFAULT_AUTO_ARCHIVE_REASON: (typeof ARCHIVE_REASONS)[number] = "Role alignment";
 
 // ── Tracker ──────────────────────────────────────────────────────────────────
 
