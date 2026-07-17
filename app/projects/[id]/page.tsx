@@ -1,7 +1,7 @@
 "use client";
 import * as XLSX from "xlsx";
 import Link from "next/link";
-import { Fragment, use, useEffect, useRef, useState } from "react";
+import { Fragment, use, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlreadyScreenedCard } from "@/components/AlreadyScreenedCard";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
@@ -24,6 +24,7 @@ import type {
 import type { ScreeningAction } from "@/lib/screeningActions";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
+import { computeMatchClusters } from "@/lib/matchClusters";
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
   clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
@@ -665,6 +666,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
+  const [highlightCluster, setHighlightCluster] = useState<number | null>(null);
   const [expandedId, setExpandedIdState] = useState<number | null>(externalExpandedId ?? null);
   function setExpandedId(id: number | null) {
     setExpandedIdState(id);
@@ -735,10 +737,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     return true;
   }
 
+  const matchClusters = useMemo(() => computeMatchClusters(screenings), [screenings]);
+
   const filteredScreenings = screenings
     .filter((s) => {
       if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
       if (statusFilter && s.status !== statusFilter) return false;
+      if (highlightCluster != null && matchClusters.get(s.id)?.index !== highlightCluster) return false;
       return true;
     })
     .slice()
@@ -866,6 +871,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               {p.label}
             </button>
           ))}
+          {highlightCluster != null && (
+            <button type="button" onClick={() => setHighlightCluster(null)}
+              className="flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">
+              Ring {highlightCluster} only · clear
+            </button>
+          )}
           <div className="ml-auto flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
               <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
@@ -988,6 +999,24 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   {s.flagged && s.flagNote && (
                     <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
                   )}
+                  {(() => {
+                    const cluster = matchClusters.get(s.id);
+                    if (!cluster) return null;
+                    return (
+                      <button
+                        type="button"
+                        title={`${cluster.size} candidates linked in this ring — click to isolate`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHighlightCluster((prev) => prev === cluster.index ? null : cluster.index);
+                        }}
+                        className="flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-600 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: cluster.color }} />
+                        {cluster.label} · {cluster.size}
+                      </button>
+                    );
+                  })()}
                 </div>
                 {/* Meta row — date · notes indicator */}
                 <div className="flex items-center gap-1.5">

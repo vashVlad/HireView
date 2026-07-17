@@ -12,6 +12,14 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-17 — Recovery from stale-base-branch regressions (direct reconstruction, no git)
+
+- Root cause: several of the day's feature branches were cut from stale base commits, so merging into `main` silently reverted unrelated already-shipped work with no textual conflict. Discovered when Vlad reported FunnelView had changed after a push and the feedback button + candidates-page search were gone.
+- This session's sandbox has zero working git access to the real repo (confirmed repeatedly, all session) — all recovery was direct `Read`/`Edit` reconstruction in the working tree, per Vlad's explicit call ("I rebuild directly now") rather than git reflog/branch recovery.
+- Fixed/rebuilt: `lib/funnelview/data.ts` totalScreened (live count, not `screening_batches`), `lib/screenings.ts` (`archive_reason` back in `SCREENING_COLUMNS`, new `DEFAULT_AUTO_ARCHIVE_REASON`, fraud/match-signal + `linkedInMode` mutations onto the in-memory `result`), `components/ResultCard.tsx` (Notes field back in place of `QuestionGenerator`, duplicate/history badges, `combinedScoreDelta`), `app/candidates/page.tsx` (multi-select status filter, fraud-signals toggle, score/date ranges), `lib/matchClusters.ts` (entire file rebuilt — union-find Ring clustering — plus re-wired into both All Candidates and the Pipeline tab), the feedback feature end to end (migration + API route + SiteHeader UI, reconstructed from the session-log description since exact original code wasn't recoverable), and `app/globals.css`'s `fade-in-up` keyframe (`transform: none`, not `translateY(0)` — re-fixes the popover stacking-context bug from follow-on #19).
+- Full detail + caveats in state.md's "Recovery, 2026-07-17" section.
+- **Not build-verified this session** (no working `npm run build`/`tsc` in this sandbox). New migration `supabase-migration-feedback.sql` not yet run. Needs Vlad's own build + live click-through, then a Claude Code commit/PR.
+
 ## 2026-07-16 (follow-on #23) — Phase 2.4: LinkedIn Comparison (LinkedIn-specific prompting + network signals)
 
 - `lib/types.ts`: added `LinkedInSignals` interface (connectionCount, recommendationCount, topEndorsedSkills, skillsAlignNote) + `linkedInSignals?` on `CredibilityAssessment`.
