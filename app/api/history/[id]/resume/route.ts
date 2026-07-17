@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getScreeningResume } from "@/lib/screenings";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 
 export async function GET(
   _request: Request,
@@ -10,6 +11,12 @@ export async function GET(
 
   if (!Number.isInteger(screeningId)) {
     return NextResponse.json({ error: "Invalid screening id" }, { status: 400 });
+  }
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, screeningId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const resume = await getScreeningResume(screeningId);

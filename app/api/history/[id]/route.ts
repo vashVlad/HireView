@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deleteScreening, getScreeningsByIds, updateScreening, updateScreeningCredibility, updateScreeningFlag, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
-import { getAuthUser } from "@/lib/auth";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
 export async function GET(
@@ -10,6 +10,13 @@ export async function GET(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   try {
     const records = await getScreeningsByIds([numId]);
     if (!records.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -31,7 +38,11 @@ export async function PATCH(
   if (!body) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
   const user = await getAuthUser();
-  const actorUserId = user?.id;
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const actorUserId = user.id;
 
   try {
     if (body.status !== undefined) {
@@ -68,6 +79,13 @@ export async function DELETE(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   try {
     await deleteScreening(numId);
     return NextResponse.json({ ok: true });

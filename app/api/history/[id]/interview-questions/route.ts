@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseClient } from "@/lib/supabase";
 import { generateInterviewQuestions, hasFraudSignal, type FraudSignals } from "@/lib/generateInterviewQuestions";
 import { updateScreening } from "@/lib/screenings";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import type { CredibilityAssessment } from "@/lib/types";
 
 export const maxDuration = 30;
@@ -13,6 +14,12 @@ export async function GET(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const supabase = getSupabaseClient();
 

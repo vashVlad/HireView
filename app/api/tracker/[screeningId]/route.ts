@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { upsertTrackerEntry } from "@/lib/screenings";
 import { getSupabaseClient } from "@/lib/supabase";
-import { getAuthUser } from "@/lib/auth";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import type { TrackerStage } from "@/lib/types";
 
 export async function GET(
@@ -11,6 +11,12 @@ export async function GET(
   const { screeningId } = await params;
   const id = parseInt(screeningId, 10);
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, id))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -34,6 +40,10 @@ export async function PATCH(
   if (!body) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
 
   const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, id))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   try {
     await upsertTrackerEntry(

@@ -4,6 +4,7 @@ import { assessCredibility, detectLinkedIn } from "@/lib/assessCredibility";
 import { extractResumeText } from "@/lib/parseResume";
 import { getScreeningResume, updateScreening } from "@/lib/screenings";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 
 export const maxDuration = 60;
 
@@ -38,6 +39,23 @@ export async function POST(request: NextRequest) {
   const screeningId = parseInt(screeningIdField, 10);
   if (isNaN(screeningId)) {
     return NextResponse.json({ error: "Invalid screeningId" }, { status: 400 });
+  }
+
+  // Team-scoping check, added in the 2026-07-16 audit — this route had zero
+  // auth check at all before, letting anyone run a credibility comparison
+  // against any two screenings regardless of team. Both sides need checking:
+  // the main screening always, and the cross-reference screening too when
+  // this is a candidate-vs-candidate comparison (not a freshly uploaded doc).
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, screeningId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (hasCrossRefScreeningId) {
+    const crossRefScreeningId = parseInt(crossRefScreeningIdField as string, 10);
+    if (!isNaN(crossRefScreeningId) && !(await canAccessScreening(user, crossRefScreeningId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   // Perf pass, 2026-07-15: the main resume and the cross-reference doc are
