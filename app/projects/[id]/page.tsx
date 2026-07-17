@@ -680,6 +680,15 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [pendingFlagId, setPendingFlagId] = useState<number | null>(null);
   const [pendingFlagNote, setPendingFlagNote] = useState("");
+  // Tracks candidates flipped to "archived" via the status dropdown during
+  // THIS session, specifically so the reason picker stays visible in place
+  // instead of the card sinking immediately (see isSettledArchived below).
+  // Deliberately session-local, not derived from server data — an archived
+  // candidate that was already sitting in the DB before this page loaded
+  // (with or without a reason) should sink into the Archived section right
+  // away, not wait around forever for someone to retroactively pick a
+  // reason nobody's going to add. Vlad's ask, 2026-07-16.
+  const [justArchivedIds, setJustArchivedIds] = useState<Set<number>>(new Set());
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
   const [actionsMap, setActionsMap] = useState<Record<number, ScreeningAction[] | "loading">>({});
@@ -706,6 +715,26 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
   const handleStageChange = onStageChange;
 
+  // Archival Logic, 2026-07-16 follow-up (Vlad's ask): a candidate only
+  // stays out of the Archived section while it's actively waiting on a
+  // reason from THIS session's own status change (tracked via
+  // justArchivedIds above) — so the reason picker's "Reason" placeholder
+  // stays visible and easy to act on right after the click, instead of the
+  // card immediately sinking out of view. Any candidate that was already
+  // "archived" when the page loaded (auto-archived, archived in a past
+  // session, or legacy data from before the reason picker existed) sinks
+  // into the Archived section immediately, reason or not — nothing about
+  // page load implies "waiting on a reason," and old data shouldn't get
+  // stuck in the active list forever just because nobody's going back to
+  // fill in a reason for it. Distinct from raw `status === "archived"`,
+  // which the status pill filter (STATUS_PILLS below) and the reason
+  // picker itself still key off of.
+  function isSettledArchived(s: ScreeningRecord | undefined): boolean {
+    if (!s || s.status !== "archived") return false;
+    if (justArchivedIds.has(s.id) && !s.archiveReason) return false;
+    return true;
+  }
+
   const filteredScreenings = screenings
     .filter((s) => {
       if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
@@ -720,14 +749,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       // Archived section (rendered via a divider below, see the render map)
       // reads as a visually separated block further down the page. Within
       // each group, the existing score sort still applies.
-      const aArchived = a.status === "archived" ? 1 : 0;
-      const bArchived = b.status === "archived" ? 1 : 0;
+      const aArchived = isSettledArchived(a) ? 1 : 0;
+      const bArchived = isSettledArchived(b) ? 1 : 0;
       if (aArchived !== bArchived) return aArchived - bArchived;
       if (sortOrder === "desc") return b.score - a.score;
       if (sortOrder === "asc") return a.score - b.score;
       return 0;
     });
-  const archivedCount = filteredScreenings.filter((s) => s.status === "archived").length;
+  const archivedCount = filteredScreenings.filter(isSettledArchived).length;
 
   function getNotesText(s: ScreeningRecord) {
     return notesMap[s.id]?.text ?? s.notes ?? "";
@@ -737,6 +766,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     const now = new Date().toISOString();
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: now } : s));
     onStatusChange?.(id, status);
+    if (status === "archived") {
+      setJustArchivedIds((prev) => new Set(prev).add(id));
+    } else {
+      setJustArchivedIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
     } catch { /* non-fatal */ }
@@ -856,7 +895,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         // archived, or if statusFilter has already narrowed the list to only
         // archived cards (idx 0 would be archived — divider still renders,
         // which is fine, it just labels the single-group list).
-        const isFirstArchived = s.status === "archived" && filteredScreenings[idx - 1]?.status !== "archived";
+        const isFirstArchived = isSettledArchived(s) && !isSettledArchived(filteredScreenings[idx - 1]);
         return (
           <Fragment key={s.id}>
           {isFirstArchived && (
@@ -877,7 +916,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             // opened — reading an expanded card's details through 50%
             // opacity was the actual complaint, so `expanded` clears the
             // toned-out treatment entirely while it's open.
-            s.status === "archived" && !expanded ? "opacity-50 saturate-[0.6] hover:opacity-90" : ""
+            isSettledArchived(s) && !expanded ? "opacity-50 saturate-[0.6] hover:opacity-90" : ""
           }`}>
             <div role="button" tabIndex={0}
               onClick={() => setExpandedId(expanded ? null : s.id)}
@@ -939,7 +978,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     </button>
                   )}
                   {s.linkedInMode && (
-                    <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
+                    <span title="Resume sourced from LinkedIn" className="shrink-0">
+                      <svg width="14" height="14" viewBox="0 0 24 24" aria-label="LinkedIn" className="shrink-0">
+                        <rect width="24" height="24" rx="4" fill="#0A66C2" />
+                        <path fill="#fff" d="M7.2 9.6H4.8V19.2h2.4V9.6zM6 8.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8zM19.2 13.2c0-2.2-1.2-3.8-3.2-3.8-1 0-1.8.5-2.4 1.3V9.6H11.2V19.2h2.4v-5.1c0-1.1.7-1.9 1.7-1.9 1 0 1.5.7 1.5 1.9v5.1h2.4v-6z" />
+                      </svg>
+                    </span>
                   )}
                   {s.flagged && s.flagNote && (
                     <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
