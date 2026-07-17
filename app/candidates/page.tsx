@@ -54,6 +54,8 @@ function CandidateCard({
   projectId,
   trackerStage,
   cluster,
+  isHighlighted,
+  isDimmed,
   onClusterClick,
   onStatusChange,
   onStageChange,
@@ -69,6 +71,10 @@ function CandidateCard({
   trackerStage?: TrackerStage;
   /** Ring cluster this candidate belongs to, if matched with 1+ others via duplicate/history/name signals — see lib/matchClusters.ts. */
   cluster?: MatchCluster;
+  /** True when a Ring chip is selected and this card is one of its members — draws a colored glow instead of the default border. */
+  isHighlighted?: boolean;
+  /** True when a Ring chip is selected and this card is NOT one of its members — dims the card without removing it from the list. */
+  isDimmed?: boolean;
   onClusterClick?: (clusterIndex: number) => void;
   onStatusChange: (id: number, status: CandidateStatus) => void;
   onStageChange: (id: number, stage: TrackerStage) => void;
@@ -109,7 +115,9 @@ function CandidateCard({
 
   return (
     <li id={`candidate-${s.id}`}
-      className={`rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${
+      className={`rounded-2xl border bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
+        isHighlighted ? "border-2" : "border border-zinc-200 dark:border-zinc-800"
+      } ${
         // Card Visuals, 2026-07-15 (Vlad's ask): archived candidates are
         // "toned out" so the eye skips past them in a mixed list — darker
         // border/bg, reduced opacity + saturation. Archived-only per
@@ -119,7 +127,17 @@ function CandidateCard({
         // 2026-07-15 follow-up: an opened card shouldn't stay dimmed either —
         // `expanded` fully clears the toned-out treatment while reading it.
         s.status === "archived" && !expanded ? "opacity-50 saturate-[0.6] hover:opacity-90" : ""
-      }`}>
+      } ${
+        // Ring highlight, 2026-07-17: clicking a Ring chip used to remove
+        // every non-member card from the list entirely — Vlad reported that
+        // was a regression from an earlier rebuild; the original behavior
+        // only ever dimmed non-members while keeping the whole list visible.
+        // Highlighted members get a colored glow via inline style below
+        // instead of a Tailwind class, since cluster colors are arbitrary
+        // hex values, not part of the design system's palette.
+        isDimmed && !expanded ? "opacity-40 saturate-[0.7] hover:opacity-80" : ""
+      }`}
+      style={isHighlighted && cluster ? { borderColor: cluster.color, boxShadow: `0 0 0 3px ${cluster.color}33` } : undefined}>
       {/* Row */}
       <div role="button" tabIndex={0}
         onClick={() => setExpanded((v) => !v)}
@@ -181,7 +199,7 @@ function CandidateCard({
             {cluster && onClusterClick && (
               <button
                 type="button"
-                title={`${cluster.size} candidates linked in this ring — click to isolate`}
+                title={`${cluster.size} candidates linked in this ring — click to highlight`}
                 onClick={(e) => { e.stopPropagation(); onClusterClick(cluster.index); }}
                 className="flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-600 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
               >
@@ -423,11 +441,14 @@ export default function CandidatesPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
-  // Click-to-highlight: clicking a Ring chip isolates that cluster's members;
-  // clicking the same one again (or a different card's chip toggle handles
-  // this via the same setter) clears it. Computed off the full, unfiltered
-  // `screenings` list so cluster membership/labels stay stable regardless of
-  // the filters above.
+  // Click-to-highlight: clicking a Ring chip highlights that cluster's
+  // members (colored glow) and dims everyone else, without removing anyone
+  // from the list — clicking the same one again (or a different card's chip)
+  // clears it. Computed off the full, unfiltered `screenings` list so
+  // cluster membership/labels stay stable regardless of the filters above.
+  // Was a filter (removed non-members entirely) until 2026-07-17 — Vlad
+  // reported that was a regression from an earlier session's rebuild; the
+  // original behavior only ever highlighted.
   const [highlightCluster, setHighlightCluster] = useState<number | null>(null);
 
   useEffect(() => {
@@ -474,11 +495,21 @@ export default function CandidatesPage() {
       if (scoreMax !== "" && s.score > Number(scoreMax)) return false;
       if (dateFrom && new Date(s.createdAt) < new Date(dateFrom)) return false;
       if (dateTo && new Date(s.createdAt) > new Date(`${dateTo}T23:59:59`)) return false;
-      if (highlightCluster != null && matchClusters.get(s.id)?.index !== highlightCluster) return false;
       return true;
     })
     .slice()
     .sort((a, b) => {
+      // Ring grouping, 2026-07-17 (Vlad's ask): candidates sharing a fraud-
+      // signal Ring used to be scattered throughout the list at whatever
+      // position their score happened to land them — findable via the
+      // highlight, but not actually adjacent. Primary sort key is now
+      // cluster index (Ring 1's members together, then Ring 2's, etc.);
+      // candidates with no cluster sink to the end via Infinity. The score
+      // sort below still applies as the tiebreaker within a ring (and among
+      // the ungrouped candidates, same as before this change).
+      const clusterA = matchClusters.get(a.id)?.index ?? Infinity;
+      const clusterB = matchClusters.get(b.id)?.index ?? Infinity;
+      if (clusterA !== clusterB) return clusterA - clusterB;
       if (sortOrder === "desc") return b.score - a.score;
       if (sortOrder === "asc") return a.score - b.score;
       return 0;
@@ -648,7 +679,7 @@ export default function CandidatesPage() {
           {highlightCluster != null && (
             <button type="button" onClick={() => setHighlightCluster(null)}
               className="self-start flex items-center gap-1.5 rounded-full border border-violet-300 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400">
-              Showing Ring {highlightCluster} only · click to clear
+              Highlighting Ring {highlightCluster} · click to clear
             </button>
           )}
 
@@ -684,12 +715,17 @@ export default function CandidatesPage() {
           <ul className="flex flex-col gap-3">
             {filtered.map((s) => {
               const proj = s.projectId ? projectMap[s.projectId] : undefined;
+              const cardCluster = matchClusters.get(s.id);
+              const isHighlighted = highlightCluster != null && cardCluster?.index === highlightCluster;
+              const isDimmed = highlightCluster != null && !isHighlighted;
               return (
                 <CandidateCard key={s.id} screening={s}
                   projectName={proj?.name}
                   projectId={proj?.id}
                   trackerStage={stagesMap[s.id]}
-                  cluster={matchClusters.get(s.id)}
+                  cluster={cardCluster}
+                  isHighlighted={isHighlighted}
+                  isDimmed={isDimmed}
                   onClusterClick={(idx) => setHighlightCluster((prev) => prev === idx ? null : idx)}
                   onStatusChange={handleStatusChange}
                   onStageChange={handleStageChange}

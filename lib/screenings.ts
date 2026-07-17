@@ -335,16 +335,40 @@ export async function saveScreening(params: {
   // a screening from being saved. Runs after the insert so a failure here
   // can't lose the screening itself.
   let becameDuplicate = false;
+  // Real bug found 2026-07-17 (Vlad: "why existing resumes get screened
+  // again? Where's the warning?"): resumeText extraction + the
+  // resume_content_hash write used to live INSIDE the same try block as
+  // generateFingerprint() below, which makes a real Claude tool-use call —
+  // rate limits, timeouts, or a malformed tool response there would throw
+  // and silently skip the hash write too, even though the hash itself is
+  // free/deterministic and has nothing to do with the fingerprinting call.
+  // Once a screening's resume_content_hash never got written, it can NEVER
+  // be caught by the free exact-match pre-check
+  // (app/api/screen-resumes/check-existing) again — a later re-upload of the
+  // identical file sails through as "new," gets fully re-scored, and the
+  // only thing that might still catch it is the separate, weaker
+  // fingerprint-similarity match below (which explains the "Previously
+  // seen" cross-project banner appearing instead of the pre-score
+  // AlreadyScreenedCard warning that should have skipped scoring entirely).
+  // Fix: hash extraction/write gets its own try/catch, decoupled from the
+  // fingerprinting pipeline, so a fingerprinting hiccup can never also cost
+  // the free, always-should-work duplicate-hash signal.
+  let resumeText: string | null = null;
   try {
-    const resumeText = await extractResumeText(result.fileName, resumeFile);
-
+    resumeText = await extractResumeText(result.fileName, resumeFile);
     // Cheap exact-match dedupe signal for the pre-screen duplicate check
-    // (app/api/screen-resumes/check-existing) — independent of the fingerprint
-    // below, stored even if fingerprint matching fails downstream.
+    // (app/api/screen-resumes/check-existing) — independent of the
+    // fingerprint below, stored even if fingerprint matching fails
+    // downstream.
     await supabase
       .from("screenings")
       .update({ resume_content_hash: hashResumeText(resumeText) })
       .eq("id", screeningId);
+  } catch (err) {
+    console.error("resume_content_hash write failed (screening still saved):", err);
+  }
+  try {
+    if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
 
     const fingerprint = await generateFingerprint(resumeText);
     await saveFingerprint({ screeningId, projectId, teamId, fingerprint });
