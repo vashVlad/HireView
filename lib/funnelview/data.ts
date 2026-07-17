@@ -46,8 +46,33 @@ function furthestStage(stage: TrackerStage | null, previousStage: TrackerStage |
  * function, so the two can never silently drift apart in how they count.
  */
 function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { stages: FunnelStageCount[]; archivedOrRejected: number } {
-  const passedThreshold = candidates.length;
-  const reachedOut = candidates.filter((c) => c.status !== "new_applicant").length;
+  // NOT candidates.length — every screened resume gets a `screenings` row
+  // regardless of score (2026-07-15 auto-archive decision), so `candidates`
+  // here is the full screened set, same as totalScreened. "Passed Threshold"
+  // has to actually filter on the passedThreshold flag computed per-candidate
+  // below, or this stage is just a second copy of Total Screened. Fixed
+  // 2026-07-16 — see session-log follow-on #38.
+  const passedThreshold = candidates.filter((c) => c.passedThreshold).length;
+
+  // NOT `status !== "new_applicant"` — that treats every archived candidate
+  // as "reached out," including ones nobody ever actually contacted:
+  // below-threshold candidates are auto-archived straight from creation
+  // (previousStatus stays null, no engagement ever happened), and a
+  // recruiter can also archive a "new_applicant" directly without moving
+  // them through recruiter_screen/contacted/screening first. Vlad flagged
+  // this 2026-07-16 after noticing the number looked too high. The
+  // previous_status column is trigger-maintained on every status UPDATE
+  // (supabase-migration-previous-status.sql) and always holds the status
+  // immediately before the current one — so for an archived candidate,
+  // checking previousStatus tells us whether they passed through real
+  // engagement on their way there. "Reached out" now means: currently in
+  // an active engagement status, OR archived after having been in one.
+  const ACTIVE_ENGAGEMENT_STATUSES: CandidateStatus[] = ["recruiter_screen", "contacted", "screening"];
+  const reachedOut = candidates.filter(
+    (c) =>
+      ACTIVE_ENGAGEMENT_STATUSES.includes(c.status) ||
+      (c.status === "archived" && c.previousStatus != null && ACTIVE_ENGAGEMENT_STATUSES.includes(c.previousStatus))
+  ).length;
   const archivedOrRejected = candidates.filter(
     (c) => c.status === "archived" || c.trackerStage === "Reject"
   ).length;
@@ -104,7 +129,11 @@ export async function getFunnelData(): Promise<FunnelData> {
       )
       .returns<ScreeningFunnelRow[]>(),
     supabase.from("tracker").select("screening_id, stage, previous_stage").returns<TrackerFunnelRow[]>(),
-    supabase.from("projects").select("id, name").returns<{ id: number; name: string }[]>(),
+    // score_threshold added 2026-07-16 so "Passed Threshold" can be computed
+    // per-candidate against their own project's real threshold (defaults to
+    // 45, matching lib/projects.ts) instead of every screened row counting
+    // as "passed" now that below-threshold candidates are saved too.
+    supabase.from("projects").select("id, name, score_threshold").returns<{ id: number; name: string; score_threshold: number | null }[]>(),
     getRecruiterEmailMap(),
   ]);
 
@@ -117,11 +146,13 @@ export async function getFunnelData(): Promise<FunnelData> {
   const screenings = screeningsRes.data ?? [];
   const trackerByScreeningId = new Map((trackerRes.data ?? []).map((t) => [t.screening_id, t]));
   const projectNameById = new Map((projectsRes.data ?? []).map((p) => [p.id, p.name]));
+  const scoreThresholdByProjectId = new Map((projectsRes.data ?? []).map((p) => [p.id, p.score_threshold ?? 45]));
 
   const candidates: FunnelCandidate[] = screenings.map((s) => {
     const tracker = trackerByScreeningId.get(s.id);
     const stage = tracker?.stage ?? null;
     const previousStage = tracker?.previous_stage ?? null;
+    const threshold = s.project_id != null ? (scoreThresholdByProjectId.get(s.project_id) ?? 45) : 45;
     return {
       screeningId: s.id,
       candidateName: s.candidate_name,
@@ -131,6 +162,7 @@ export async function getFunnelData(): Promise<FunnelData> {
       recruiterEmail: s.user_id != null ? (emailByUserId.get(s.user_id) ?? s.user_id) : null,
       source: s.linkedin_mode ? "outbound" : "inbound",
       score: s.score,
+      passedThreshold: s.score >= threshold,
       hasFraudFlag: Boolean(s.duplicate_flag) || s.history_alert_type != null,
       status: s.status,
       previousStatus: s.previous_status,

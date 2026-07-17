@@ -10,6 +10,8 @@ export interface FunnelCandidate {
   recruiterEmail: string | null;
   source: "inbound" | "outbound";
   score: number;
+  /** True if this score cleared the candidate's own project's score_threshold (defaults to 45 if the project has none set, or no project at all) — independent of current status, so a candidate manually archived later for an unrelated reason still counts as having passed. */
+  passedThreshold: boolean;
   status: CandidateStatus;
   previousStatus: CandidateStatus | null;
   trackerStage: TrackerStage | null;
