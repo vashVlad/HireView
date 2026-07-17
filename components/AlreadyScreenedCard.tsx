@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { ScoreBadge } from "@/components/ScoreBadge";
-import type { CheckExistingResult } from "@/lib/types";
+import { STATUS_COLORS } from "@/components/StatusSelect";
+import { CANDIDATE_STATUS_LABELS, type CheckExistingResult } from "@/lib/types";
 
 interface AlreadyScreenedCardProps {
   fileName: string;
@@ -39,7 +40,29 @@ export function AlreadyScreenedCard({
         <div className="flex items-start gap-3">
           <ScoreBadge score={existing.score} size="md" />
           <div>
-            <p className="font-semibold text-zinc-900 dark:text-zinc-50">{existing.candidateName}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-semibold text-zinc-900 dark:text-zinc-50">{existing.candidateName}</p>
+              {/*
+               * Read-only equivalent of StatusSelect's joined status+reason
+               * pill (components/StatusSelect.tsx) — same visual grammar
+               * (single rounded pill, `·`-divider via a low-opacity
+               * currentColor rule), just static text instead of two <select>
+               * elements since this card has nothing to edit. Reason lives
+               * IN the chip, not as a separate line below it — Vlad's ask,
+               * 2026-07-17, after the first version split them.
+               */}
+              <span
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_COLORS[existing.status]}`}
+              >
+                {CANDIDATE_STATUS_LABELS[existing.status]}
+                {existing.status === "archived" && existing.archiveReason && (
+                  <>
+                    <span className="h-2.5 w-px shrink-0 bg-current opacity-25" />
+                    {existing.archiveReason}
+                  </>
+                )}
+              </span>
+            </div>
             <p className="mt-0.5 text-sm text-amber-700 dark:text-amber-400">
               Already screened in this project — identical resume, skipped scoring.
             </p>

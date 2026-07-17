@@ -4,7 +4,7 @@ import { hashResumeText, normalizeCandidateName } from "@/lib/resumeContentHash"
 import { getSupabaseClient } from "@/lib/supabase";
 import { getAuthUser } from "@/lib/auth";
 import { listRejectionHistory } from "@/lib/screenings";
-import type { CheckExistingResult, ExistingCandidateRef, Recommendation, RejectionHistoryEntry } from "@/lib/types";
+import type { CandidateStatus, CheckExistingResult, ExistingCandidateRef, Recommendation, RejectionHistoryEntry } from "@/lib/types";
 
 export const maxDuration = 30;
 
@@ -50,6 +50,8 @@ interface ExistingScreeningRow {
   career_trajectory: string | null;
   recommendation: Recommendation | null;
   resume_content_hash: string | null;
+  status: CandidateStatus;
+  archive_reason: string | null;
 }
 
 export async function POST(request: NextRequest) {
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest) {
   const supabase = getSupabaseClient();
   const { data: existingRows, error } = await supabase
     .from("screenings")
-    .select("id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, resume_content_hash")
+    .select("id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, resume_content_hash, status, archive_reason")
     .eq("project_id", projectId)
     .returns<ExistingScreeningRow[]>();
 
@@ -123,6 +125,8 @@ export async function POST(request: NextRequest) {
       concerns: row.concerns ?? [],
       ...(row.career_trajectory ? { careerTrajectory: row.career_trajectory } : {}),
       recommendation: row.recommendation,
+      status: row.status,
+      ...(row.archive_reason ? { archiveReason: row.archive_reason } : {}),
     };
   }
 
