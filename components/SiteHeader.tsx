@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getBrowserSupabaseClient } from "@/lib/supabase-browser";
+import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import { ThemeToggle } from "./ThemeToggle";
 import { Logo } from "./Logo";
 
@@ -70,16 +71,16 @@ export function SiteHeader({ active }: { active: NavHref }) {
   }
 
   return (
-    <header className="border-b border-zinc-200/70 dark:border-zinc-800/70">
-      <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-5">
+    <header className="sticky top-0 z-40 border-b border-zinc-200/70 bg-white/85 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-950/85">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
         <Link href="/projects" className="flex items-center gap-3">
-          <Logo size={36} />
+          <Logo size={34} />
           <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             HireView
           </h1>
         </Link>
         <div className="flex items-center gap-3">
-          <nav className="flex items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+          <nav className="flex items-center gap-1 rounded-full border border-zinc-200/70 bg-zinc-100/80 p-1 dark:border-zinc-800/60 dark:bg-zinc-900/80">
             {NAV_ITEMS.map((item) => {
               const isActive = active === item.href;
               return (
@@ -128,17 +129,32 @@ export function SiteHeader({ active }: { active: NavHref }) {
           </nav>
           <ThemeToggle />
 
-          {/* User menu */}
+          {/* User menu — colored-initial avatar, same avatarColor()/
+              avatarInitial() pattern already used for team chips and the
+              Activity timeline, instead of a generic outline icon. A small
+              violet corner dot marks admins, same badge style already used
+              on the pending-requests indicator below. */}
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((o) => !o)}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
               aria-label="Account menu"
+              className={`relative flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white shadow-sm ring-2 ring-white transition-transform hover:scale-105 dark:ring-zinc-950 ${
+                email ? avatarColor(email) : "bg-zinc-400 dark:bg-zinc-600"
+              }`}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="8" r="4" />
-                <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-              </svg>
+              {email ? (
+                avatarInitial(email)
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                </svg>
+              )}
+              {isAdmin && (
+                <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-violet-500 ring-2 ring-white dark:ring-zinc-950">
+                  <span className="h-1 w-1 rounded-full bg-white" />
+                </span>
+              )}
             </button>
 
             {menuOpen && (
