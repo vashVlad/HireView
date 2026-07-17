@@ -41,6 +41,17 @@ export const ARCHIVE_REASONS = [
   "Not interested",
 ] as const;
 
+/**
+ * Reason auto-filled on screenings saved directly as "archived" for falling
+ * below the project's score threshold (see saveScreening's auto-archive
+ * branch, lib/screenings.ts) — distinct from the fixed ARCHIVE_REASONS list
+ * above since no recruiter made this call by hand. Free text on
+ * screenings.archive_reason, so this doesn't need to be one of the picker
+ * options; the picker can still overwrite it later if a recruiter reviews
+ * the candidate and picks a real reason. Added 2026-07-16.
+ */
+export const DEFAULT_AUTO_ARCHIVE_REASON = "Below score threshold";
+
 // ── Tracker ──────────────────────────────────────────────────────────────────
 
 export type TrackerStage = "TA" | "L1" | "L2" | "In-Person" | "Offer" | "Reject";
@@ -168,6 +179,24 @@ export interface CandidateResult {
    * ScreeningRecord read back from the DB. Added 2026-07-15.
    */
   archiveReason?: string;
+  /** Notes field, added 2026-07-16 in place of the removed Generate Question tool — mirrors ScreeningRecord.notes so it can be edited immediately post-screening. */
+  notes?: string;
+  /** Mirrors ScreeningRecord.linkedInMode — lets the post-screening card show the LinkedIn icon without waiting for a reload. Added 2026-07-16. */
+  linkedInMode?: boolean;
+  /**
+   * Fraud/match signals mirrored from ScreeningRecord so they can render on
+   * the post-screening ResultCard immediately, not just after a reload —
+   * saveScreening already computes these synchronously at save time.
+   * Added 2026-07-16.
+   */
+  duplicateFlag?: boolean;
+  duplicateMatchId?: number;
+  duplicateMatchCandidateName?: string;
+  historyAlertType?: "previously_seen" | "known_fraud_pattern";
+  historyAlertMatchId?: number;
+  historyAlertMatchProjectId?: number;
+  historyAlertMatchProjectName?: string;
+  historyAlertMatchCandidateName?: string;
 }
 
 export interface ScreenResumesResponse {

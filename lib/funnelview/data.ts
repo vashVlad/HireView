@@ -120,8 +120,13 @@ function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { 
 export async function getFunnelData(): Promise<FunnelData> {
   const supabase = getSupabaseClient();
 
-  const [batchesRes, screeningsRes, trackerRes, projectsRes, emailByUserId] = await Promise.all([
-    supabase.from("screening_batches").select("total_count, project_id"),
+  // Deliberately no screening_batches query here — that table is an
+  // immutable per-upload-batch log (written once, never updated on later
+  // deletion), so sourcing totalScreened from it meant deleting a candidate
+  // could never move the number. Switched to a live count off `screenings`
+  // itself (see session-log follow-on #37). This branch was re-merged from a
+  // pre-#37 base and briefly regressed this — re-fixed 2026-07-17.
+  const [screeningsRes, trackerRes, projectsRes, emailByUserId] = await Promise.all([
     supabase
       .from("screenings")
       .select(
@@ -140,10 +145,8 @@ export async function getFunnelData(): Promise<FunnelData> {
   if (screeningsRes.error) throw screeningsRes.error;
   if (trackerRes.error) throw trackerRes.error;
 
-  const batches = (batchesRes.data ?? []) as { total_count: number; project_id: number | null }[];
-  const totalScreened = batches.reduce((sum, b) => sum + b.total_count, 0);
-
   const screenings = screeningsRes.data ?? [];
+  const totalScreened = screenings.length;
   const trackerByScreeningId = new Map((trackerRes.data ?? []).map((t) => [t.screening_id, t]));
   const projectNameById = new Map((projectsRes.data ?? []).map((p) => [p.id, p.name]));
   const scoreThresholdByProjectId = new Map((projectsRes.data ?? []).map((p) => [p.id, p.score_threshold ?? 45]));
@@ -182,15 +185,10 @@ export async function getFunnelData(): Promise<FunnelData> {
 
   // Per-project breakdown — same funnel shape as above, scoped to one project
   // at a time, so a blended org-wide number can't hide one specific role
-  // converting badly. Candidates/batches with no assigned project are left
-  // out of this list (they're still counted in the blended totals above);
-  // union of both sources since a project can have below-threshold-only
-  // batches (candidates never persisted) with zero rows in `candidates`.
-  const totalScreenedByProject = new Map<number, number>();
-  for (const b of batches) {
-    if (b.project_id == null) continue;
-    totalScreenedByProject.set(b.project_id, (totalScreenedByProject.get(b.project_id) ?? 0) + b.total_count);
-  }
+  // converting badly. Keyed off `screenings` alone (live counts, matching
+  // totalScreened above) — a project's totalScreened here is just its
+  // candidate row count. Candidates with no assigned project are left out of
+  // this list (they're still counted in the blended totals above).
   const candidatesByProject = new Map<number, FunnelCandidate[]>();
   for (const c of candidates) {
     if (c.projectId == null) continue;
@@ -198,11 +196,9 @@ export async function getFunnelData(): Promise<FunnelData> {
     if (list) list.push(c);
     else candidatesByProject.set(c.projectId, [c]);
   }
-  const projectIds = new Set<number>([...totalScreenedByProject.keys(), ...candidatesByProject.keys()]);
 
-  const byProject: FunnelProjectBreakdown[] = Array.from(projectIds).map((projectId) => {
-    const projectCandidates = candidatesByProject.get(projectId) ?? [];
-    const projectTotalScreened = totalScreenedByProject.get(projectId) ?? 0;
+  const byProject: FunnelProjectBreakdown[] = Array.from(candidatesByProject.entries()).map(([projectId, projectCandidates]) => {
+    const projectTotalScreened = projectCandidates.length;
     const { stages: projectStages, archivedOrRejected: projectArchivedOrRejected } = computeStages(projectTotalScreened, projectCandidates);
     return {
       projectId,

@@ -20,6 +20,7 @@ import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
   Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage,
 } from "./types";
+import { DEFAULT_AUTO_ARCHIVE_REASON } from "./types";
 
 interface ScreeningRow {
   id: number;
@@ -54,6 +55,7 @@ interface ScreeningRow {
   history_alert_match_id: number | null;
   name_match_id: number | null;
   previous_status: CandidateStatus | null;
+  archive_reason: string | null;
   created_at: string;
 }
 
@@ -92,6 +94,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.history_alert_match_id != null ? { historyAlertMatchId: row.history_alert_match_id } : {}),
     ...(row.name_match_id != null ? { nameMatchId: row.name_match_id } : {}),
     ...(row.previous_status != null ? { previousStatus: row.previous_status } : {}),
+    ...(row.archive_reason ? { archiveReason: row.archive_reason } : {}),
     createdAt: row.created_at,
   };
 }
@@ -267,6 +270,7 @@ export async function saveScreening(params: {
   // callers with no project context keep the old unconditional behavior.
   const initialStatus: CandidateStatus =
     scoreThreshold !== undefined && result.score < scoreThreshold ? "archived" : "new_applicant";
+  const initialArchiveReason = initialStatus === "archived" ? DEFAULT_AUTO_ARCHIVE_REASON : null;
 
   const insert = await supabase
     .from("screenings")
@@ -282,6 +286,7 @@ export async function saveScreening(params: {
       career_trajectory: result.careerTrajectory ?? null,
       recommendation: result.recommendation,
       status: initialStatus,
+      archive_reason: initialArchiveReason,
       job_description: jobDescription,
       resume_path: resumePath,
       resume_mime_type: resumeMimeType,
@@ -306,6 +311,12 @@ export async function saveScreening(params: {
   // or the auto-archive "archived") reaches the immediate API response with
   // zero changes to either do-not-touch route.
   result.status = initialStatus;
+  if (initialArchiveReason) result.archiveReason = initialArchiveReason;
+
+  // Mirrors ScreeningRecord.linkedInMode onto the immediate API response so
+  // the post-screening ResultCard can show the LinkedIn icon without waiting
+  // for a reload. Added 2026-07-16.
+  result.linkedInMode = linkedInMode ?? false;
 
   // Best-effort, non-throwing (logAction swallows its own errors).
   //
@@ -345,6 +356,21 @@ export async function saveScreening(params: {
     if (match) {
       await markDuplicatePair(screeningId, match.screeningId);
       becameDuplicate = true;
+      result.duplicateFlag = true;
+      result.duplicateMatchId = match.screeningId;
+      // Best-effort name lookup so the badge can show who it matched without
+      // a second round trip from the client — failure here just means the
+      // badge renders without a name, never blocks the save.
+      try {
+        const { data: matchedRow } = await supabase
+          .from("screenings")
+          .select("candidate_name")
+          .eq("id", match.screeningId)
+          .single<{ candidate_name: string }>();
+        if (matchedRow) result.duplicateMatchCandidateName = matchedRow.candidate_name;
+      } catch {
+        // non-fatal
+      }
     }
 
     // Free candidate-name check — skipped when this save already became a
@@ -379,6 +405,28 @@ export async function saveScreening(params: {
             ? "known_fraud_pattern"
             : "previously_seen";
         await markHistoryAlertPair(screeningId, crossMatch.screeningId, alertType);
+        result.historyAlertType = alertType;
+        result.historyAlertMatchId = crossMatch.screeningId;
+        // Best-effort lookup of the matched candidate's name + project so the
+        // banner can render immediately post-screening without a second
+        // round trip — same non-fatal pattern as the duplicate lookup above.
+        try {
+          const { data: matchedRow } = await supabase
+            .from("screenings")
+            .select("candidate_name, project_id")
+            .eq("id", crossMatch.screeningId)
+            .single<{ candidate_name: string; project_id: number | null }>();
+          if (matchedRow) {
+            result.historyAlertMatchCandidateName = matchedRow.candidate_name;
+            if (matchedRow.project_id != null) {
+              result.historyAlertMatchProjectId = matchedRow.project_id;
+              const matchedProject = await getProject(matchedRow.project_id).catch(() => null);
+              if (matchedProject) result.historyAlertMatchProjectName = matchedProject.name;
+            }
+          }
+        } catch {
+          // non-fatal
+        }
       }
     }
   } catch (err) {
@@ -391,7 +439,7 @@ export async function saveScreening(params: {
 // ── List ───────────────────────────────────────────────────────────────────
 
 const SCREENING_COLUMNS =
-  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, created_at";
+  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, archive_reason, created_at";
 
 /**
  * Fills in the matched candidate's name and project (name + id) for any

@@ -32,7 +32,13 @@ body {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    /* Must be the literal keyword `none`, not a visually-identical
+       translateY(0) — any non-`none` computed transform makes the element a
+       permanent CSS stacking context once `animation-fill-mode: both` holds
+       it, which breaks z-index resolution for popovers on later siblings
+       (Team page card overlap, 2026-07-15 follow-on #19). Re-regressed and
+       re-fixed 2026-07-17 — see memory/session-log.md. */
+    transform: none;
   }
 }
 

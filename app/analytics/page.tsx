@@ -59,18 +59,49 @@ function BarChart({ data }: { data: { label: string; count: number }[] }) {
   );
 }
 
-function ActivityLine({ data }: { data: { date: string; count: number }[] }) {
+function formatShortDate(iso: string) {
+  // iso is "YYYY-MM-DD" — parse manually rather than `new Date(iso)` to
+  // avoid UTC/local timezone drift shifting the displayed day by one.
+  const [, m, d] = iso.split("-");
+  return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+}
+
+function ActivityLine({ data }: { data: { date: string; count: number; avgScore: number }[] }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   if (data.length === 0) return <p className="py-4 text-center text-sm text-zinc-400">No activity in range.</p>;
   const max = Math.max(...data.map((d) => d.count), 1);
   return (
-    <div className="flex items-end gap-1 h-20">
-      {data.map((d) => (
+    <div className="flex items-end gap-1" style={{ height: "5rem" }}>
+      {data.map((d, i) => (
         <div
           key={d.date}
-          title={`${d.date}: ${d.count} screened`}
-          className="flex-1 rounded-t bg-violet-400/60 dark:bg-violet-500/50 hover:bg-violet-500 dark:hover:bg-violet-400 transition-colors"
-          style={{ height: `${Math.round((d.count / max) * 72)}px`, minHeight: "2px" }}
-        />
+          className="relative flex h-full flex-1 flex-col items-center justify-end"
+          onMouseEnter={() => setHoveredIdx(i)}
+          onMouseLeave={() => setHoveredIdx(null)}
+        >
+          {hoveredIdx === i && (
+            <div
+              role="tooltip"
+              className="absolute bottom-full left-1/2 z-20 mb-1.5 w-max -translate-x-1/2 whitespace-nowrap rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+            >
+              <p className="font-semibold text-zinc-800 dark:text-zinc-100">{d.count} screened</p>
+              {d.avgScore > 0 && (
+                <p className="text-[10px] text-zinc-400 dark:text-zinc-500">avg {d.avgScore}</p>
+              )}
+            </div>
+          )}
+          <div
+            className={`w-full rounded-t transition-colors ${
+              hoveredIdx === i
+                ? "bg-violet-500 dark:bg-violet-400"
+                : "bg-violet-400/60 dark:bg-violet-500/50"
+            }`}
+            style={{ height: `${Math.round((d.count / max) * 60)}px`, minHeight: "2px" }}
+          />
+          <span className="mt-1 whitespace-nowrap text-[9px] leading-none text-zinc-400 dark:text-zinc-500">
+            {formatShortDate(d.date)}
+          </span>
+        </div>
       ))}
     </div>
   );
@@ -200,7 +231,6 @@ export default function AnalyticsPage() {
             <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
               <h2 className="mb-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">Daily activity</h2>
               <ActivityLine data={data.recentActivity} />
-              <p className="mt-2 text-xs text-zinc-400">Each bar = one calendar day</p>
             </div>
 
             {/* By project */}

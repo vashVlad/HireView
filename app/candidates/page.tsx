@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { InsightList } from "@/components/InsightList";
@@ -11,6 +11,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { StatusStageControl } from "@/components/StatusStageControl";
+import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import {
   CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS,
   type CandidateStatus, type CredibilityAssessment, type CredibilitySignal,
@@ -52,6 +53,8 @@ function CandidateCard({
   projectName,
   projectId,
   trackerStage,
+  cluster,
+  onClusterClick,
   onStatusChange,
   onStageChange,
   onArchiveReasonChange,
@@ -64,6 +67,9 @@ function CandidateCard({
   projectName?: string;
   projectId?: number;
   trackerStage?: TrackerStage;
+  /** Ring cluster this candidate belongs to, if matched with 1+ others via duplicate/history/name signals — see lib/matchClusters.ts. */
+  cluster?: MatchCluster;
+  onClusterClick?: (clusterIndex: number) => void;
   onStatusChange: (id: number, status: CandidateStatus) => void;
   onStageChange: (id: number, stage: TrackerStage) => void;
   onArchiveReasonChange: (id: number, reason: string) => void;
@@ -166,6 +172,17 @@ function CandidateCard({
             )}
             {s.linkedInMode && (
               <span className="shrink-0 rounded bg-blue-100 px-1.5 py-px text-[10px] font-bold tracking-wide text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">LI</span>
+            )}
+            {cluster && onClusterClick && (
+              <button
+                type="button"
+                title={`${cluster.size} candidates linked in this ring — click to isolate`}
+                onClick={(e) => { e.stopPropagation(); onClusterClick(cluster.index); }}
+                className="flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-600 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: cluster.color }} />
+                {cluster.label} · {cluster.size}
+              </button>
             )}
             {s.flagged && s.flagNote && (
               <span className="truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
@@ -387,10 +404,26 @@ export default function CandidatesPage() {
 
   // Filters
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
+  // Multi-select — was a single CandidateStatus | null before 2026-07-16's
+  // enhanced filter bar. A Set lets a recruiter e.g. view "Contacted" and
+  // "Screening" together instead of clicking back and forth.
+  const [statusFilter, setStatusFilter] = useState<Set<CandidateStatus>>(new Set());
   const [projectFilter, setProjectFilter] = useState<number | null>(null);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  // Fraud signals toggle — matches any of the same three signals the badges
+  // in CandidateCard render (duplicateFlag, historyAlertType, nameMatchId).
+  const [fraudOnly, setFraudOnly] = useState(false);
+  const [scoreMin, setScoreMin] = useState("");
+  const [scoreMax, setScoreMax] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
+  // Click-to-highlight: clicking a Ring chip isolates that cluster's members;
+  // clicking the same one again (or a different card's chip toggle handles
+  // this via the same setter) clears it. Computed off the full, unfiltered
+  // `screenings` list so cluster membership/labels stay stable regardless of
+  // the filters above.
+  const [highlightCluster, setHighlightCluster] = useState<number | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -423,13 +456,20 @@ export default function CandidatesPage() {
   }, []);
 
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
+  const matchClusters = useMemo(() => computeMatchClusters(screenings), [screenings]);
 
   const filtered = screenings
     .filter((s) => {
       if (query && !s.candidateName.toLowerCase().includes(query.toLowerCase())) return false;
-      if (statusFilter && s.status !== statusFilter) return false;
+      if (statusFilter.size > 0 && !statusFilter.has(s.status)) return false;
       if (projectFilter && s.projectId !== projectFilter) return false;
       if (flaggedOnly && !s.flagged) return false;
+      if (fraudOnly && !(s.duplicateFlag || s.historyAlertType != null || s.nameMatchId != null)) return false;
+      if (scoreMin !== "" && s.score < Number(scoreMin)) return false;
+      if (scoreMax !== "" && s.score > Number(scoreMax)) return false;
+      if (dateFrom && new Date(s.createdAt) < new Date(dateFrom)) return false;
+      if (dateTo && new Date(s.createdAt) > new Date(`${dateTo}T23:59:59`)) return false;
+      if (highlightCluster != null && matchClusters.get(s.id)?.index !== highlightCluster) return false;
       return true;
     })
     .slice()
@@ -554,21 +594,66 @@ export default function CandidatesPage() {
               Flagged{flaggedCount > 0 && ` (${flaggedCount})`}
             </button>
 
-            {/* Status filters */}
+            {/* Fraud signals — matches duplicateFlag, historyAlertType, or nameMatchId, same signals as the CandidateCard badges. */}
+            <button type="button" onClick={() => setFraudOnly((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${fraudOnly ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Fraud signals
+            </button>
+
+            {/* Status filters — multi-select */}
             {CANDIDATE_STATUSES.map((status) => (
               <button key={status} type="button"
-                onClick={() => setStatusFilter((prev) => prev === status ? null : status)}
-                className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${statusFilter === status ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+                onClick={() => setStatusFilter((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(status)) next.delete(status); else next.add(status);
+                  return next;
+                })}
+                className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${statusFilter.has(status) ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
                 {CANDIDATE_STATUS_LABELS[status]}
               </button>
             ))}
           </div>
 
+          {/* Score + date-screened ranges */}
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">Score</span>
+              <input type="number" min={0} max={100} value={scoreMin} onChange={(e) => setScoreMin(e.target.value)}
+                placeholder="Min"
+                className="w-16 rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200" />
+              <span className="text-xs text-zinc-300 dark:text-zinc-600">–</span>
+              <input type="number" min={0} max={100} value={scoreMax} onChange={(e) => setScoreMax(e.target.value)}
+                placeholder="Max"
+                className="w-16 rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">Screened</span>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+                className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200" />
+              <span className="text-xs text-zinc-300 dark:text-zinc-600">–</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+                className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200" />
+            </div>
+          </div>
+
+          {/* Highlighted cluster indicator */}
+          {highlightCluster != null && (
+            <button type="button" onClick={() => setHighlightCluster(null)}
+              className="self-start flex items-center gap-1.5 rounded-full border border-violet-300 bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400">
+              Showing Ring {highlightCluster} only · click to clear
+            </button>
+          )}
 
           {/* Active filter summary */}
-          {(statusFilter || projectFilter || flaggedOnly || query) && (
+          {(statusFilter.size > 0 || projectFilter || flaggedOnly || fraudOnly || query || scoreMin !== "" || scoreMax !== "" || dateFrom || dateTo || highlightCluster != null) && (
             <button type="button"
-              onClick={() => { setStatusFilter(null); setProjectFilter(null); setFlaggedOnly(false); setQuery(""); }}
+              onClick={() => {
+                setStatusFilter(new Set()); setProjectFilter(null); setFlaggedOnly(false); setFraudOnly(false);
+                setQuery(""); setScoreMin(""); setScoreMax(""); setDateFrom(""); setDateTo(""); setHighlightCluster(null);
+              }}
               className="self-start text-xs text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300">
               Clear filters · {filtered.length} of {screenings.length} shown
             </button>
@@ -599,6 +684,8 @@ export default function CandidatesPage() {
                   projectName={proj?.name}
                   projectId={proj?.id}
                   trackerStage={stagesMap[s.id]}
+                  cluster={matchClusters.get(s.id)}
+                  onClusterClick={(idx) => setHighlightCluster((prev) => prev === idx ? null : idx)}
                   onStatusChange={handleStatusChange}
                   onStageChange={handleStageChange}
                   onArchiveReasonChange={handleArchiveReasonChange}

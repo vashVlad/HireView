@@ -6,7 +6,6 @@ import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingC
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
 import { InsightList } from "./InsightList";
-import { QuestionGenerator } from "./QuestionGenerator";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusSelect } from "./StatusSelect";
@@ -91,8 +90,13 @@ export function ResultCard({
     result.credibility ?? null
   );
   const [archiveReason, setArchiveReason] = useState<string | undefined>(result.archiveReason);
-  const [showQuestion, setShowQuestion] = useState(false);
   const [savedId] = useState<number | undefined>(result.id);
+  // Notes field, added 2026-07-16 in place of the removed Generate Question
+  // tool — same pattern as CandidateCard's notes textarea on the All
+  // Candidates page (app/candidates/page.tsx), just backed by result.notes
+  // instead of a ScreeningRecord.
+  const [noteText, setNoteText] = useState(result.notes ?? "");
+  const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [showNameCompare, setShowNameCompare] = useState(false);
   const [nameCompareAssessment, setNameCompareAssessment] = useState<CredibilityAssessment | null>(null);
   const [checkingGate, setCheckingGate] = useState(false);
@@ -109,6 +113,23 @@ export function ResultCard({
   const trajectoryText = result.careerTrajectory ?? result.summary;
 
   const hasOtherActiveProjects = otherActiveCount !== undefined && otherActiveCount > 0;
+
+  // combinedScoreDelta: credibility (cross-reference check) and nameCompare
+  // (Compare against a name-matched candidate) are independent adjustments —
+  // both should shift the displayed score if both fired, not just whichever
+  // ran last. Added 2026-07-16.
+  const combinedScoreDelta = (credibility?.scoreDelta ?? 0) + (nameCompareAssessment?.scoreDelta ?? 0);
+
+  async function handleSaveNotes(text: string) {
+    if (savedId === undefined) return;
+    setNoteSaveState("saving");
+    await fetch(`/api/history/${savedId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: text }),
+    }).catch(() => {});
+    setNoteSaveState("saved");
+    setTimeout(() => setNoteSaveState("idle"), 2000);
+  }
 
   async function handleFindBetterFit() {
     if (!onFindBetterFit || checkingFit) return;
@@ -202,7 +223,7 @@ export function ResultCard({
         <ScoreBadge
           score={result.score}
           size={solo ? "lg" : "md"}
-          adjustedScore={credibility?.scoreDelta ? result.score + credibility.scoreDelta : undefined}
+          adjustedScore={combinedScoreDelta ? result.score + combinedScoreDelta : undefined}
         />
         <div className="flex flex-col items-center gap-2">
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -211,6 +232,33 @@ export function ResultCard({
               {result.candidateName}
             </h3>
             <RecommendationBadge recommendation={result.recommendation} />
+            {result.duplicateFlag && (
+              <span
+                title="Duplicate detected — matches another candidate's content fingerprint"
+                className="shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 dark:bg-rose-500/15 dark:text-rose-400"
+              >
+                Duplicate detected
+              </span>
+            )}
+            {result.historyAlertType && (
+              <Link
+                href={result.historyAlertMatchProjectId != null ? `/projects/${result.historyAlertMatchProjectId}?tab=pipeline` : "#"}
+                title={
+                  result.historyAlertMatchCandidateName && result.historyAlertMatchProjectName
+                    ? `Matches ${result.historyAlertMatchCandidateName} in ${result.historyAlertMatchProjectName}`
+                    : result.historyAlertType === "known_fraud_pattern"
+                    ? "Known fraud pattern — matches a flagged candidate in another project"
+                    : "Previously seen in another project"
+                }
+                className={
+                  result.historyAlertType === "known_fraud_pattern"
+                    ? "shrink-0 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-700 transition-colors hover:bg-rose-200 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25"
+                    : "shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 transition-colors hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-400 dark:hover:bg-amber-500/25"
+                }
+              >
+                {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
+              </Link>
+            )}
           </div>
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
@@ -404,31 +452,17 @@ export function ResultCard({
         )}
 
         {canCheck && (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowQuestion((v) => !v)}
-              className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
-                showQuestion
-                  ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400"
-                  : "border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300 dark:hover:border-violet-500/50 dark:hover:bg-violet-500/10 dark:hover:text-violet-400"
-              }`}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Generate question
-            </button>
-            <div
-              className="grid transition-[grid-template-rows] duration-300 ease-in-out"
-              style={{ gridTemplateRows: showQuestion ? "1fr" : "0fr" }}
-            >
-              <div className="overflow-hidden">
-                <QuestionGenerator screeningId={savedId!} />
-              </div>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Notes</span>
+              {noteSaveState === "saving" && <span className="text-xs text-zinc-400">Saving...</span>}
+              {noteSaveState === "saved" && <span className="text-xs text-emerald-500">Saved</span>}
             </div>
-          </>
+            <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)}
+              onBlur={(e) => handleSaveNotes(e.target.value)}
+              placeholder="Add notes about this candidate..." rows={3}
+              className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
+          </div>
         )}
       </div>
     </li>

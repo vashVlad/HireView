@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { getBrowserSupabaseClient } from "@/lib/supabase-browser";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import { ThemeToggle } from "./ThemeToggle";
@@ -28,8 +28,15 @@ export function SiteHeader({ active }: { active: NavHref }) {
   const [email, setEmail] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pendingRequests, setPendingRequests] = useState(0);
+  // Feedback form — swaps the dropdown menu items for an inline textarea
+  // instead of navigating away, so submitting feedback never interrupts
+  // whatever the recruiter was doing. Added 2026-07-16.
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackState, setFeedbackState] = useState<"idle" | "sending" | "sent">("idle");
   const menuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     const supabase = getBrowserSupabaseClient();
@@ -63,11 +70,44 @@ export function SiteHeader({ active }: { active: NavHref }) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  // Reset the feedback form whenever the account menu closes, so reopening
+  // it always starts from the normal menu items, not mid-draft.
+  useEffect(() => {
+    if (!menuOpen) {
+      setFeedbackOpen(false);
+      setFeedbackText("");
+      setFeedbackState("idle");
+    }
+  }, [menuOpen]);
+
   async function handleSignOut() {
     const supabase = getBrowserSupabaseClient();
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
+  }
+
+  async function handleSendFeedback() {
+    const text = feedbackText.trim();
+    if (!text || feedbackState === "sending") return;
+    setFeedbackState("sending");
+    try {
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, page: pathname }),
+      });
+      if (!res.ok) throw new Error();
+      setFeedbackState("sent");
+      setFeedbackText("");
+      setTimeout(() => {
+        setFeedbackState("idle");
+        setFeedbackOpen(false);
+        setMenuOpen(false);
+      }, 1500);
+    } catch {
+      setFeedbackState("idle");
+    }
   }
 
   return (
@@ -158,26 +198,73 @@ export function SiteHeader({ active }: { active: NavHref }) {
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 top-10 z-50 min-w-[200px] rounded-2xl border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+              <div className="absolute right-0 top-10 z-50 min-w-[220px] rounded-2xl border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
                 {email && (
                   <div className="mb-2 flex items-center gap-2 px-2 py-1.5">
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                     <span className="truncate text-xs text-zinc-500 dark:text-zinc-400">{email}</span>
                   </div>
                 )}
-                <Link
-                  href="/auth/set-password"
-                  className="block w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  Change password
-                </Link>
-                <button
-                  onClick={handleSignOut}
-                  className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-                >
-                  Sign out
-                </button>
+
+                {feedbackOpen ? (
+                  <div className="flex flex-col gap-2 px-2 py-1.5">
+                    {feedbackState === "sent" ? (
+                      <p className="py-2 text-center text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                        Thanks — sent!
+                      </p>
+                    ) : (
+                      <>
+                        <textarea
+                          autoFocus
+                          value={feedbackText}
+                          onChange={(e) => setFeedbackText(e.target.value)}
+                          placeholder="Bug, idea, anything..."
+                          rows={3}
+                          className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-2.5 py-2 text-sm text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:text-zinc-900 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-800/50 dark:focus:text-zinc-100"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSendFeedback}
+                            disabled={!feedbackText.trim() || feedbackState === "sending"}
+                            className="flex-1 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {feedbackState === "sending" ? "Sending…" : "Send"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setFeedbackOpen(false); setFeedbackText(""); }}
+                            className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setFeedbackOpen(true)}
+                      className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    >
+                      Send feedback
+                    </button>
+                    <Link
+                      href="/auth/set-password"
+                      className="block w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Change password
+                    </Link>
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                    >
+                      Sign out
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
