@@ -2,10 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
 import { generateTrajectory } from "@/lib/generateTrajectory";
 import { getScreeningResume, listScreenings, updateScreening } from "@/lib/screenings";
+import { getAuthUser, isAdmin } from "@/lib/auth";
 
 export const maxDuration = 60;
 
+/**
+ * Maintenance/backfill route, not called from any UI — found during the
+ * 2026-07-16 full-codebase audit with NO auth check at all and no team
+ * scoping (listScreenings() here is called without teamIds, which means
+ * "admin, sees everything" per its own docstring, regardless of who's
+ * actually calling). That combination meant any logged-in recruiter, on any
+ * team, could trigger a system-wide bulk Claude-API operation touching every
+ * candidate across every team, not just their own. Admin-gated to match
+ * every other cross-team/bulk operation in the app (Analytics, FunnelView,
+ * admin/teams, admin/users).
+ */
 export async function POST(request: NextRequest) {
+  const user = await getAuthUser();
+  if (!user || !isAdmin(user)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const body = await request.json().catch(() => ({}));
   const projectId: number | undefined =
     typeof body?.projectId === "number" ? body.projectId : undefined;

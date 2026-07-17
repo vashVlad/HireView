@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { updateScreening } from "@/lib/screenings";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 
 /** GET /api/history/[id]/photo — proxy the photo from private Supabase Storage */
 export async function GET(
@@ -11,6 +12,12 @@ export async function GET(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const supabase = getSupabaseClient();
   const { data: row } = await supabase
@@ -49,6 +56,12 @@ export async function POST(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const formData = await request.formData().catch(() => null);
   const file = formData?.get("photo");

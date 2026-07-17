@@ -12,6 +12,16 @@ import { useSearchParams } from "next/navigation";
 // non-PDF type.
 const PREVIEWABLE_MIME_TYPES = new Set(["application/pdf"]);
 
+// 2026-07-16: Word resumes no longer fall straight through to "download to
+// view" — /api/history/[id]/resume/preview renders an inline HTML preview
+// (mammoth for .docx, word-extractor's plain text for legacy .doc). Detected
+// by mime type OR filename extension, since File.type from the browser
+// isn't always populated reliably for older/renamed files.
+const OFFICE_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
+  "application/msword", // .doc
+]);
+
 // Next.js requires useSearchParams() to sit inside a Suspense boundary or
 // the build errors ("should be wrapped in a suspense boundary") — this
 // wrapper is that boundary; the fallback is effectively invisible since
@@ -38,10 +48,6 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
       .finally(() => setChecking(false));
   }, [id]);
 
-  const docUrl = activeDoc === "resume"
-    ? `/api/history/${id}/resume`
-    : `/api/history/${id}/linkedin`;
-
   // The caller already has the resume's mime type in memory (it's on
   // ScreeningRecord) and passes it straight through as a URL param — see
   // the `window.open(...?mime=...)` call sites in candidates/page.tsx and
@@ -57,7 +63,25 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
   // only genuinely-known non-PDF types fall back to the download panel.
   const resumeMimeParam = searchParams.get("mime");
   const resumeFileName = searchParams.get("name") ?? "resume";
+
+  // Checked by mime type OR filename extension — browsers don't always
+  // populate File.type reliably (older files, some OS/browser combos), and
+  // the extension is a much more reliable signal for something we already
+  // trust the filename for elsewhere in the app.
+  const resumeExt = resumeFileName.toLowerCase().split(".").pop();
+  const isOfficeDoc = activeDoc === "resume" && (
+    (resumeMimeParam !== null && OFFICE_MIME_TYPES.has(resumeMimeParam))
+    || resumeExt === "doc"
+    || resumeExt === "docx"
+  );
+
+  const rawResumeUrl = `/api/history/${id}/resume`;
+  const docUrl = activeDoc === "resume"
+    ? (isOfficeDoc ? `/api/history/${id}/resume/preview` : rawResumeUrl)
+    : `/api/history/${id}/linkedin`;
+
   const canPreview = activeDoc === "linkedin"
+    || isOfficeDoc
     || resumeMimeParam === null
     || PREVIEWABLE_MIME_TYPES.has(resumeMimeParam);
 
@@ -109,17 +133,36 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
           </button>
         </div>
 
-        {/* Close button */}
-        <button
-          type="button"
-          onClick={() => window.close()}
-          className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
-          </svg>
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Download original — always available for the resume, even
+              when a preview is showing (Vlad, 2026-07-16: "keep both").
+              Always points at the raw file endpoint, never the HTML
+              preview, so the recruiter gets the exact original either way. */}
+          {activeDoc === "resume" && (
+            <a
+              href={rawResumeUrl}
+              download={resumeFileName}
+              className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Download original
+            </a>
+          )}
+
+          {/* Close button */}
+          <button
+            type="button"
+            onClick={() => window.close()}
+            className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
+            </svg>
+            Close
+          </button>
+        </div>
       </div>
 
       {/* Document area — iframe for previewable PDFs, a fallback panel for
@@ -144,9 +187,9 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
           </div>
           <p className="text-sm font-medium text-zinc-200">Can&#x2019;t preview {resumeFileName} in the browser</p>
           <p className="max-w-xs text-xs text-zinc-500">
-            This resume is a Word document — browsers can only preview PDFs inline. Download it to view.
+            This file type isn&#x2019;t previewable inline (PDF and Word documents are). Download it to view.
           </p>
-          <a href={docUrl} download={resumeFileName}
+          <a href={rawResumeUrl} download={resumeFileName}
             className="mt-1 rounded-lg bg-white px-3.5 py-2 text-xs font-medium text-zinc-900 transition-colors hover:bg-zinc-200">
             Download to view
           </a>

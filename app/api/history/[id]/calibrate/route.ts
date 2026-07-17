@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthUser } from "@/lib/auth";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { saveCalibrationExample } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
@@ -23,6 +23,9 @@ export async function POST(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const body = await request.json().catch(() => null);
   const label: CalibrationLabel = body?.label === "bad" ? "bad" : "good";

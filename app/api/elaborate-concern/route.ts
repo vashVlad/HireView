@@ -3,6 +3,7 @@ import { getAnthropicClient, CLAUDE_MODEL } from "@/lib/anthropic";
 import { extractResumeText } from "@/lib/parseResume";
 import { getScreeningResume } from "@/lib/screenings";
 import { getSupabaseClient } from "@/lib/supabase";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 
 export const maxDuration = 30;
 
@@ -11,6 +12,13 @@ export async function POST(request: NextRequest) {
 
   if (!screeningId || !concern) {
     return NextResponse.json({ error: "screeningId and concern are required" }, { status: 400 });
+  }
+
+  // Added in the 2026-07-16 audit — this route had zero auth check at all.
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, screeningId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Fetch JD from the screening record

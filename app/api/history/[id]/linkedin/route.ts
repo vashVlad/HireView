@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
+import { canAccessScreening, getAuthUser } from "@/lib/auth";
 
 // HEAD — lightweight check: does a LinkedIn PDF exist for this candidate?
 export async function HEAD(
@@ -9,6 +10,10 @@ export async function HEAD(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return new NextResponse(null, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return new NextResponse(null, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) return new NextResponse(null, { status: 403 });
 
   const supabase = getSupabaseClient();
   const { data: row } = await supabase
@@ -27,6 +32,12 @@ export async function GET(
   const { id } = await params;
   const numId = parseInt(id, 10);
   if (isNaN(numId)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const user = await getAuthUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await canAccessScreening(user, numId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const supabase = getSupabaseClient();
 

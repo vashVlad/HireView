@@ -596,6 +596,31 @@ export async function deleteScreening(id: number): Promise<void> {
   if (row?.resume_path) {
     await supabase.storage.from(RESUME_BUCKET).remove([row.resume_path]);
   }
+
+  // Clear reverse match pointers on whichever candidate(s) still reference
+  // this one — duplicate_match_id/history_alert_match_id/name_match_id are
+  // all set bidirectionally in pairs (markDuplicatePair/markHistoryAlertPair/
+  // markNameMatchPair in this file and lib/resumeFingerprints.ts write both
+  // sides), but nothing previously cleaned up the surviving side when one
+  // half of a pair got deleted. Left alone, the other candidate's badge
+  // ("Duplicate detected" / "Known fraud pattern" / "Previously seen" /
+  // "Name match") would point at an id that no longer exists forever —
+  // computeMatchClusters (lib/matchClusters.ts) already guards against this
+  // for ring grouping via its idsInScope check, but the badge itself is
+  // rendered directly off these fields regardless of clustering, so it would
+  // still show a dead link. Found during the 2026-07-16 full-codebase audit.
+  // Best-effort, non-blocking — a failure here must never stop the actual
+  // delete.
+  try {
+    await Promise.all([
+      supabase.from("screenings").update({ duplicate_flag: false, duplicate_match_id: null }).eq("duplicate_match_id", id),
+      supabase.from("screenings").update({ history_alert_type: null, history_alert_match_id: null }).eq("history_alert_match_id", id),
+      supabase.from("screenings").update({ name_match_id: null }).eq("name_match_id", id),
+    ]);
+  } catch (err) {
+    console.error("Failed to clear reverse match pointers before delete (screening still deleted):", err);
+  }
+
   const { error } = await supabase.from("screenings").delete().eq("id", id);
   if (error) throw error;
 }
