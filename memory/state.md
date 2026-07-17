@@ -451,3 +451,12 @@ Vlad reported existing resumes getting re-screened with no "already screened" wa
 - **Ran the count query this sandbox now has real Supabase access for:** `SELECT count(*) FROM screenings WHERE resume_content_hash IS NULL` → **66 of 124 total screenings (~53%)** currently un-catchable by the free exact-match duplicate pre-check. That's a much bigger gap than "unknown" — worth prioritizing a one-time backfill (re-extract + hash every NULL row) soon rather than treating it as a someday cleanup. Queried via direct PostgREST calls (`Prefer: count=exact`, `Range: 0-0`), same method used for the migration-confirmation checks in the prior pass.
 - Committed and pushed on `fix/resume-hash-write-and-cancel-button-and-ring-highlight`. Compare URL: `https://github.com/vashVlad/HireView/compare/main...fix/resume-hash-write-and-cancel-button-and-ring-highlight?expand=1`.
 - No structurally odd findings this pass — everything matched the handoff description.
+
+## Backfill run, 2026-07-17 — resume_content_hash, 66/66 clean
+
+Follow-up to the `resume_content_hash` write-bug fix shipped on `fix/resume-hash-write-and-cancel-button-and-ring-highlight`. That branch stopped new rows from going null; this backfilled the 66 rows (of 124 total) that were already affected before the fix.
+
+- Reviewed `scripts/backfill-resume-hashes.ts` before running anything — confirmed `getScreeningResume`/`extractResumeText`/`hashResumeText` signatures all matched real usage in `lib/screenings.ts`.
+- Committed on its own branch, `chore/backfill-resume-hashes`, off freshly-pulled `main` (script-only, no runtime/app changes).
+- Ran `npx tsx scripts/backfill-resume-hashes.ts` against real Supabase: **66/66 backfilled, zero failures.** Re-queried the REST API afterward and confirmed zero screenings now have a null `resume_content_hash`.
+- Pushed. Compare URL: `https://github.com/vashVlad/HireView/compare/main...chore/backfill-resume-hashes?expand=1`.
