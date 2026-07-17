@@ -230,6 +230,15 @@ export interface CheckExistingResult {
     concerns: string[];
     careerTrajectory?: string;
     recommendation: Recommendation | null;
+    /**
+     * Current pipeline status of the already-saved candidate, shown as a
+     * chip on AlreadyScreenedCard so a recruiter re-uploading a resume can
+     * see at a glance where that candidate already stands, without needing
+     * to switch to the Pipeline tab. Added 2026-07-17.
+     */
+    status: CandidateStatus;
+    /** Only meaningful when status === "archived" — mirrors ScreeningRecord.archiveReason. */
+    archiveReason?: string;
   };
 }
 

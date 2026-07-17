@@ -289,6 +289,15 @@ function ScreenTab({ project, onScreeningsSaved }: {
   // batch of several below-threshold candidates can't burst concurrent
   // Claude calls.
   const fitQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  // Cancel-during-screening — client-side only, since scoreCandidate.ts and
+  // app/api/screen-resumes/route.ts are do-not-touch (no server-side way to
+  // abort a Claude call already in flight). Aborting the fetch just stops
+  // this browser tab from waiting on the response and discards whatever
+  // comes back; it does not stop Claude API usage for calls already
+  // in-flight server-side by the time Cancel is clicked. Vlad's ask,
+  // 2026-07-17 — a batch of several resumes could otherwise leave a
+  // recruiter stuck watching a spinner with no way out.
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (screenView !== "results") return;
@@ -329,7 +338,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
   // how it's always been called — this function is the only thing that
   // decides which files reach it, so /api/screen-resumes and scoreCandidate
   // stay completely untouched either way.
-  async function scoreFiles(filesToScore: File[]): Promise<{ results: CandidateResult[]; errors: ScreenResumesError[] }> {
+  async function scoreFiles(filesToScore: File[], signal?: AbortSignal): Promise<{ results: CandidateResult[]; errors: ScreenResumesError[] }> {
     const formData = new FormData();
     formData.set("jobDescription", project.jobDescription);
     formData.set("roleContext", project.name);
@@ -337,7 +346,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
     if (isLinkedInMode) formData.set("linkedInMode", "true");
     filesToScore.forEach((f) => formData.append("resumes", f));
 
-    const res = await fetch("/api/screen-resumes", { method: "POST", body: formData });
+    const res = await fetch("/api/screen-resumes", { method: "POST", body: formData, signal });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
       throw new Error(body?.error ?? "Something went wrong while screening resumes.");
@@ -354,6 +363,9 @@ function ScreenTab({ project, onScreeningsSaved }: {
     setFormError(null);
     setScreenView("loading");
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       // Free pre-check first — anything that already exists in this project
       // never reaches the scoring route at all, so it never costs a Claude call.
@@ -365,16 +377,18 @@ function ScreenTab({ project, onScreeningsSaved }: {
       let candidates: ExistingCandidateRef[] = [];
       let rejections: RejectionHistoryEntry[] = [];
       try {
-        const checkRes = await fetch("/api/screen-resumes/check-existing", { method: "POST", body: checkFormData });
+        const checkRes = await fetch("/api/screen-resumes/check-existing", { method: "POST", body: checkFormData, signal: controller.signal });
         if (checkRes.ok) {
           const checkData = await checkRes.json();
           classifications = Array.isArray(checkData.results) ? checkData.results : [];
           candidates = Array.isArray(checkData.existingCandidates) ? checkData.existingCandidates : [];
           rejections = Array.isArray(checkData.rejectionHistory) ? checkData.rejectionHistory : [];
         }
-      } catch {
-        // Best-effort — if the pre-check itself fails, fall through and
-        // score everything normally rather than blocking the batch on it.
+      } catch (err) {
+        // Re-throw an abort so the outer catch handles it as a cancel, not a
+        // silently-swallowed pre-check failure — everything else about a
+        // failed pre-check is still fine to fall through on.
+        if (err instanceof DOMException && err.name === "AbortError") throw err;
       }
 
       const byFileName = new Map(classifications.map((c) => [c.fileName, c]));
@@ -391,7 +405,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
       }
 
       const { results: scored, errors } = newFiles.length > 0
-        ? await scoreFiles(newFiles)
+        ? await scoreFiles(newFiles, controller.signal)
         : { results: [], errors: [] };
 
       setResults(scored);
@@ -404,9 +418,25 @@ function ScreenTab({ project, onScreeningsSaved }: {
       setScreenView("results");
       if (scored.length > 0) onScreeningsSaved();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Unknown error");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // User-initiated cancel (handleCancel below) — quietly back out to
+        // the form instead of surfacing this as an error. Any candidates
+        // that had already finished saving server-side before the cancel
+        // was clicked are still in the DB (best-effort, not rolled back —
+        // Claude calls already in flight can't be stopped from the client)
+        // and will simply show up on the Pipeline tab on next visit.
+        setFormError(null);
+      } else {
+        setFormError(err instanceof Error ? err.message : "Unknown error");
+      }
       setScreenView("form");
+    } finally {
+      if (abortControllerRef.current === controller) abortControllerRef.current = null;
     }
+  }
+
+  function handleCancel() {
+    abortControllerRef.current?.abort();
   }
 
   // Neither the hash nor filename pre-check can catch "two different resume
@@ -635,16 +665,28 @@ function ScreenTab({ project, onScreeningsSaved }: {
         </div>
       )}
 
-      <button type="button" onClick={handleSubmit}
-        disabled={files.length === 0 || screenView === "loading"}
-        className="flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-xl hover:shadow-violet-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
-        {screenView === "loading" ? (
-          <>
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-            {isLinkedInMode ? "Screening profiles..." : "Screening resumes..."}
-          </>
-        ) : isLinkedInMode ? "Screen profiles" : "Screen resumes"}
-      </button>
+      <div className="flex items-center gap-3">
+        <button type="button" onClick={handleSubmit}
+          disabled={files.length === 0 || screenView === "loading"}
+          className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-xl hover:shadow-violet-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
+          {screenView === "loading" ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+              {isLinkedInMode ? "Screening profiles..." : "Screening resumes..."}
+            </>
+          ) : isLinkedInMode ? "Screen profiles" : "Screen resumes"}
+        </button>
+        {screenView === "loading" && (
+          <button
+            type="button"
+            onClick={handleCancel}
+            title="Stops waiting on this batch and returns you to the upload form — any candidates that had already finished scoring server-side before you cancel are still saved."
+            className="shrink-0 rounded-2xl border border-zinc-200 px-5 py-3.5 text-sm font-semibold text-zinc-600 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-rose-500/40 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -666,6 +708,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
   const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
+  // Click-to-highlight: clicking a Ring chip highlights that cluster's
+  // members (colored glow) and dims everyone else, without removing anyone
+  // from the list. Was a filter (removed non-members entirely) until
+  // 2026-07-17 — Vlad reported that was a regression from an earlier
+  // session's rebuild; the original behavior only ever highlighted. See the
+  // matching note on app/candidates/page.tsx.
   const [highlightCluster, setHighlightCluster] = useState<number | null>(null);
   const [expandedId, setExpandedIdState] = useState<number | null>(externalExpandedId ?? null);
   function setExpandedId(id: number | null) {
@@ -743,7 +791,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     .filter((s) => {
       if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
       if (statusFilter && s.status !== statusFilter) return false;
-      if (highlightCluster != null && matchClusters.get(s.id)?.index !== highlightCluster) return false;
       return true;
     })
     .slice()
@@ -752,11 +799,19 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       // sink below every active candidate, regardless of score sort, so the
       // main pipeline list only ever contains active candidates and the
       // Archived section (rendered via a divider below, see the render map)
-      // reads as a visually separated block further down the page. Within
-      // each group, the existing score sort still applies.
+      // reads as a visually separated block further down the page.
       const aArchived = isSettledArchived(a) ? 1 : 0;
       const bArchived = isSettledArchived(b) ? 1 : 0;
       if (aArchived !== bArchived) return aArchived - bArchived;
+      // Ring grouping, 2026-07-17 (Vlad's ask, mirrored from the same fix on
+      // app/candidates/page.tsx): within the active/archived split above,
+      // candidates sharing a fraud-signal Ring are grouped together instead
+      // of scattered by score — Ring 1's members adjacent, then Ring 2's,
+      // etc. No-cluster candidates sink to the end of their split via
+      // Infinity. Score sort still applies as the tiebreaker within a ring.
+      const clusterA = matchClusters.get(a.id)?.index ?? Infinity;
+      const clusterB = matchClusters.get(b.id)?.index ?? Infinity;
+      if (clusterA !== clusterB) return clusterA - clusterB;
       if (sortOrder === "desc") return b.score - a.score;
       if (sortOrder === "asc") return a.score - b.score;
       return 0;
@@ -874,7 +929,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
           {highlightCluster != null && (
             <button type="button" onClick={() => setHighlightCluster(null)}
               className="flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">
-              Ring {highlightCluster} only · clear
+              Highlighting Ring {highlightCluster} · clear
             </button>
           )}
           <div className="ml-auto flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
@@ -918,7 +973,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
             </li>
           )}
-          <li data-candidate-id={s.id} className={`rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${
+          <li data-candidate-id={s.id} className={`rounded-2xl border bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
+            matchClusters.get(s.id) && highlightCluster === matchClusters.get(s.id)!.index
+              ? "border-2"
+              : "border border-zinc-200 dark:border-zinc-800"
+          } ${
             // Card Visuals, 2026-07-15 (Vlad's ask): archived candidates are
             // "toned out" — darker/lower-opacity, desaturated — so the main
             // pipeline visually recedes for them. Archived-only per confirmed
@@ -928,7 +987,21 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             // opacity was the actual complaint, so `expanded` clears the
             // toned-out treatment entirely while it's open.
             isSettledArchived(s) && !expanded ? "opacity-50 saturate-[0.6] hover:opacity-90" : ""
-          }`}>
+          } ${
+            // Ring highlight, 2026-07-17: clicking a Ring chip used to remove
+            // every non-member card from the list entirely — Vlad reported
+            // that was a regression from an earlier rebuild; the original
+            // behavior only ever dimmed non-members while keeping the whole
+            // list visible. See the matching note on app/candidates/page.tsx.
+            highlightCluster != null && matchClusters.get(s.id)?.index !== highlightCluster && !expanded
+              ? "opacity-40 saturate-[0.7] hover:opacity-80"
+              : ""
+          }`}
+          style={
+            matchClusters.get(s.id) && highlightCluster === matchClusters.get(s.id)!.index
+              ? { borderColor: matchClusters.get(s.id)!.color, boxShadow: `0 0 0 3px ${matchClusters.get(s.id)!.color}33` }
+              : undefined
+          }>
             <div role="button" tabIndex={0}
               onClick={() => setExpandedId(expanded ? null : s.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedId(expanded ? null : s.id); }}
@@ -1005,7 +1078,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     return (
                       <button
                         type="button"
-                        title={`${cluster.size} candidates linked in this ring — click to isolate`}
+                        title={`${cluster.size} candidates linked in this ring — click to highlight`}
                         onClick={(e) => {
                           e.stopPropagation();
                           setHighlightCluster((prev) => prev === cluster.index ? null : cluster.index);
