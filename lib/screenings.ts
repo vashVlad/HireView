@@ -401,7 +401,7 @@ export async function saveScreening(params: {
       // more time), skip duplicate/history matching for this save. Matches
       // the pre-existing best-effort guarantee: fingerprinting failures must
       // never block the screening from being saved.
-      throw new Error("Fingerprint generation failed upstream — skipping duplicate/history matching");
+      throw new Error("UPSTREAM_FINGERPRINT_SKIP");
     }
     if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
 
@@ -489,7 +489,16 @@ export async function saveScreening(params: {
       }
     }
   } catch (err) {
-    console.error("Duplicate fingerprinting failed (screening still saved):", err);
+    // Flagged by Claude Code during the 2026-07-20 handoff review: distinguish
+    // the deliberate "caller already tried fingerprinting in parallel and it
+    // failed, skip cleanly" signal from a genuine, unexpected failure in THIS
+    // function's own fingerprinting/matching steps — the old single message
+    // read as an error even when everything behaved exactly as designed.
+    if (err instanceof Error && err.message === "UPSTREAM_FINGERPRINT_SKIP") {
+      console.log("Fingerprint generation failed upstream (parallel with scoring) — duplicate/history matching skipped for this save, screening still saved fine.");
+    } else {
+      console.error("Duplicate fingerprinting failed (screening still saved):", err);
+    }
   }
 
   return { id: screeningId };
