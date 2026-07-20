@@ -278,6 +278,23 @@ export async function saveScreening(params: {
   const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold } = params;
   const supabase = getSupabaseClient();
 
+  // Real bug found 2026-07-20 (Vlad: "FunnelView didn't save the recruiter
+  // who screened the candidate, even though it shows under Activity").
+  // Root cause: the `user_id` column written below used to come straight
+  // from the `userId` param — which both do-not-touch callers pass in via
+  // `userIdFilter(user)`, a helper built for QUERY scoping ("admin sees
+  // everything, no filter needed" — returns undefined for admin). Reusing
+  // that same undefined-for-admin value as the actual attribution written
+  // to the row meant every screening an admin ran themselves saved with
+  // `user_id: null` — invisible to FunnelView's/Pipeline's recruiter
+  // filter/column, both of which read straight off that column. The
+  // Activity timeline's "created" log entry already worked around this
+  // exact problem (see the logAction call below, added earlier) by
+  // re-resolving the true session user instead of trusting the `userId`
+  // param — this reuses that same resolution for the `user_id` column
+  // itself, so both places agree on who actually did the screening.
+  const actingUser = await getAuthUser().catch(() => null);
+
   // Recover a missing candidate name before it ever reaches the DB (Teti's
   // bug report, 2026-07-13 — "Unknown (resume name not provided)" cards).
   // scoreCandidate.ts (do-not-touch) is honest when the resume TEXT it was
@@ -348,7 +365,7 @@ export async function saveScreening(params: {
       linkedin_mode: linkedInMode ?? false,
       agency_name: agencyName ?? null,
       project_id: projectId ?? null,
-      user_id: userId ?? null,
+      user_id: actingUser?.id ?? userId ?? null,
       team_id: teamId,
     })
     .select("id")
@@ -375,17 +392,9 @@ export async function saveScreening(params: {
   result.linkedInMode = linkedInMode ?? false;
   if (agencyName) result.agencyName = agencyName;
 
-  // Best-effort, non-throwing (logAction swallows its own errors).
-  //
-  // Attribution needs the TRUE acting user, not the `userId` param above —
-  // that comes from callers via userIdFilter(), which deliberately returns
-  // undefined for admin (it was built as a query-scoping helper: "admin sees
-  // everything, no filter needed"). Reusing it for attribution silently
-  // dropped admin-run screenings from the Activity timeline. Re-resolving
-  // the session user here fixes that without touching screen-resumes/route.ts
-  // (do-not-touch) — both callers of saveScreening already require an
-  // authenticated user before reaching this point, so this always succeeds.
-  const actingUser = await getAuthUser().catch(() => null);
+  // Best-effort, non-throwing (logAction swallows its own errors). Reuses
+  // the same `actingUser` resolved at the top of this function (now also
+  // used for the `user_id` column itself — see the comment up there).
   await logAction({ screeningId, userId: actingUser?.id ?? userId, actionType: "created" });
 
   // Best-effort: fingerprinting/duplicate-detection failures must never block
@@ -662,6 +671,20 @@ export async function updateScreening(
     interviewQuestions?: string[];
     /** See ARCHIVE_REASONS (lib/types.ts) and supabase-migration-archive-reason.sql. */
     archiveReason?: string;
+    /**
+     * Editable post-save, 2026-07-20 (Vlad's ask: "add an option to change
+     * the source on the result card in Pipeline"). Source was previously
+     * only ever set once, at screening time — this lets a recruiter correct
+     * or set it later (e.g. they forgot to flip to Agency before screening).
+     * Passing linkedInMode: true does NOT retroactively re-score the
+     * candidate — scoreCandidate.ts (do-not-touch) already ran once at save
+     * time with whatever mode was active then; this only changes the label/
+     * scoring-mode metadata going forward, matching how archiveReason and
+     * every other field here is a pure metadata patch, never a re-run of
+     * any Claude call.
+     */
+    linkedInMode?: boolean;
+    agencyName?: string;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -680,6 +703,11 @@ export async function updateScreening(
   // archive_reason column not yet confirmed run (supabase-migration-archive-reason.sql)
   // — see that file's header for the sequencing rationale.
   if (fields.archiveReason !== undefined) update.archive_reason = fields.archiveReason;
+  if (fields.linkedInMode !== undefined) update.linkedin_mode = fields.linkedInMode;
+  // agency_name requires supabase-migration-agency-source.sql, confirmed run
+  // (see decisions-log.md, 2026-07-20) — same column already wired into
+  // saveScreening()'s INSERT unconditionally, so it's already a live column.
+  if (fields.agencyName !== undefined) update.agency_name = fields.agencyName || null;
   if (Object.keys(update).length === 0) return;
 
   // Attribution needs the "before" value for status/flagged — everything else

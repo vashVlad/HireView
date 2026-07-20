@@ -66,6 +66,16 @@ export async function PATCH(
     if (body.credibility !== undefined) {
       await updateScreeningCredibility(numId, body.credibility, actorUserId);
     }
+    // Source edit, 2026-07-20 (Vlad's ask) — lets a recruiter correct/set
+    // source (Applicant/LinkedIn/Agency) after the fact from the Pipeline
+    // card, not just at initial screening time. Pure metadata patch, see
+    // lib/screenings.ts's updateScreening() comment — never re-triggers scoring.
+    if (body.linkedInMode !== undefined || body.agencyName !== undefined) {
+      await updateScreening(numId, {
+        ...(body.linkedInMode !== undefined ? { linkedInMode: Boolean(body.linkedInMode) } : {}),
+        ...(body.agencyName !== undefined ? { agencyName: String(body.agencyName) } : {}),
+      });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Failed" }, { status: 500 });

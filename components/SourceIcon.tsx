@@ -46,7 +46,7 @@ export default function SourceIcon({
     return (
       <span title={title} className="shrink-0">
         <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Agency" className="shrink-0">
-          <rect width="24" height="24" rx="4" fill="#D97706" />
+          <rect width="24" height="24" rx="4" fill="#DC2626" />
           <path
             fill="none"
             stroke="#fff"
@@ -65,7 +65,7 @@ export default function SourceIcon({
   return (
     <span title={title} className="shrink-0">
       <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Applicant" className="shrink-0">
-        <rect width="24" height="24" rx="4" fill="#2563EB" />
+        <rect width="24" height="24" rx="4" fill="#16A34A" />
         <path
           fill="none"
           stroke="#fff"

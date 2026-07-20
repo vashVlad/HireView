@@ -5,8 +5,21 @@ import Link from "next/link";
 import * as XLSX from "xlsx";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
+import SourceIcon from "@/components/SourceIcon";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import type { FunnelCandidate, FunnelData } from "@/lib/funnelview/types";
+
+// FunnelCandidate.source uses "inbound"/"outbound"/"agency" (kept distinct
+// from lib/sourceType.ts's "applicant"/"linkedin"/"agency" naming to
+// minimize churn across this file's many existing c.source checks — see
+// lib/funnelview/types.ts). Maps to the shared SourceIcon's type for the
+// table badge, 2026-07-20 (Vlad's ask — Applicant had no icon here, unlike
+// ResultCard/Candidates/Pipeline which all show one via showApplicant).
+function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "linkedin" | "agency" {
+  if (source === "outbound") return "linkedin";
+  if (source === "agency") return "agency";
+  return "applicant";
+}
 
 function StageBar({ stages }: { stages: FunnelData["stages"] }) {
   const max = Math.max(...stages.map((s) => s.count), 1);
@@ -34,8 +47,10 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
 }
 
 // Three-way source split — Agency added 2026-07-20 (Vlad's ask) alongside
-// Applied/Sourced (LinkedIn). Amber matches the Agency icon color used
-// elsewhere on this page and on ResultCard/All Candidates (SourceIcon).
+// Applied/Sourced (LinkedIn). Green (Applied) and red (Agency) match the
+// SourceIcon fills used elsewhere on this page and on ResultCard/All
+// Candidates/Pipeline; violet (Sourced/LinkedIn) is this bar's own accent,
+// distinct from the LinkedIn-brand-blue SourceIcon uses for that same source.
 function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
   const total = split.inbound + split.outbound + split.agency;
   const inboundPct = total > 0 ? Math.round((split.inbound / total) * 100) : 0;
@@ -44,13 +59,13 @@ function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex h-3 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-        <div className="h-full bg-blue-500" style={{ width: `${inboundPct}%` }} />
+        <div className="h-full bg-green-500" style={{ width: `${inboundPct}%` }} />
         <div className="h-full bg-violet-500" style={{ width: `${outboundPct}%` }} />
-        <div className="h-full bg-amber-500" style={{ width: `${agencyPct}%` }} />
+        <div className="h-full bg-red-500" style={{ width: `${agencyPct}%` }} />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Applied
+          <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Applied
           <span className="font-semibold tabular-nums">{split.inbound.toLocaleString()}</span>
         </span>
         <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
@@ -58,7 +73,7 @@ function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
           <span className="font-semibold tabular-nums">{split.outbound.toLocaleString()}</span>
         </span>
         <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Agency
+          <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Agency
           <span className="font-semibold tabular-nums">{split.agency.toLocaleString()}</span>
         </span>
       </div>
@@ -396,23 +411,11 @@ export default function FunnelViewPage() {
                               c.source === "outbound"
                                 ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400"
                                 : c.source === "agency"
-                                ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
-                                : "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
+                                ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
+                                : "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400"
                             }`}
                           >
-                            {c.source === "outbound" && (
-                              <svg width="11" height="11" viewBox="0 0 24 24" aria-label="LinkedIn" className="shrink-0">
-                                <rect width="24" height="24" rx="4" fill="#0A66C2" />
-                                <path fill="#fff" d="M7.2 9.6H4.8V19.2h2.4V9.6zM6 8.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8zM19.2 13.2c0-2.2-1.2-3.8-3.2-3.8-1 0-1.8.5-2.4 1.3V9.6H11.2V19.2h2.4v-5.1c0-1.1.7-1.9 1.7-1.9 1 0 1.5.7 1.5 1.9v5.1h2.4v-6z" />
-                              </svg>
-                            )}
-                            {c.source === "agency" && (
-                              <svg width="11" height="11" viewBox="0 0 24 24" aria-label="Agency" className="shrink-0">
-                                <rect width="24" height="24" rx="4" fill="#D97706" />
-                                <path fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" d="M8 8V6.8a1.6 1.6 0 0 1 1.6-1.6h4.8A1.6 1.6 0 0 1 16 6.8V8m-11 0h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" />
-                                <path fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" d="M4 13h16" />
-                              </svg>
-                            )}
+                            <SourceIcon type={toSourceIconType(c.source)} agencyName={c.agencyName} size={11} showApplicant />
                             {c.source === "outbound" ? "Sourced" : c.source === "agency" ? (c.agencyName ?? "Agency") : "Applied"}
                           </span>
                         </td>
