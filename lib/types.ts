@@ -316,6 +316,16 @@ export interface ScreeningRecord {
    */
   nameMatchId?: number;
   previousStatus?: CandidateStatus;
+  /**
+   * Who screened this candidate — mirrors FunnelCandidate's recruiterId/
+   * recruiterEmail naming (lib/funnelview/types.ts). recruiterId is the raw
+   * auth user id from screenings.user_id; recruiterEmail is resolved via
+   * getRecruiterEmailMap() in listScreenings/getScreeningsByIds, falling
+   * back to the id if the user has no email or the lookup fails. Added
+   * 2026-07-20 for the Pipeline tab's recruiter filter.
+   */
+  recruiterId?: string;
+  recruiterEmail?: string;
   createdAt: string;
 }
 

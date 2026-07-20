@@ -12,6 +12,45 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (newest of all) — Pipeline status filter was missing "Recruiter Screen" entirely
+
+- Follow-up correction to the recruiter filter above — Vlad's actual ask was the `recruiter_screen` pipeline **status/stage** as a filter option, not "which recruiter screened this" (that's still a useful feature, just not what was asked). Different thing, kept both since both are real gaps.
+- `recruiter_screen` is a real `CandidateStatus` (`lib/types.ts`, sits between `new_applicant` and `contacted` in the actual pipeline order) but `PipelineTab`'s `STATUS_PILLS` list (`app/projects/[id]/page.tsx`) never included it — New/Contacted/Screening/Archived only. Candidates could carry that status with no way to filter down to them on this tab. Added a "Recruiter Screen" pill in the correct pipeline position.
+- `tsc --noEmit -p tsconfig.json`: clean.
+
+## 2026-07-20 (newest) — Recruiter filter on the project Pipeline tab
+
+- Vlad's ask: add a recruiter filter to the project pipeline.
+- `screenings.user_id` existed in the DB (written by `saveScreening()`) but was never selected/surfaced on `ScreeningRecord` — only FunnelView had it, via its own separate column list. Surfaced it properly instead of duplicating FunnelView's approach a second time: added `user_id` to the shared `SCREENING_COLUMNS`, mapped to `recruiterId` in `rowToRecord`, and added a new `attachRecruiterEmails()` step (mirrors `enrichHistoryAlerts()`'s shape) in `lib/screenings.ts` that resolves it to `recruiterEmail` via the existing `getRecruiterEmailMap()` (`lib/recruiters.ts`, already shared with FunnelView/Analytics) — one batched Auth admin call per `listScreenings`/`getScreeningsByIds` call, not per row. `recruiterId`/`recruiterEmail` added to `ScreeningRecord` (`lib/types.ts`), naming matches `FunnelCandidate`'s existing fields for consistency.
+- `app/api/history/route.ts` needed no change — it already just forwards whatever `listScreenings()` returns, so the new fields flow through automatically.
+- `app/projects/[id]/page.tsx`'s `PipelineTab`: new `recruiterFilter` state + a `<select>` dropdown (same pill-styled pattern as the existing sort dropdown), populated from the distinct recruiters actually present in the project's screenings (deduped, sorted by email). Only rendered when there's more than one recruiter on the project — no point filtering a list with one screener. Wired into the existing `.filter()` alongside `search`/`statusFilter`.
+- `tsc --noEmit -p tsconfig.json` full-project check: clean.
+- Not yet committed — folds into the same pending Claude Code handoff as the other uncommitted FunnelView/Pipeline changes from earlier today (LinkedIn Source icon, candidate-name deep-link, deep-link scroll-to-top).
+
+## 2026-07-20 (latest of all) — Deep-link scroll now lands on the top of the card, not the middle
+
+- Vlad's ask: when the recruiter gets redirected to a candidate's result card (from the new FunnelView deep link, or the pre-existing Tracker-tab jump), show the top of the card instead of the middle.
+- `app/projects/[id]/page.tsx`, `PipelineTab`'s scroll-into-view effect: `block: "center"` → `block: "start"`. This is the one shared mechanism behind both entry points, so the fix applies to each automatically.
+- Added `scroll-mt-24` to the candidate `<li data-candidate-id>` element so the top edge doesn't land underneath `SiteHeader`'s `sticky top-0` bar (confirmed header occupies ~62-68px via `py-3.5` + 34px logo).
+- `tsc --noEmit -p tsconfig.json` full-project check: clean.
+- Not yet committed — folds into the same pending Claude Code handoff as the FunnelView LinkedIn Source icon and candidate-name deep-link (also uncommitted).
+
+## 2026-07-20 (even later still) — FunnelView candidate name links to their result card; fixed a pre-existing dead deep-link
+
+- Vlad's ask: make the candidate name on FunnelView a link that takes the recruiter to that candidate's card in the project.
+- Found while implementing: `app/projects/[id]/page.tsx` never actually read the `?tab=pipeline` query param — the "click to jump to matching candidate" duplicate/history-alert links in `ResultCard.tsx` have been building that URL all along, but it silently landed on the Filters tab every time, not Pipeline. Pre-existing gap, not something this session introduced.
+- Fixed both at once: added a one-time `window.location.search` read (deliberately not `useSearchParams()`, to avoid Next.js's Suspense-boundary requirement for that hook) right after screenings load in the project page's existing data-fetch effect. `?candidate=<id>` sets the Pipeline tab and `expandedId` together (existing `data-candidate-id` + scroll-into-view mechanism, already built for this exact purpose, just never reachable from a URL before); `?tab=<tab>` alone still works for the existing duplicate/history-alert links.
+- `app/funnelview/page.tsx`: candidate name is now a `<Link href="/projects/[id]?tab=pipeline&candidate=[id]">` when the candidate has a project, plain text otherwise (candidates with no assigned project have nowhere to link to).
+- Verified the mount-timing works correctly by reading the render tree: `PipelineTab` only mounts when `tab === "pipeline"` (conditional, not hidden-but-mounted), and `setTab`/`setExpandedId` are called together in the same effect callback, so it mounts fresh with the right candidate already targeted — no race condition.
+- `tsc --noEmit` targeted check on both files: clean.
+
+## 2026-07-20 (later still) — FunnelView Source column: added the LinkedIn icon, matching All Candidates
+
+- Vlad's ask: make sure Source actually shows on FunnelView, use the LinkedIn icon when it's LinkedIn-sourced — pointed at the All Candidates list (`app/candidates/page.tsx`) as the reference for the correct existing pattern.
+- Verified the underlying data first: FunnelView's `source` field is correctly derived from the real `linkedin_mode` column (`lib/funnelview/data.ts`) — no data-layer bug, this was a display gap only (plain text pill, no icon).
+- `app/funnelview/page.tsx`: added the same LinkedIn logo SVG (`#0A66C2`, white "in" mark) already used consistently in `ResultCard.tsx`/`app/candidates/page.tsx`/Pipeline/`CredibilitySection.tsx` to the "Sourced" pill in the candidate table. Excel export's Source column relabeled `"Sourced"` → `"Sourced (LinkedIn)"` to match (can't render an icon in a spreadsheet cell via this library), consistent with the Funnel Summary sheet's existing "Sourced (LinkedIn)" label.
+- `tsc --noEmit` targeted check on this file: clean.
+
 ## 2026-07-20 (post-handoff) — Small follow-up: fingerprint-skip log message
 
 - Claude Code pushed `feat/calibration-overhaul-and-screening-perf` (commits `8ba3ef2`, `3f3229d`) off fresh `main` — `npm install`/`tsc`/`npm run build` all real-clean (44 routes), every flagged do-not-touch exception diff confirmed matching decisions-log.md exactly, `analyzeJD.ts`/`parseResume.ts`/`calibrationExamples.ts` zero-diff. PR not yet opened (`gh` not on PATH there either) — manual link given: `https://github.com/vashVlad/HireView/pull/new/feat/calibration-overhaul-and-screening-perf`.
