@@ -223,16 +223,20 @@ function CandidateCard({
             {pendingSource && (
               <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                 <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
-                <button type="button" title="Applicant"
-                  onClick={() => { setPendingSource(false); onSourceChange(s.id, false, ""); }}
-                  className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "applicant" ? "ring-2 ring-green-400" : "opacity-40 hover:opacity-100"}`}>
-                  <SourceIcon type="applicant" size={13} showApplicant />
-                </button>
-                <button type="button" title="Sourced (LinkedIn)"
-                  onClick={() => { setPendingSource(false); onSourceChange(s.id, true, ""); }}
-                  className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "linkedin" ? "ring-2 ring-violet-400" : "opacity-40 hover:opacity-100"}`}>
-                  <SourceIcon type="linkedin" size={13} />
-                </button>
+                {getSourceType(s) !== "applicant" && (
+                  <button type="button" title="Applicant"
+                    onClick={() => { setPendingSource(false); onSourceChange(s.id, false, ""); }}
+                    className="rounded-full p-0.5 opacity-40 transition-opacity hover:opacity-100">
+                    <SourceIcon type="applicant" size={13} showApplicant />
+                  </button>
+                )}
+                {getSourceType(s) !== "linkedin" && (
+                  <button type="button" title="Sourced (LinkedIn)"
+                    onClick={() => { setPendingSource(false); onSourceChange(s.id, true, ""); }}
+                    className="rounded-full p-0.5 opacity-40 transition-opacity hover:opacity-100">
+                    <SourceIcon type="linkedin" size={13} />
+                  </button>
+                )}
                 {pendingSourceType === "agency" ? (
                   <input
                     autoFocus

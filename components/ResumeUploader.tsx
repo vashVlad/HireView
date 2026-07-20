@@ -13,9 +13,23 @@ interface ResumeUploaderProps {
   onFilesChange: (files: File[]) => void;
 }
 
+// Cap re-added, 2026-07-20 (Vlad: "let's get back to how it was, just put a
+// limit of three resumes upload at a time") — reverts the earlier
+// shorter-output-for-low-scorers experiment in favor of a simpler, more
+// direct fix for the real problem: app/api/screen-resumes/route.ts scores in
+// concurrent batches of 3 (CONCURRENCY there) inside one request capped at
+// maxDuration = 60. A 6-resume screen is 2 sequential batches of 3, and the
+// second one can run out of time before the function ever responds — even
+// though the first batch's 3 already saved successfully by then (exactly
+// what Vlad saw: retrying showed 3 "already screened"). Capping uploads at 3
+// here keeps every screening request to exactly one concurrency batch, so
+// there's nothing left to run out of time on.
+const MAX_FILES = 3;
+
 export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [rejected, setRejected] = useState<string[]>([]);
+  const [overflowCount, setOverflowCount] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function addFiles(incoming: FileList | File[]) {
@@ -24,11 +38,15 @@ export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
     const skipped = all.filter((file) => !/\.(pdf|docx?)$/i.test(file.name));
     setRejected(skipped.map((file) => file.name));
     const existingNames = new Set(files.map((file) => file.name));
-    const merged = [...files, ...accepted.filter((file) => !existingNames.has(file.name))];
-    onFilesChange(merged);
+    const newAccepted = accepted.filter((file) => !existingNames.has(file.name));
+    const room = Math.max(0, MAX_FILES - files.length);
+    const toAdd = newAccepted.slice(0, room);
+    setOverflowCount(newAccepted.length - toAdd.length);
+    onFilesChange([...files, ...toAdd]);
   }
 
   function removeFile(name: string) {
+    setOverflowCount(0);
     onFilesChange(files.filter((file) => file.name !== name));
   }
 
@@ -68,12 +86,18 @@ export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
         <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
           Drop resumes here, or click to browse
         </p>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">PDF or Word — drop as many as you like</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">PDF or Word — up to {MAX_FILES} at a time</p>
       </label>
 
       {rejected.length > 0 && (
         <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
           Skipped — only PDF and Word (.doc/.docx) are supported: {rejected.join(", ")}
+        </p>
+      )}
+
+      {overflowCount > 0 && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+          Only {MAX_FILES} resumes can be screened at once — {overflowCount} file{overflowCount !== 1 ? "s" : ""} not added. Screen these {MAX_FILES}, then add more.
         </p>
       )}
 
@@ -85,7 +109,7 @@ export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
           </span>
           <button
             type="button"
-            onClick={() => onFilesChange([])}
+            onClick={() => { setOverflowCount(0); onFilesChange([]); }}
             className="text-xs text-zinc-400 transition-colors hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400"
           >
             Clear all

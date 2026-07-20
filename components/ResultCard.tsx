@@ -365,8 +365,17 @@ export function ResultCard({
             <p className="text-xs text-violet-500 dark:text-violet-400">Checking other active roles…</p>
           )}
           {!fitError && !checkingGate && !checkingFit && fitChecked && (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-zinc-600 dark:text-zinc-300">
+            // Layout bug fixed 2026-07-20 (Vlad shared a screenshot): this row
+            // used to be a plain `flex items-center justify-between` with no
+            // `min-w-0` on the text and no responsive stacking — on a narrow
+            // viewport neither the paragraph nor the "Transfer to X" button had
+            // room to actually lay out, so both got squeezed into unreadable,
+            // overlapping-looking narrow columns instead of wrapping properly.
+            // Stacking vertically below `sm:` (text on top, button full-width
+            // underneath) and giving the paragraph `min-w-0` so it can wrap
+            // within its own row once side-by-side again at `sm:` and up.
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <p className="min-w-0 text-xs text-zinc-600 dark:text-zinc-300">
                 {fitSuggestion ? (
                   <>
                     Stronger fit for <span className="font-semibold text-violet-600 dark:text-violet-400">{fitSuggestion.projectName}</span> — scored {fitSuggestion.score} there
@@ -376,13 +385,13 @@ export function ResultCard({
                 )}
               </p>
               {fitSuggestion && onTransferToProject && (
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 sm:shrink-0">
                   {transferError && <span className="text-xs text-rose-500">{transferError}</span>}
                   <button
                     type="button"
                     onClick={handleTransfer}
                     disabled={transferring}
-                    className="shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full shrink-0 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                   >
                     {transferring ? "Transferring…" : `Transfer to ${fitSuggestion.projectName}`}
                   </button>
