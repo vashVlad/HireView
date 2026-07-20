@@ -12,6 +12,11 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (post-handoff) — Small follow-up: fingerprint-skip log message
+
+- Claude Code pushed `feat/calibration-overhaul-and-screening-perf` (commits `8ba3ef2`, `3f3229d`) off fresh `main` — `npm install`/`tsc`/`npm run build` all real-clean (44 routes), every flagged do-not-touch exception diff confirmed matching decisions-log.md exactly, `analyzeJD.ts`/`parseResume.ts`/`calibrationExamples.ts` zero-diff. PR not yet opened (`gh` not on PATH there either) — manual link given: `https://github.com/vashVlad/HireView/pull/new/feat/calibration-overhaul-and-screening-perf`.
+- One thing flagged during review, cosmetic only: `lib/screenings.ts`'s deliberate "caller already tried fingerprinting in parallel and failed, skip cleanly" path threw a synthetic `Error` that landed in the generic catch block, logging "Duplicate fingerprinting failed" even though nothing actually failed in that function — just misleading log phrasing, not a behavior bug. Since `lib/screenings.ts` isn't do-not-touch, fixed directly here (not part of the pushed branch): synthetic error now carries a sentinel message (`"UPSTREAM_FINGERPRINT_SKIP"`), the catch block checks for it and logs a calm `console.log` instead of `console.error` for that specific case, real unexpected failures still get the original error-level message. Needs its own small commit on top of (or folded into) the already-pushed branch before merge.
+
 ## 2026-07-20 (latest) — Perf audit: fixed double resume-text extraction, flagged two bigger findings unfixed
 
 - Vlad asked for a full pass on screening speed before merging today's changes ("no empty prompts or anything that take up screening time"). Full detail in decisions-log.md.
