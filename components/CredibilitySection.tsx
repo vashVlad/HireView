@@ -159,8 +159,11 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
         <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
           Credibility
           {isLinkedIn && (
-            <span className="rounded-full bg-blue-100 px-1.5 py-px text-[9px] font-bold normal-case tracking-normal text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
-              LinkedIn
+            <span title="Cross-referenced against a LinkedIn profile" className="shrink-0">
+              <svg width="13" height="13" viewBox="0 0 24 24" aria-label="LinkedIn" className="shrink-0">
+                <rect width="24" height="24" rx="4" fill="#0A66C2" />
+                <path fill="#fff" d="M7.2 9.6H4.8V19.2h2.4V9.6zM6 8.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8zM19.2 13.2c0-2.2-1.2-3.8-3.2-3.8-1 0-1.8.5-2.4 1.3V9.6H11.2V19.2h2.4v-5.1c0-1.1.7-1.9 1.7-1.9 1 0 1.5.7 1.5 1.9v5.1h2.4v-6z" />
+              </svg>
             </span>
           )}
         </span>
