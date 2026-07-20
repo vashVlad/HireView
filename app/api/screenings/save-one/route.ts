@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
   const jobDescriptionField = formData.get("jobDescription");
   const projectIdField = formData.get("projectId");
   const linkedInModeField = formData.get("linkedInMode");
+  const agencyNameField = formData.get("agencyName");
 
   if (typeof resultJsonField !== "string" || !(resumeFile instanceof File) || typeof jobDescriptionField !== "string") {
     return NextResponse.json({ error: "resultJson, resumeFile, and jobDescription are required" }, { status: 400 });
@@ -45,6 +46,12 @@ export async function POST(request: NextRequest) {
     ? parseInt(projectIdField.trim(), 10) || undefined
     : undefined;
   const linkedInMode = linkedInModeField === "true";
+  // DO-NOT-TOUCH EXCEPTION (2026-07-20, Vlad's ask — see decisions-log.md):
+  // Agency source, same additive-metadata shape as the resumeText passthrough
+  // exception right above. No scoring involvement — `result` here is already
+  // fully-scored JSON passed in from the client (this route never calls
+  // scoreCandidate at all).
+  const agencyName = typeof agencyNameField === "string" && agencyNameField.trim() ? agencyNameField.trim() : undefined;
   const mimeType = resolveMimeType(resumeFile);
 
   const buffer = Buffer.from(await resumeFile.arrayBuffer());
@@ -79,6 +86,7 @@ export async function POST(request: NextRequest) {
     resumeMimeType: mimeType,
     resumeText: extractedResumeText,
     linkedInMode,
+    agencyName,
     projectId,
     userId,
     scoreThreshold,

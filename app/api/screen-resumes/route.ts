@@ -36,6 +36,13 @@ export async function POST(request: NextRequest) {
     ? parseInt(projectIdField.trim(), 10) || undefined
     : undefined;
   const linkedInModeOverride = formData.get("linkedInMode") === "true";
+  // DO-NOT-TOUCH EXCEPTION (2026-07-20, Vlad's ask — see decisions-log.md):
+  // Agency source, purely additive metadata plumbing, same shape as the
+  // resumeText/fingerprint passthrough exceptions above it. Read here,
+  // passed straight through to saveScreening below — does not reach
+  // scoreCandidate() or affect scoring in any way, unlike linkedInMode.
+  const agencyNameField = formData.get("agencyName");
+  const agencyName = typeof agencyNameField === "string" && agencyNameField.trim() ? agencyNameField.trim() : undefined;
 
   let jobDescription: string;
 
@@ -178,6 +185,7 @@ export async function POST(request: NextRequest) {
           resumeText: resume.text,
           fingerprint,
           linkedInMode: linkedInModeOverride,
+          agencyName,
           projectId,
           userId,
           scoreThreshold,

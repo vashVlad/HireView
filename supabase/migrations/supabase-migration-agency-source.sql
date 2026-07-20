@@ -1,0 +1,30 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Agency source
+-- Run this in Supabase SQL editor → Run — BEFORE merging/deploying the code
+-- that goes with it.
+--
+-- Vlad's ask, 2026-07-20: sourcing needs three types, not two — Applicant
+-- (default, no flag needed), Sourced (LinkedIn) (existing linkedin_mode
+-- boolean, untouched — it still drives scoring exactly as before, see
+-- lib/scoreCandidate.ts), and Agency, which is brand new and carries a
+-- free-text agency name. Source type itself is NOT a new column — it's
+-- derived in code (lib/sourceType.ts) from linkedin_mode + whether
+-- agency_name is set, so this migration only needs to add the one new
+-- column agency_name lives in.
+--
+-- Additive only, no backfill — existing rows simply have no agency name
+-- (derives to "applicant" or "linkedin" depending on their existing
+-- linkedin_mode, exactly as before this migration).
+--
+-- IMPORTANT — same sequencing lesson as archive_reason
+-- (supabase-migration-archive-reason.sql): unlike archive_reason,
+-- agency_name IS being wired into lib/screenings.ts's saveScreening()
+-- INSERT in this same change (every screening save writes this column,
+-- not just agency-sourced ones — the insert always includes the key). If
+-- this migration has NOT been run yet when that code deploys, EVERY
+-- screening save will start failing, not just agency-sourced ones — this
+-- is a harder break than archive_reason's was. Run this migration first,
+-- confirm it succeeded, THEN merge/deploy.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE screenings ADD COLUMN IF NOT EXISTS agency_name text;

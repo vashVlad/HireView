@@ -57,6 +57,7 @@ interface ScreeningRow {
   name_match_id: number | null;
   previous_status: CandidateStatus | null;
   archive_reason: string | null;
+  agency_name: string | null;
   user_id: string | null;
   created_at: string;
 }
@@ -97,6 +98,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.name_match_id != null ? { nameMatchId: row.name_match_id } : {}),
     ...(row.previous_status != null ? { previousStatus: row.previous_status } : {}),
     ...(row.archive_reason ? { archiveReason: row.archive_reason } : {}),
+    ...(row.agency_name ? { agencyName: row.agency_name } : {}),
     ...(row.user_id != null ? { recruiterId: row.user_id } : {}),
     createdAt: row.created_at,
   };
@@ -225,6 +227,15 @@ export async function saveScreening(params: {
   resumeFile: Buffer;
   resumeMimeType: string;
   linkedInMode?: boolean;
+  /**
+   * Free-text agency name, set only when this candidate was sourced via an
+   * agency (mutually exclusive with linkedInMode in the ScreenTab UI, though
+   * this function doesn't enforce that — see lib/sourceType.ts). Undefined
+   * for Applicant/LinkedIn sources. Added 2026-07-20 — requires
+   * supabase-migration-agency-source.sql to have run (this insert includes
+   * the column unconditionally, every save, not just agency-sourced ones).
+   */
+  agencyName?: string;
   projectId?: number;
   userId?: string;
   /**
@@ -264,7 +275,7 @@ export async function saveScreening(params: {
    */
   fingerprint?: ResumeFingerprint | null;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, projectId, userId, scoreThreshold } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold } = params;
   const supabase = getSupabaseClient();
 
   // Recover a missing candidate name before it ever reaches the DB (Teti's
@@ -335,6 +346,7 @@ export async function saveScreening(params: {
       resume_path: resumePath,
       resume_mime_type: resumeMimeType,
       linkedin_mode: linkedInMode ?? false,
+      agency_name: agencyName ?? null,
       project_id: projectId ?? null,
       user_id: userId ?? null,
       team_id: teamId,
@@ -361,6 +373,7 @@ export async function saveScreening(params: {
   // the post-screening ResultCard can show the LinkedIn icon without waiting
   // for a reload. Added 2026-07-16.
   result.linkedInMode = linkedInMode ?? false;
+  if (agencyName) result.agencyName = agencyName;
 
   // Best-effort, non-throwing (logAction swallows its own errors).
   //
@@ -524,7 +537,7 @@ export async function saveScreening(params: {
 // ── List ───────────────────────────────────────────────────────────────────
 
 const SCREENING_COLUMNS =
-  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, archive_reason, user_id, created_at";
+  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, archive_reason, agency_name, user_id, created_at";
 
 /**
  * Fills in the matched candidate's name and project (name + id) for any

@@ -12,6 +12,32 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (newest of all, round 4) — Three-way source: Applicant / Sourced (LinkedIn) / Agency
+
+- Vlad's ask: add Agency as a third source type (free-text agency name), alongside the existing Applicant/LinkedIn, shown on ResultCard/Candidates/Pipeline icons and on FunnelView. See decisions-log.md for the full design writeup and DO-NOT-TOUCH exception details.
+- **New:** `supabase-migration-agency-source.sql` (agency_name column — **must run before this deploys**, read that file's header), `lib/sourceType.ts` (shared 3-way derivation), `components/SourceIcon.tsx` (shared icon, replaces 3 independently copy-pasted LinkedIn SVGs, adds a matching amber Agency icon).
+- **Data layer:** `lib/types.ts`/`lib/screenings.ts` — `agencyName` on `CandidateResult`/`ScreeningRecord`, wired into `SCREENING_COLUMNS`, `rowToRecord`, `saveScreening`'s insert + response mirror (matches the existing linkedInMode mirror pattern).
+- **DO-NOT-TOUCH EXCEPTIONS:** `app/api/screen-resumes/route.ts` and `app/api/screenings/save-one/route.ts` — both read `agencyName` off FormData and pass it through to `saveScreening`, additive only, no scoring path touched.
+- **FunnelView:** `lib/funnelview/types.ts`/`data.ts` — `source` gained a third `"agency"` value, `FunnelSourceSplit` gained an `agency` count. `app/funnelview/page.tsx` — every `c.source` site updated (source-split bar, table badge, Excel export, empty-state check).
+- **ScreenTab UI** (`app/projects/[id]/page.tsx`): the old LinkedIn-only toggle replaced with a 3-way pill selector (Applicants/Sourced (LinkedIn)/Agency) + conditional agency-name text input. `isLinkedInMode` kept as a derived const off the new `sourceType` state so every existing isLinkedInMode-keyed copy string needed zero changes.
+- `tsc --noEmit -p tsconfig.json` full-project: clean.
+- **Not committed. Migration must run in Supabase before this deploys** — flag this to Claude Code prominently in the next handoff, it's a harder failure mode than the archive_reason precedent (this hits every screening save, not just agency ones, if the column's missing).
+
+## 2026-07-20 (newest of all, round 3) — Post-screening status changes now sync to Pipeline instantly
+
+- Vlad's ask: changing a candidate's status on the ResultCard right after screening should show up in the Pipeline tab immediately, no page reload.
+- Root cause: `ScreenTab`'s `handleStatusChange`/`handleArchiveReasonChange` (`app/projects/[id]/page.tsx`) only ever updated `ScreenTab`'s own local `results` state and PATCHed the DB — never touched the parent page's `screenings` state that `PipelineTab` actually renders from. That state only got refreshed by `onScreeningsSaved`/`loadScreenings`, fired once when a batch finishes scoring, not on later edits to an already-shown result.
+- Fix mirrors the existing `onScreeningFieldSaved` pattern `TrackerTab` already uses for the same problem (patches parent `screenings` by id, no refetch): added the same optional prop to `ScreenTab`, called from both handlers with the changed field(s), wired in the parent JSX exactly like TrackerTab's wiring (`setScreenings((prev) => prev.map(...))`).
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — next item for a handoff, alongside anything else that accumulates.
+
+## 2026-07-20 (post-handoff #2) — Pipeline/FunnelView follow-ups pushed, PR open
+
+- Claude Code verified the 5-item handoff (Source LinkedIn icon, candidate-name deep link + dead-link fix, deep-link scroll-to-top, recruiter identity filter, missing "Recruiter Screen" pill): `npm install`/`tsc`/`npm run build` real-clean, diff matched exactly those 5 items, session-log.md entries confirmed accurate.
+- `feat/calibration-overhaul-and-screening-perf` (PR #38) had already merged, so this went on a fresh branch off `main`: `fix/pipeline-recruiter-filter-and-deep-link`, commit `88b781a`. PR not yet opened (`gh` not on PATH there) — open manually: https://github.com/vashVlad/HireView/pull/new/fix/pipeline-recruiter-filter-and-deep-link
+- Hiccup, resolved cleanly: stale `.git/index.lock` blocked the first commit attempt (no live git process holding it — matches the same lock artifact seen in the Cowork sandbox this session); removed, working tree untouched, retried fine.
+- **Next:** Vlad to open the PR via the link above and merge.
+
 ## 2026-07-20 (newest of all) — Pipeline status filter was missing "Recruiter Screen" entirely
 
 - Follow-up correction to the recruiter filter above — Vlad's actual ask was the `recruiter_screen` pipeline **status/stage** as a filter option, not "which recruiter screened this" (that's still a useful feature, just not what was asked). Different thing, kept both since both are real gaps.

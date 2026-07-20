@@ -25,6 +25,8 @@ import type { ScreeningAction } from "@/lib/screeningActions";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import { computeMatchClusters } from "@/lib/matchClusters";
+import SourceIcon from "@/components/SourceIcon";
+import { getSourceType, type SourceType } from "@/lib/sourceType";
 
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
   clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
@@ -239,9 +241,22 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
 
 // ── Screen tab ─────────────────────────────────────────────────────────────
 
-function ScreenTab({ project, onScreeningsSaved }: {
+function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   project: Project;
   onScreeningsSaved: () => void;
+  /**
+   * Mirrors TrackerTab's prop of the same name/shape (below): patches the
+   * parent's own `screenings` state directly by id, so a status/archive-
+   * reason change made right here on a post-screening ResultCard is
+   * reflected in the Pipeline tab immediately, without needing a full
+   * `onScreeningsSaved`/`loadScreenings` refetch or a page reload. Vlad's
+   * ask, 2026-07-20 — before this, handleStatusChange/handleArchiveReasonChange
+   * below only ever updated this component's own local `results` state
+   * (and the DB via PATCH), never the parent's `screenings`, so the change
+   * was invisible on Pipeline until something else happened to trigger a
+   * refetch (e.g. screening another batch).
+   */
+  onScreeningFieldSaved?: (id: number, fields: Partial<ScreeningRecord>) => void;
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const [screenView, setScreenView] = useState<ScreenView>("form");
@@ -281,7 +296,16 @@ function ScreenTab({ project, onScreeningsSaved }: {
   // sourced from checkData.rejectionHistory instead of existingCandidates.
   const [rejectionHistoryBaseline, setRejectionHistoryBaseline] = useState<RejectionHistoryEntry[]>([]);
   const [rejectionMatches, setRejectionMatches] = useState<Map<string, RejectionHistoryEntry>>(new Map());
-  const [isLinkedInMode, setIsLinkedInMode] = useState(false);
+  // Source picker, 2026-07-20 (Vlad's ask): three mutually-exclusive types —
+  // Applicant (default), LinkedIn (existing linkedin_mode, unchanged scoring
+  // behavior via isLinkedInMode below), Agency (new, carries a free-text
+  // agency name, no scoring impact — see lib/sourceType.ts). `isLinkedInMode`
+  // kept as a derived const rather than removed so every existing
+  // isLinkedInMode-keyed copy string/behavior below (screen button label,
+  // loading text, formData wiring) needed zero other changes.
+  const [sourceType, setSourceType] = useState<SourceType>("applicant");
+  const [agencyNameInput, setAgencyNameInput] = useState("");
+  const isLinkedInMode = sourceType === "linkedin";
   // undefined = not checked yet, 0 = checked and there's nothing to suggest against.
   const [otherActiveCount, setOtherActiveCount] = useState<number | undefined>(undefined);
   // Serializes every cross-project-fit call — gate checks and real checks,
@@ -311,6 +335,8 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    const statusUpdatedAt = new Date().toISOString();
+    onScreeningFieldSaved?.(id, { status, statusUpdatedAt });
     try {
       await fetch(`/api/history/${id}`, {
         method: "PATCH",
@@ -325,6 +351,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
   // to, same as StatusStageControl's reason segment on Pipeline/All Candidates.
   async function handleArchiveReasonChange(id: number, archiveReason: string) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, archiveReason } : r)));
+    onScreeningFieldSaved?.(id, { archiveReason });
     try {
       await fetch(`/api/history/${id}`, {
         method: "PATCH",
@@ -344,6 +371,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
     formData.set("roleContext", project.name);
     formData.set("projectId", String(project.id));
     if (isLinkedInMode) formData.set("linkedInMode", "true");
+    if (sourceType === "agency" && agencyNameInput.trim()) formData.set("agencyName", agencyNameInput.trim());
     filesToScore.forEach((f) => formData.append("resumes", f));
 
     const res = await fetch("/api/screen-resumes", { method: "POST", body: formData, signal });
@@ -594,6 +622,7 @@ function ScreenTab({ project, onScreeningsSaved }: {
                 fd.set("jobDescription", suggestion.jobDescription);
                 fd.set("projectId", String(suggestion.projectId));
                 if (isLinkedInMode) fd.set("linkedInMode", "true");
+                if (sourceType === "agency" && agencyNameInput.trim()) fd.set("agencyName", agencyNameInput.trim());
                 const res = await fetch("/api/screenings/save-one", { method: "POST", body: fd });
                 if (!res.ok) {
                   const body = await res.json().catch(() => null);
@@ -642,19 +671,49 @@ function ScreenTab({ project, onScreeningsSaved }: {
 
       <CalibrationPanel projectId={project.id} />
 
-      <div className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-        <span className="text-sm text-zinc-700 dark:text-zinc-300">
-          Sourced (LinkedIn) <span className="text-zinc-400 dark:text-zinc-500">— adjusts scoring for profile PDFs</span>
-        </span>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isLinkedInMode}
-          onClick={() => setIsLinkedInMode((v) => !v)}
-          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${isLinkedInMode ? "bg-violet-600" : "bg-zinc-200 dark:bg-zinc-700"}`}
-        >
-          <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${isLinkedInMode ? "translate-x-4" : "translate-x-0"}`} />
-        </button>
+      <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button type="button" onClick={() => setSourceType("applicant")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              sourceType === "applicant"
+                ? "bg-blue-600 text-white"
+                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+            }`}>
+            Applicants
+          </button>
+          <button type="button" onClick={() => setSourceType("linkedin")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              sourceType === "linkedin"
+                ? "bg-violet-600 text-white"
+                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+            }`}>
+            Sourced (LinkedIn)
+          </button>
+          <button type="button" onClick={() => setSourceType("agency")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              sourceType === "agency"
+                ? "bg-amber-600 text-white"
+                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+            }`}>
+            Agency
+          </button>
+          <span className="text-xs text-zinc-400 dark:text-zinc-500">
+            {sourceType === "linkedin"
+              ? "— adjusts scoring for profile PDFs"
+              : sourceType === "agency"
+              ? "— label only, scoring unaffected"
+              : "— default, no scoring adjustment"}
+          </span>
+        </div>
+        {sourceType === "agency" && (
+          <input
+            type="text"
+            placeholder="Agency name…"
+            value={agencyNameInput}
+            onChange={(e) => setAgencyNameInput(e.target.value)}
+            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm placeholder-zinc-400 focus:border-amber-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
+          />
+        )}
       </div>
 
       <ResumeUploader files={files} onFilesChange={setFiles} />
@@ -1109,14 +1168,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       Name match
                     </button>
                   )}
-                  {s.linkedInMode && (
-                    <span title="Resume sourced from LinkedIn" className="shrink-0">
-                      <svg width="14" height="14" viewBox="0 0 24 24" aria-label="LinkedIn" className="shrink-0">
-                        <rect width="24" height="24" rx="4" fill="#0A66C2" />
-                        <path fill="#fff" d="M7.2 9.6H4.8V19.2h2.4V9.6zM6 8.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8zM19.2 13.2c0-2.2-1.2-3.8-3.2-3.8-1 0-1.8.5-2.4 1.3V9.6H11.2V19.2h2.4v-5.1c0-1.1.7-1.9 1.7-1.9 1 0 1.5.7 1.5 1.9v5.1h2.4v-6z" />
-                      </svg>
-                    </span>
-                  )}
+                  <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} />
                   {s.flagged && s.flagNote && (
                     <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
                   )}
@@ -2438,7 +2490,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           </div>
         )}
         {tab === "screen" && (
-          <ScreenTab project={project} onScreeningsSaved={loadScreenings} />
+          <ScreenTab
+            project={project}
+            onScreeningsSaved={loadScreenings}
+            onScreeningFieldSaved={(id, fields) => setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s))}
+          />
         )}
         {tab === "pipeline" && (
           <PipelineTab

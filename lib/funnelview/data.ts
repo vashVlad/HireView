@@ -17,6 +17,7 @@ interface ScreeningFunnelRow {
   status: CandidateStatus;
   previous_status: CandidateStatus | null;
   linkedin_mode: boolean;
+  agency_name: string | null;
   score: number;
   duplicate_flag: boolean | null;
   history_alert_type: string | null;
@@ -130,7 +131,7 @@ export async function getFunnelData(): Promise<FunnelData> {
     supabase
       .from("screenings")
       .select(
-        "id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, score, duplicate_flag, history_alert_type, created_at"
+        "id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, agency_name, score, duplicate_flag, history_alert_type, created_at"
       )
       .returns<ScreeningFunnelRow[]>(),
     supabase.from("tracker").select("screening_id, stage, previous_stage").returns<TrackerFunnelRow[]>(),
@@ -163,7 +164,8 @@ export async function getFunnelData(): Promise<FunnelData> {
       projectName: s.project_id != null ? (projectNameById.get(s.project_id) ?? `Project ${s.project_id}`) : "—",
       recruiterId: s.user_id,
       recruiterEmail: s.user_id != null ? (emailByUserId.get(s.user_id) ?? s.user_id) : null,
-      source: s.linkedin_mode ? "outbound" : "inbound",
+      source: s.linkedin_mode ? "outbound" : s.agency_name ? "agency" : "inbound",
+      ...(s.agency_name ? { agencyName: s.agency_name } : {}),
       score: s.score,
       passedThreshold: s.score >= threshold,
       hasFraudFlag: Boolean(s.duplicate_flag) || s.history_alert_type != null,
@@ -181,6 +183,7 @@ export async function getFunnelData(): Promise<FunnelData> {
   const sourceSplit = {
     inbound: candidates.filter((c) => c.source === "inbound").length,
     outbound: candidates.filter((c) => c.source === "outbound").length,
+    agency: candidates.filter((c) => c.source === "agency").length,
   };
 
   // Per-project breakdown — same funnel shape as above, scoped to one project
