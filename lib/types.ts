@@ -186,6 +186,8 @@ export interface CandidateResult {
   notes?: string;
   /** Mirrors ScreeningRecord.linkedInMode — lets the post-screening card show the LinkedIn icon without waiting for a reload. Added 2026-07-16. */
   linkedInMode?: boolean;
+  /** Mirrors ScreeningRecord.agencyName — same reload-avoidance reason as linkedInMode above. Added 2026-07-20. */
+  agencyName?: string;
   /**
    * Fraud/match signals mirrored from ScreeningRecord so they can render on
    * the post-screening ResultCard immediately, not just after a reload —
@@ -291,6 +293,20 @@ export interface ScreeningRecord {
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;
+  /**
+   * Set only when this candidate came in via an agency — free text, the
+   * agency's name. Undefined/empty for Applicant and LinkedIn sources. See
+   * lib/sourceType.ts's getSourceType() for how the three source types
+   * (Applicant/LinkedIn/Agency) derive from this + linkedInMode. Added
+   * 2026-07-20. UNLIKE archiveReason's deferred-SCREENING_COLUMNS pattern,
+   * this column IS wired into the write path unconditionally (every
+   * saveScreening() insert includes it, not just agency-sourced saves) — so
+   * deferring the read-side wiring wouldn't actually reduce deploy-order
+   * risk here, the insert breaks everything regardless if the column is
+   * missing. supabase-migration-agency-source.sql MUST run before this
+   * deploys, full stop — see that file's header.
+   */
+  agencyName?: string;
   flagged: boolean;
   flagNote?: string;
   notes?: string;

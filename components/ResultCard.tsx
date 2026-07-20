@@ -10,6 +10,8 @@ import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusSelect } from "./StatusSelect";
 import { TrajectoryRenderer, countKeywordMatches } from "./TrajectoryRenderer";
+import SourceIcon from "./SourceIcon";
+import { getSourceType } from "@/lib/sourceType";
 import type { JDAnalysis } from "@/lib/types";
 
 // ── Main ResultCard ─────────────────────────────────────────────────────────
@@ -259,14 +261,7 @@ export function ResultCard({
                 {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
-            {result.linkedInMode && (
-              <span title="Resume sourced from LinkedIn" className="shrink-0">
-                <svg width="14" height="14" viewBox="0 0 24 24" aria-label="LinkedIn" className="shrink-0">
-                  <rect width="24" height="24" rx="4" fill="#0A66C2" />
-                  <path fill="#fff" d="M7.2 9.6H4.8V19.2h2.4V9.6zM6 8.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8zM19.2 13.2c0-2.2-1.2-3.8-3.2-3.8-1 0-1.8.5-2.4 1.3V9.6H11.2V19.2h2.4v-5.1c0-1.1.7-1.9 1.7-1.9 1 0 1.5.7 1.5 1.9v5.1h2.4v-6z" />
-                </svg>
-              </span>
-            )}
+            <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} />
           </div>
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>

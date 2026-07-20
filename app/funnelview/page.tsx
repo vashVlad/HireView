@@ -33,16 +33,22 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
   );
 }
 
+// Three-way source split — Agency added 2026-07-20 (Vlad's ask) alongside
+// Applied/Sourced (LinkedIn). Amber matches the Agency icon color used
+// elsewhere on this page and on ResultCard/All Candidates (SourceIcon).
 function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
-  const total = split.inbound + split.outbound;
+  const total = split.inbound + split.outbound + split.agency;
   const inboundPct = total > 0 ? Math.round((split.inbound / total) * 100) : 0;
+  const outboundPct = total > 0 ? Math.round((split.outbound / total) * 100) : 0;
+  const agencyPct = total > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex h-3 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
         <div className="h-full bg-blue-500" style={{ width: `${inboundPct}%` }} />
-        <div className="h-full bg-violet-500" style={{ width: `${100 - inboundPct}%` }} />
+        <div className="h-full bg-violet-500" style={{ width: `${outboundPct}%` }} />
+        <div className="h-full bg-amber-500" style={{ width: `${agencyPct}%` }} />
       </div>
-      <div className="flex items-center justify-between text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
           <span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Applied
           <span className="font-semibold tabular-nums">{split.inbound.toLocaleString()}</span>
@@ -50,6 +56,10 @@ function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
         <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
           <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Sourced (LinkedIn)
           <span className="font-semibold tabular-nums">{split.outbound.toLocaleString()}</span>
+        </span>
+        <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-500" /> Agency
+          <span className="font-semibold tabular-nums">{split.agency.toLocaleString()}</span>
         </span>
       </div>
     </div>
@@ -128,8 +138,9 @@ export default function FunnelViewPage() {
     ? {
         inbound: activeCandidates.filter((c) => c.source === "inbound").length,
         outbound: activeCandidates.filter((c) => c.source === "outbound").length,
+        agency: activeCandidates.filter((c) => c.source === "agency").length,
       }
-    : (data?.sourceSplit ?? { inbound: 0, outbound: 0 });
+    : (data?.sourceSplit ?? { inbound: 0, outbound: 0, agency: 0 });
 
   // Recruiter(s) working the active view — surfaced prominently in the Funnel
   // card header rather than only buried in the candidate table below. Added
@@ -159,6 +170,7 @@ export default function FunnelViewPage() {
     }));
     summaryRows.push({ Stage: "Archived/Rejected", Count: activeArchivedOrRejected, "% of Previous Stage": "—" });
     summaryRows.push({ Stage: "Sourced (LinkedIn)", Count: activeSourceSplit.outbound, "% of Previous Stage": "—" });
+    summaryRows.push({ Stage: "Agency", Count: activeSourceSplit.agency, "% of Previous Stage": "—" });
     summaryRows.push({ Stage: "Applied", Count: activeSourceSplit.inbound, "% of Previous Stage": "—" });
     const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
     summarySheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 20 }];
@@ -168,7 +180,7 @@ export default function FunnelViewPage() {
       return {
         Name: c.candidateName,
         Role: c.projectName,
-        Source: c.source === "outbound" ? "Sourced (LinkedIn)" : "Applied",
+        Source: c.source === "outbound" ? "Sourced (LinkedIn)" : c.source === "agency" ? `Agency (${c.agencyName ?? "—"})` : "Applied",
         Score: c.score,
         "Current Stage": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
         "Past Stage": pastStageLabel(c) === "—" ? "" : pastStageLabel(c),
@@ -313,7 +325,7 @@ export default function FunnelViewPage() {
               <h2 className="mb-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
                 Sourced vs. Applied {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}
               </h2>
-              {activeSourceSplit.inbound + activeSourceSplit.outbound === 0 ? (
+              {activeSourceSplit.inbound + activeSourceSplit.outbound + activeSourceSplit.agency === 0 ? (
                 <p className="py-2 text-center text-sm text-zinc-400">No data yet.</p>
               ) : (
                 <SourceSplit split={activeSourceSplit} />
@@ -379,9 +391,12 @@ export default function FunnelViewPage() {
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span
+                            title={c.source === "agency" ? `Agency: ${c.agencyName ?? "—"}` : undefined}
                             className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
                               c.source === "outbound"
                                 ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400"
+                                : c.source === "agency"
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
                                 : "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
                             }`}
                           >
@@ -391,7 +406,14 @@ export default function FunnelViewPage() {
                                 <path fill="#fff" d="M7.2 9.6H4.8V19.2h2.4V9.6zM6 8.4a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8zM19.2 13.2c0-2.2-1.2-3.8-3.2-3.8-1 0-1.8.5-2.4 1.3V9.6H11.2V19.2h2.4v-5.1c0-1.1.7-1.9 1.7-1.9 1 0 1.5.7 1.5 1.9v5.1h2.4v-6z" />
                               </svg>
                             )}
-                            {c.source === "outbound" ? "Sourced" : "Applied"}
+                            {c.source === "agency" && (
+                              <svg width="11" height="11" viewBox="0 0 24 24" aria-label="Agency" className="shrink-0">
+                                <rect width="24" height="24" rx="4" fill="#D97706" />
+                                <path fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" d="M8 8V6.8a1.6 1.6 0 0 1 1.6-1.6h4.8A1.6 1.6 0 0 1 16 6.8V8m-11 0h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" />
+                                <path fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" d="M4 13h16" />
+                              </svg>
+                            )}
+                            {c.source === "outbound" ? "Sourced" : c.source === "agency" ? (c.agencyName ?? "Agency") : "Applied"}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">

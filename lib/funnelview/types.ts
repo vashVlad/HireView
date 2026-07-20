@@ -8,7 +8,18 @@ export interface FunnelCandidate {
   projectName: string;
   recruiterId: string | null;
   recruiterEmail: string | null;
-  source: "inbound" | "outbound";
+  /**
+   * "outbound" = LinkedIn-sourced (linkedin_mode), "agency" = came in via an
+   * agency (agency_name set), "inbound" = ordinary applicant, the default.
+   * Kept as this inbound/outbound/agency naming rather than switching to
+   * lib/sourceType.ts's applicant/linkedin/agency strings, to minimize churn
+   * across this file's many existing `c.source === "outbound"` call sites —
+   * same three-way classification underneath (see getSourceType()). Agency
+   * added 2026-07-20, Vlad's ask.
+   */
+  source: "inbound" | "outbound" | "agency";
+  /** Set only when source === "agency". */
+  agencyName?: string | null;
   score: number;
   /** True if this score cleared the candidate's own project's score_threshold (defaults to 45 if the project has none set, or no project at all) — independent of current status, so a candidate manually archived later for an unrelated reason still counts as having passed. */
   passedThreshold: boolean;
@@ -34,6 +45,7 @@ export interface FunnelStageCount {
 export interface FunnelSourceSplit {
   inbound: number;
   outbound: number;
+  agency: number;
 }
 
 /** Same funnel shape as FunnelData's top-level stages, scoped to one project instead of blended across all of them. */
