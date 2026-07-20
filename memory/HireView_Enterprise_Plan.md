@@ -177,5 +177,26 @@ Remaining Phase 3 features reuse Teams architecture (1.3) and Credibility Checke
 
 ---
 
+## ENTERPRISE SCALING REQUIREMENTS — Brillio pilot (added 2026-07-17, from Team Demo feedback)
+
+Split by what Vlad can execute solo vs. what structurally requires Brillio's internal AI product group (Abibsha Kota, Sandeep Prani) or leadership sign-off. Grounded against the actual codebase, not assumptions:
+
+**Vlad can do now:**
+- Multi-key API routing — currently a single hard-coded `ANTHROPIC_API_KEY` in `lib/anthropic.ts`, one client, no per-team/project routing. Code change is straightforward; getting *additional company-billed keys issued* is the Brillio-side half (see below).
+- Data restriction guardrail — verified no compensation/salary field exists anywhere in the schema today, so this is a policy + a simple upload-time warning to add, not a rearchitecture.
+- Calibration onboarding for EA — `calibration_examples` table and like/dislike flow already ship. Feeding in Shubham/Gomati's past successful-hire resumes is just using the existing feature with real data, no new build.
+- Cross-project fraud pattern detection — Phase 1.1–1.4 (duplicate fingerprinting, candidate history alerts) already shipped and merged to main. Needs live-testing at real EA volume, not new engineering.
+- Pilot expansion (EA role, high volume) — infra already handles bulk upload; known constraint is `CONCURRENCY = 3` hardcoded in `app/api/screen-resumes/route.ts` (screening) and `cross-project-fit/route.ts` (fit suggestion) — functionally fine, just slow at hundreds of resumes. Raising it is a Vlad-side tuning task, capped by whatever rate limit the single API key actually has.
+- Lever integration prototype — today `leverUrl` is just a manual per-candidate link field, no real Lever API calls anywhere in the code. Vlad can prototype real sync logic, but Brillio has to grant Lever API access/decide the system boundary before it's real (see below).
+
+**Needs Brillio's AI product group / leadership:**
+- Dedicated database migration — provisioning and credentials for Brillio's secure internal DB aren't Vlad's to create; he can prep an export/migration script, but the destination has to come from their side.
+- Audit & compliance review — by definition an external review Vlad can't self-certify.
+- Additional API keys (billing/procurement) — the code-side routing is Vlad's, but the actual keys need to be issued under Brillio's account.
+- Lever integration scope/access — same story as above: prototype is Vlad's, the actual API grant and "is this an approved integration boundary" call is theirs.
+- Stakeholder alignment (Sandeep Prani, technical TA team) — a relationship/outreach action for Vlad to initiate, not something to build, but the *alignment itself* can't be unilaterally declared done.
+
+---
+
 *Drop this file into Cowork alongside BLUEPRINT_Operations_Systems_Builder.md.
 Every build session reads this before starting anything.*
