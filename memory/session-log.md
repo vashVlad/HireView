@@ -12,6 +12,47 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (newest of all, round 21) — Cross-project fit banner layout bug: text and button squeezed unreadable on narrow widths
+
+Vlad shared a screenshot (converted from HEIC via pillow-heif, sandbox has no native HEIC viewer) of the below-threshold "Stronger fit for X — scored Y there" banner on a post-screening ResultCard, on a narrow viewport — the paragraph and the "Transfer to X" button were both squeezed into unreadable, overlapping-looking narrow columns instead of laying out properly.
+
+- `components/ResultCard.tsx` — root cause: the row was a plain `flex items-center justify-between gap-3` with no `min-w-0` on the paragraph and no responsive stacking. Neither child had room to lay out on a narrow screen, so both got forced into tiny columns. Fixed: `flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3` (stacks vertically below `sm:`, side-by-side at `sm:` and up), `min-w-0` added to the paragraph so it wraps properly within its own row, button goes full-width below `sm:` and back to auto-width at `sm:` and up.
+- Checked for duplicate copies of this banner elsewhere (Pipeline/Candidates cards) — none found, this fit-suggestion banner only exists on the post-screening `ResultCard`.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+## 2026-07-20 (newest of all, round 20) — Reverted round 19, capped uploads at 3 resumes per screening request instead
+
+Vlad, right after I gave him an honest answer on whether round 19 would actually fix the batch-timeout: "You know. Let's get back to how it was. Just put a limit of three resumes upload at a time." My own answer was part of why — shortening only helps batches that happen to include low scorers, does nothing for a batch of strong candidates, and doesn't touch the real structural cause (2 sequential `CONCURRENCY = 3` waves inside one `maxDuration = 60` request).
+
+- Reverted `lib/scoreCandidate.ts`, `app/api/screen-resumes/route.ts`, `app/api/cross-project-fit/route.ts` — confirmed via `git diff` against the last commit that all three are byte-for-byte back to their pre-round-19 state.
+- New fix: `components/ResumeUploader.tsx` caps a batch at `MAX_FILES = 3` (drag-drop or file picker) — files past that aren't added, with a clear message explaining why. This guarantees every screening request is exactly one `CONCURRENCY` batch server-side — no second wave left to time out on. Pure client-side UI change, `app/api/screen-resumes/route.ts` untouched.
+- Full reasoning trail in `memory/decisions-log.md`.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+## 2026-07-20 (newest of all, round 19) — Shortened career trajectory for low-scoring candidates: do-not-touch exception, `lib/scoreCandidate.ts`
+
+Vlad: "let's pay less attention to candidates that score poorly. We can save time and tokens there by generating less information." Came right after diagnosing the 6-resume batch timeout (previous message) — this doesn't fix that timeout on its own, but trims the single biggest thing Claude generates for the candidates least likely to get a close read, which helps the average.
+
+- Asked Vlad directly (AskUserQuestion) on the two real judgment calls: approach (same single call, shorter output for low scorers — chosen — vs. a two-pass triage design that saves more but risks mis-triaging a borderline candidate) and what "poorly" means (his own configurable `score_threshold` minus a 10-point buffer, so borderline candidates still get full detail).
+- `lib/scoreCandidate.ts` — `SCORE_TOOL` became `buildScoreTool(lowScoreCutoff)`; both the tool schema's `careerTrajectory` description and a new prompt instruction block tell Claude to write the full per-role breakdown only when its own computed score is `scoreThreshold - 10` or above, and a compact 2-3 sentence overview otherwise. New optional `scoreThreshold: number = 45` param. Score/mustHaveScore/niceToHaveScore/recommendation logic completely untouched — one field's verbosity only.
+- `app/api/screen-resumes/route.ts` (do-not-touch exception, flagged) — one additive line, passes the already-in-scope `scoreThreshold` through as the new arg.
+- `app/api/cross-project-fit/route.ts` (normal file) — same change, passes `project.scoreThreshold` through; most of its calls are against projects the candidate scores poorly on by definition, so the benefit applies there too.
+- Full reasoning trail in `memory/decisions-log.md`.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- **Not measured** — reasoned and low-risk, but the actual time/token savings haven't been benchmarked against real screening batches yet.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+## 2026-07-20 (newest of all, round 18) — AlreadyScreenedCard's status is now editable, not just shown
+
+Vlad: "for already screened in this project candidates result cards let me also change the status instead of just showing it to me." Since 2026-07-17, re-uploading a file that exact-content-matched an existing screening showed a read-only status+reason chip on `AlreadyScreenedCard` (styled to look like `StatusSelect`'s joined pill but with nothing to actually click).
+
+- `components/AlreadyScreenedCard.tsx` — swapped the static chip for the real `StatusSelect` component when `onStatusChange` is passed (falls back to the old read-only chip if a future call site doesn't wire it up — defensive, not expected to trigger today). `existing.id` (the real `screenings` row id, already present on `CheckExistingResult["existing"]`) is what gets PATCHed.
+- `app/projects/[id]/page.tsx` (`ScreenTab`) — `handleStatusChange`/`handleArchiveReasonChange` (already used by the regular post-screening `ResultCard`) gained a second branch that also updates `existingMatches` state when the id matches an entry there (harmless no-op map when it's a regular result's id instead). Wired both into the `<AlreadyScreenedCard>` call site. Reuses the exact same PATCH `/api/history/[id]` call and the same `onScreeningFieldSaved` sync into the parent's `screenings` state (round 3's fix) — so a status change made here shows up on the Pipeline tab immediately too, same as everywhere else.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
 ## 2026-07-20 (newest of all, round 17) — Recruiter filter moved next to the score sort dropdown
 
 Vlad: "move the recruiter drop-down from the filters lower to the drop-down of the score filter on the project pipeline page." The recruiter `<select>` used to sit inline among the status/flag filter pills; the score sort `<select>` was the only thing pinned to the far right (`ml-auto`) of that row.

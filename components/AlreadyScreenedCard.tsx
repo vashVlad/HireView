@@ -2,14 +2,23 @@
 
 import { useState } from "react";
 import { ScoreBadge } from "@/components/ScoreBadge";
-import { STATUS_COLORS } from "@/components/StatusSelect";
-import { CANDIDATE_STATUS_LABELS, type CheckExistingResult } from "@/lib/types";
+import { STATUS_COLORS, StatusSelect } from "@/components/StatusSelect";
+import { CANDIDATE_STATUS_LABELS, type CandidateStatus, type CheckExistingResult } from "@/lib/types";
 
 interface AlreadyScreenedCardProps {
   fileName: string;
   existing: NonNullable<CheckExistingResult["existing"]>;
   file: File;
   onForceRescore: (file: File) => void;
+  /**
+   * Vlad's ask, 2026-07-20: "let me also change the status instead of just
+   * showing it to me" — this card used to render a read-only copy of
+   * StatusSelect's joined status+reason pill (see the comment this replaced,
+   * dated 2026-07-17). Both optional so the card still renders fine (falls
+   * back to the old static pill) if a future call site doesn't wire them up.
+   */
+  onStatusChange?: (id: number, status: CandidateStatus) => void;
+  onArchiveReasonChange?: (id: number, archiveReason: string) => void;
 }
 
 /**
@@ -31,6 +40,8 @@ export function AlreadyScreenedCard({
   existing,
   file,
   onForceRescore,
+  onStatusChange,
+  onArchiveReasonChange,
 }: AlreadyScreenedCardProps) {
   const [rescoring, setRescoring] = useState(false);
 
@@ -42,26 +53,42 @@ export function AlreadyScreenedCard({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-semibold text-zinc-900 dark:text-zinc-50">{existing.candidateName}</p>
-              {/*
-               * Read-only equivalent of StatusSelect's joined status+reason
-               * pill (components/StatusSelect.tsx) — same visual grammar
-               * (single rounded pill, `·`-divider via a low-opacity
-               * currentColor rule), just static text instead of two <select>
-               * elements since this card has nothing to edit. Reason lives
-               * IN the chip, not as a separate line below it — Vlad's ask,
-               * 2026-07-17, after the first version split them.
-               */}
-              <span
-                className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_COLORS[existing.status]}`}
-              >
-                {CANDIDATE_STATUS_LABELS[existing.status]}
-                {existing.status === "archived" && existing.archiveReason && (
-                  <>
-                    <span className="h-2.5 w-px shrink-0 bg-current opacity-25" />
-                    {existing.archiveReason}
-                  </>
-                )}
-              </span>
+              {onStatusChange ? (
+                // Editable, 2026-07-20 (Vlad's ask) — same StatusSelect used
+                // on the post-screening ResultCard and Pipeline/All
+                // Candidates cards, so a recruiter can move this candidate
+                // straight from a re-upload without switching to the
+                // Pipeline tab. onClick stopPropagation matches every other
+                // StatusSelect call site (this card isn't itself clickable,
+                // but keeps the pattern consistent).
+                <div onClick={(e) => e.stopPropagation()}>
+                  <StatusSelect
+                    status={existing.status}
+                    onChange={(status) => onStatusChange(existing.id, status)}
+                    archiveReason={existing.archiveReason}
+                    onArchiveReasonChange={
+                      onArchiveReasonChange ? (reason) => onArchiveReasonChange(existing.id, reason) : undefined
+                    }
+                  />
+                </div>
+              ) : (
+                // Fallback: read-only equivalent of StatusSelect's joined
+                // status+reason pill, kept for any call site that doesn't
+                // wire up onStatusChange. Same visual grammar (single
+                // rounded pill, `·`-divider via a low-opacity currentColor
+                // rule) as the editable version above.
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium ${STATUS_COLORS[existing.status]}`}
+                >
+                  {CANDIDATE_STATUS_LABELS[existing.status]}
+                  {existing.status === "archived" && existing.archiveReason && (
+                    <>
+                      <span className="h-2.5 w-px shrink-0 bg-current opacity-25" />
+                      {existing.archiveReason}
+                    </>
+                  )}
+                </span>
+              )}
             </div>
             <p className="mt-0.5 text-sm text-amber-700 dark:text-amber-400">
               Already screened in this project — identical resume, skipped scoring.

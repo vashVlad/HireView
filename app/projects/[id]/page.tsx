@@ -335,6 +335,14 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+    // Vlad's ask, 2026-07-20: "let me also change the status" on
+    // AlreadyScreenedCard, not just view it — that card's data lives in
+    // existingMatches (a CheckExistingResult, not a CandidateResult), so it
+    // needs its own branch of this same optimistic update. Harmless no-op
+    // map over existingMatches when id belongs to a regular result instead.
+    setExistingMatches((prev) =>
+      prev.map((m) => (m.match.existing?.id === id ? { ...m, match: { ...m.match, existing: { ...m.match.existing!, status } } } : m))
+    );
     const statusUpdatedAt = new Date().toISOString();
     onScreeningFieldSaved?.(id, { status, statusUpdatedAt });
     try {
@@ -351,6 +359,10 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // to, same as StatusStageControl's reason segment on Pipeline/All Candidates.
   async function handleArchiveReasonChange(id: number, archiveReason: string) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, archiveReason } : r)));
+    // Same AlreadyScreenedCard branch as handleStatusChange above.
+    setExistingMatches((prev) =>
+      prev.map((m) => (m.match.existing?.id === id ? { ...m, match: { ...m.match, existing: { ...m.match.existing!, archiveReason } } } : m))
+    );
     onScreeningFieldSaved?.(id, { archiveReason });
     try {
       await fetch(`/api/history/${id}`, {
@@ -641,6 +653,8 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               existing={match.existing!}
               file={file}
               onForceRescore={handleForceRescore}
+              onStatusChange={handleStatusChange}
+              onArchiveReasonChange={handleArchiveReasonChange}
             />
           ))}
         </ul>
