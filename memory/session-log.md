@@ -12,6 +12,99 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (newest of all, round 15) — Recruiter-attribution backfill script written
+
+Follow-up on round 12's bug fix (screenings.user_id silently null for admin-run screenings). Fix was forward-only; Vlad asked to "get it out of the way" — i.e. write the backfill now rather than leave it as an open question.
+
+- New `scripts/backfill-recruiter-attribution.ts` — same shape/conventions as the existing `scripts/backfill-resume-hashes.ts` (manual `.env.local` loader, per-row try/catch, safe to re-run, only selects rows still missing). Selects every `screenings` row with `user_id IS NULL`, looks up that screening's own `screening_actions` row where `action_type = 'created'` (earliest one, ordered by `created_at`), and copies its `user_id` back onto the `screenings` row.
+- **Why this is trustworthy and not a guess:** confirmed via `git diff -w 7014c65 -- lib/screenings.ts` that the `logAction(...)`/`actingUser` resolution for the "created" action already existed *before* this session's fix — only the `screenings.user_id` column write itself was ever wrong. So `screening_actions`' "created" row has always recorded the true acting user for every screening ever saved through this app; this script just closes the gap by copying that already-correct value back.
+- Rows with no recoverable "created" action (shouldn't exist post-2026-07-08, when action logging was added, but handled defensively) are left alone and reported in a final failure summary, not guessed at.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+**Update — build-verified, committed, pushed, PR open, script run against real Supabase.** Claude Code: `npm install`/`tsc --noEmit`/`npm run build` all real-clean (44 routes). Confirmed the migration from round 5 actually applied via a live REST query (`select agency_name from screenings limit 1` → `200`, not just Vlad's say-so) before touching anything. Read every file in the diff against this file's/decisions-log.md's description — matched exactly, do-not-touch check (`git diff origin/main -- app/api/screen-resumes/route.ts app/api/screenings/save-one/route.ts`) empty as expected. `feat/agency-source-and-pipeline-live-sync`'s only commit (`7014c65`) had already merged via PR #40, so per the handoff's branch logic this went on a fresh branch off `main`: `fix/pipeline-flags-merge-cards-source-colors-and-recruiter-backfill`, commit `2e3af9a`. Manual compare URL (`gh` still not on PATH): `https://github.com/vashVlad/HireView/compare/main...fix/pipeline-flags-merge-cards-source-colors-and-recruiter-backfill?expand=1`.
+Ran `npx tsx scripts/backfill-recruiter-attribution.ts` against live Supabase: **found 29 rows with `user_id: null`, 22 backfilled, 7 unrecoverable** (`#227` Grashma Chaparla, `#228` Jason Reddy, `#229` Kishore Kumar Sundara, `#230` Ashish Prakash Upadhye, `#231` Gauri Hoshing, `#234` James McClung, `#235` Mark Chen — all "no \"created\" action found in `screening_actions`", i.e. pre-2026-07-08 rows from before action logging existed, exactly the case the script's own header anticipated). Re-queried the REST API afterward (`user_id=is.null`, `Prefer: count=exact`) and confirmed `content-range: 0-6/7` — exactly the 7 the script reported, no drift. Those 7 will keep showing no recruiter on FunnelView/Pipeline until resolved manually (if the recruiter is known some other way) — same "flag, don't guess" precedent as the resume-hash backfill's own unrecoverable-row handling.
+Same stale-`.git/index.lock` hiccup as the previous two handoffs this week — no live `git.exe` process holding it, removed, working tree confirmed untouched via `git status` before and after, retried clean.
+**Next:** Vlad to open the PR via the link above and merge; decide whether the 7 unrecoverable rows are worth chasing down manually.
+
+## 2026-07-20 (newest of all, round 14) — Post-verification cleanup: Applicant icon → green, Agency icon → red
+
+- Vlad's two quick asks after the round-12/13 verification pass: change the Applicant `SourceIcon` fill from blue to green, then Agency from amber to red.
+- `components/SourceIcon.tsx`: Applicant fill `#2563EB` → `#16A34A` (green-600); Agency fill `#D97706` → `#DC2626` (red-600). LinkedIn's blue left untouched (brand color, not part of this scheme).
+- Threaded the same two colors through every other spot that mirrors a source's identity in an accent color (not just the icon itself), to avoid a green/red icon sitting inside a now-mismatched blue/amber active-state background:
+  - `app/funnelview/page.tsx`: `SourceSplit` bar segment + legend dot + table badge pill (Applied: blue→green, Agency: amber→red). Violet (Sourced/LinkedIn) left as-is — it was already an independent accent, not tied to the LinkedIn-blue icon.
+  - `app/projects/[id]/page.tsx` (ScreenTab's 3-way pill selector + Pipeline card's inline source-editor popover): Applicant pill/ring blue→green, Agency pill/ring/input-border amber→red.
+  - `app/candidates/page.tsx` (mirrors the Pipeline popover exactly): same ring/input-border swap.
+- **No do-not-touch files touched** — confirmed via `git diff -w --stat 7014c65`, this round's diff only spans `components/SourceIcon.tsx`, `app/funnelview/page.tsx`, `app/projects/[id]/page.tsx`, `app/candidates/page.tsx`.
+- `npx tsc --noEmit -p tsconfig.json`: clean after each edit.
+- Not yet committed — same batch as round 3-13 below, all still sitting on top of `7014c65` (now merged into `main` via PR #40 — this local branch is stale, next commit needs a fresh branch off updated `main`).
+
+## 2026-07-20 (newest of all, round 12) — Real recruiter-attribution bug found and fixed
+
+- Vlad's report: FunnelView never showed the recruiter for candidates he'd screened, even though the same candidate's Activity timeline correctly showed him. Full root-cause writeup in decisions-log.md.
+- Short version: `saveScreening()` wrote `screenings.user_id` from a query-scoping helper (`userIdFilter()`) that deliberately returns `undefined` for admin — so every admin-run screening saved with no recruiter attributed at all, invisible to FunnelView's recruiter column and Pipeline's recruiter filter. The Activity timeline already worked around this same problem for its own "created" log entry; `saveScreening()`'s `user_id` column write now reuses that same true-acting-user resolution.
+- **Important:** only fixes it going forward. Anything screened before this fix (including everything currently showing no recruiter) still has `user_id: null` in the database and needs a backfill to show a recruiter retroactively — not written, flagged for Vlad to decide if wanted.
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed.
+
+## 2026-07-20 (newest of all, round 11) — Found the real bug: All Candidates page had no source icon or editor at all
+
+- Root cause of "agency candidates not showing on FunnelView"/"no source icon on older cards": traced to `app/candidates/page.tsx`. Its `SourceIcon` usage never passed `showApplicant`, so any "applicant"-sourced candidate (the default — which is every older candidate, since Agency/LinkedIn-as-a-choice didn't exist before this session) rendered NO icon at all. And unlike PipelineTab, this page never got the click-to-edit-source popover in the first place — so there was no way to set Christopher Darden or Omeir Ash to Agency (Angie) from here even if the icon had shown.
+- Fixed: `CandidateCard` (`app/candidates/page.tsx`) now has the exact same clickable source icon + inline Applicant/LinkedIn/Agency popover as `PipelineTab` (`app/projects/[id]/page.tsx`) — same visual pattern, same optimistic-update-with-rollback PATCH shape. New `onSourceChange` prop, parent `handleSourceChange` function mirrors `handleFlagToggle`'s existing pattern in this file.
+- This was never actually a FunnelView bug — FunnelView's data layer was correct all along (confirmed by re-reading `lib/funnelview/data.ts`'s select/derivation, no issue found there). The candidates simply had no way to be tagged Agency in the first place from the page Vlad was using.
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed. **Next step for Vlad:** use the new source icon on Christopher Darden's and Omeir Ash's cards (All Candidates or Pipeline, both now support it) to set them to Agency → "Angie".
+
+## 2026-07-20 (newest of all, round 10) — FunnelView's Applicant source had no icon
+
+- Vlad's reminder: FunnelView's Source column badge was missing an icon for Applicant — LinkedIn and Agency both had one, Applicant just showed plain text "Applied", inconsistent with ResultCard/Candidates/Pipeline (all show an Applicant icon too via `SourceIcon`'s `showApplicant`).
+- Replaced the two hand-inlined LinkedIn/Agency SVGs in `app/funnelview/page.tsx`'s table badge with the shared `SourceIcon` component (`showApplicant` on), via a small `toSourceIconType()` mapper since `FunnelCandidate.source` uses "inbound"/"outbound"/"agency" naming (kept distinct from `lib/sourceType.ts`'s naming to minimize churn — see that type's comment) rather than switching this whole file over. Net effect: all three source types now show a matching icon in this badge, and any future icon tweaks in `SourceIcon` apply here automatically instead of needing a fourth copy-paste.
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed.
+
+## 2026-07-20 (newest of all, round 9) — Same Ring-to-merge replacement on All Candidates
+
+- Vlad confirmed: yes, do the same Ring→merge replacement on `app/candidates/page.tsx` (round 8 was Pipeline-only, flagged this page as a known gap).
+- This file's `CandidateCard` is already a proper standalone component (unlike Pipeline's inline `.map()` body), so the port was mechanical: swapped `cluster`/`isHighlighted`/`isDimmed`/`onClusterClick` props for `mergePosition?: "solo"|"first"|"middle"|"last"` and `clusterIsFraud?: boolean`, same rounding/margin/border logic as PipelineTab. Removed the Ring badge button, the `highlightCluster` state, the "Highlighting Ring N" filter chip, and its entry in the clear-all-filters button/condition.
+- Added the same `clusterHasFraudSignal()` helper and "Same person"/"Possible duplicate" header divider as Pipeline, reusing the existing "Ring grouping" sort tiebreaker (matchClusters.index) so merge position reads off array neighbors with no new reordering.
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed.
+
+## 2026-07-20 (newest of all, round 8) — Ring badges replaced entirely with card merging, Pipeline only
+
+- Vlad's explicit follow-up: replace Rings with merging cards, full stop — not just the name-match-only case from round 7.
+- `app/projects/[id]/page.tsx` `PipelineTab`: every `matchClusters` group (duplicateMatchId/historyAlertMatchId/nameMatchId — any of them) now merges into one visual card, including fraud-signal clusters that round 7 deliberately excluded. Renamed `isNameMatchOnlyCluster` → `clusterHasFraudSignal` — now used only to pick the merged header's styling (neutral gray "Same person · N submissions" vs. rose "Possible duplicate · N submissions" + rose-tinted card border when the cluster carries a real `duplicateFlag`/`historyAlertType`), not to gate whether merging happens at all.
+- Removed the whole Ring click-to-highlight mechanic as dead weight now that merging replaces it: `highlightCluster`/`setHighlightCluster` state, the "Highlighting Ring N · clear" filter chip, the border-2/box-shadow highlight styling, the opacity-dim-non-members styling, and the standalone "Ring N · size" badge button (the only thing that ever set `highlightCluster`). The per-candidate "Duplicate detected"/"Previously seen"/"Known fraud pattern" badges next to the name are untouched — those carry specific fraud detail the generic Ring badge never did, still show on merged fraud cards.
+- **Scope note:** this only touches the Pipeline tab. `app/candidates/page.tsx` still has its own separate, older Ring/highlightCluster implementation (own state, own click-to-highlight) — not touched today, flagged here in case Vlad wants the same replacement there too.
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed.
+
+## 2026-07-20 (newest of all, round 7) — Name-matched candidates merge into one visual card
+
+- Vlad's ask: two cards for the same person (linked via "NAME MATCH" + a Ring badge) should look like one merged card instead of two separate floating cards.
+- Confirmed with Vlad first (AskUserQuestion): display-only merge — no data is combined/archived/deleted, both `screenings` rows stay fully independent underneath (own status, own flag, own everything). Higher-scored submission shown as primary (i.e., first in the merged stack).
+- `app/projects/[id]/page.tsx` `PipelineTab`: added `isNameMatchOnlyCluster()` — a cluster (from the existing `matchClusters`/Ring union-find, which already merges duplicateMatchId + historyAlertMatchId + nameMatchId edges together) only merges visually if NONE of its members carry a real fraud signal (`duplicateFlag`/`historyAlertType`). Fraud rings are completely untouched — still separate cards with the clickable Ring badge, exactly as before; collapsing a suspicious duplicate together would work against a fraud review, not help it.
+- Reused an existing fact for free: `filteredScreenings`'s sort already places same-cluster members adjacent (2026-07-17 "Ring grouping" tiebreaker) — so merge position (solo/first/middle/last) is read straight off array neighbors, no new reordering logic needed. A lone visible member of an otherwise-larger cluster (its match filtered out by search/status/etc.) just renders solo, unchanged.
+- Visual merge is pure CSS: a small "Same person · N submissions" header divider (same pattern as the existing Archived-section divider) sits above the group; each member's outer rounding/margin adjusts by position (`-mt-3` cancels the list's `gap-3` between merged members so they sit flush) so the whole group reads as one continuous card. The "Name match" badge and the Ring badge are hidden on merged members (redundant now that they're visibly adjacent) — both still show normally for a name-match that isn't currently merged (partial filter visibility).
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed.
+
+## 2026-07-20 (newest of all, round 6) — Source editor redesigned: inline, no Save/Cancel
+
+- Vlad's follow-up: the source-edit popover (round 5, below) should show the alternative options inline to the right of the current source icon, not as a block below the card, and drop the Save/Cancel buttons — the click itself commits.
+- `app/projects/[id]/page.tsx` `PipelineTab`: removed the below-row popover entirely. Clicking the source icon now reveals the other two source icons directly to its right (current one ringed to show it's active); clicking Applicant or LinkedIn commits immediately via `handleSourceChange` (already closed the popover as part of saving, no change needed there). Clicking Agency reveals a small inline name input right there — Enter, or clicking away with text entered, commits; Escape or blurring empty just closes without saving. No explicit Save/Cancel anywhere in this control now.
+- `tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed.
+
+## 2026-07-20 (newest of all, round 5) — Edit source from the Pipeline card + Flagged filter
+
+- Vlad's ask: (1) let a recruiter set/correct a candidate's source after the fact, right from the Pipeline card, not just at initial screening; (2) add a Flagged filter to Pipeline.
+- **Agency migration confirmed run** — Vlad ran `ALTER TABLE screenings ADD COLUMN IF NOT EXISTS agency_name text;` in Supabase after it caused a live FunnelView 500 earlier this session. This work assumes that column exists.
+- **Editable source:** `lib/screenings.ts`'s `updateScreening()` gained `linkedInMode?`/`agencyName?` fields (pure metadata patch — does NOT re-run `scoreCandidate`, matches how every other field on this function already works). `app/api/history/[id]/route.ts`'s PATCH handler accepts both. `app/projects/[id]/page.tsx`'s `PipelineTab`: the `SourceIcon` on each card is now a button (shows even for Applicant via a new `showApplicant` prop on `SourceIcon`, so there's something to click on the common case too) that opens an inline popover — same "click → popover → PATCH" shape as the existing flag-note editor right next to it — with the same 3-way pill picker used in ScreenTab, plus agency-name input. Optimistic local update with rollback on failure.
+- **Flagged filter:** new `flaggedFilter` toggle pill next to the status pills (orthogonal to status, so not folded into `STATUS_PILLS`), wired into the existing `.filter()` chain. Reuses the same flag glyph already used elsewhere on this page.
+- `tsc --noEmit -p tsconfig.json` full-project: clean.
+- Not yet committed — next handoff.
+
 ## 2026-07-20 (newest of all, round 4) — Three-way source: Applicant / Sourced (LinkedIn) / Agency
 
 - Vlad's ask: add Agency as a third source type (free-text agency name), alongside the existing Applicant/LinkedIn, shown on ResultCard/Candidates/Pipeline icons and on FunnelView. See decisions-log.md for the full design writeup and DO-NOT-TOUCH exception details.

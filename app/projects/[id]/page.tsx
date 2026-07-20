@@ -24,7 +24,7 @@ import type {
 import type { ScreeningAction } from "@/lib/screeningActions";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
-import { computeMatchClusters } from "@/lib/matchClusters";
+import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
 import { getSourceType, type SourceType } from "@/lib/sourceType";
 
@@ -672,46 +672,49 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       <CalibrationPanel projectId={project.id} />
 
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
           <button type="button" onClick={() => setSourceType("applicant")}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "applicant"
-                ? "bg-blue-600 text-white"
+                ? "bg-green-600 text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
+            <SourceIcon type="applicant" showApplicant size={14} />
             Applicants
           </button>
           <button type="button" onClick={() => setSourceType("linkedin")}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "linkedin"
                 ? "bg-violet-600 text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
+            <SourceIcon type="linkedin" size={14} />
             Sourced (LinkedIn)
           </button>
           <button type="button" onClick={() => setSourceType("agency")}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "agency"
-                ? "bg-amber-600 text-white"
+                ? "bg-red-600 text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
+            <SourceIcon type="agency" size={14} />
             Agency
           </button>
-          <span className="text-xs text-zinc-400 dark:text-zinc-500">
-            {sourceType === "linkedin"
-              ? "— adjusts scoring for profile PDFs"
-              : sourceType === "agency"
-              ? "— label only, scoring unaffected"
-              : "— default, no scoring adjustment"}
-          </span>
         </div>
+        <span className="text-sm text-zinc-400 dark:text-zinc-500">
+          {sourceType === "linkedin"
+            ? "— adjusts scoring for profile PDFs"
+            : sourceType === "agency"
+            ? "— label only, scoring unaffected"
+            : "— default, no scoring adjustment"}
+        </span>
         {sourceType === "agency" && (
           <input
             type="text"
             placeholder="Agency name…"
             value={agencyNameInput}
             onChange={(e) => setAgencyNameInput(e.target.value)}
-            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm placeholder-zinc-400 focus:border-amber-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
+            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm placeholder-zinc-400 focus:border-red-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
           />
         )}
       </div>
@@ -772,14 +775,10 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   // can be narrowed to "who screened this" the same way status/score already
   // filter. null = all recruiters.
   const [recruiterFilter, setRecruiterFilter] = useState<string | null>(null);
+  // Flagged filter, 2026-07-20 (Vlad's ask). Orthogonal to status, so a
+  // standalone toggle pill rather than an entry in STATUS_PILLS.
+  const [flaggedFilter, setFlaggedFilter] = useState(false);
   const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
-  // Click-to-highlight: clicking a Ring chip highlights that cluster's
-  // members (colored glow) and dims everyone else, without removing anyone
-  // from the list. Was a filter (removed non-members entirely) until
-  // 2026-07-17 — Vlad reported that was a regression from an earlier
-  // session's rebuild; the original behavior only ever highlighted. See the
-  // matching note on app/candidates/page.tsx.
-  const [highlightCluster, setHighlightCluster] = useState<number | null>(null);
   const [expandedId, setExpandedIdState] = useState<number | null>(externalExpandedId ?? null);
   function setExpandedId(id: number | null) {
     setExpandedIdState(id);
@@ -801,6 +800,15 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [pendingFlagId, setPendingFlagId] = useState<number | null>(null);
   const [pendingFlagNote, setPendingFlagNote] = useState("");
+  // Editable source, 2026-07-20 (Vlad's ask): clicking the SourceIcon on a
+  // Pipeline card opens an inline popover (same pattern as the flag-note
+  // popover right above) to set/correct Applicant/LinkedIn/Agency after the
+  // fact. pendingSourceAgencyName is seeded from the candidate's current
+  // value when the popover opens (see the click handler below), not always
+  // starting blank, so correcting a typo doesn't mean retyping the whole name.
+  const [pendingSourceId, setPendingSourceId] = useState<number | null>(null);
+  const [pendingSourceType, setPendingSourceType] = useState<SourceType>("applicant");
+  const [pendingSourceAgencyName, setPendingSourceAgencyName] = useState("");
   // Tracks candidates flipped to "archived" via the status dropdown during
   // THIS session, specifically so the reason picker stays visible in place
   // instead of the card sinking immediately (see isSettledArchived below).
@@ -858,6 +866,25 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
   const matchClusters = useMemo(() => computeMatchClusters(screenings), [screenings]);
 
+  // Card merging, 2026-07-20 (Vlad's ask): replaces the old "Ring N" badge +
+  // click-to-highlight mechanic entirely. Every matchClusters group (any of
+  // duplicateMatchId/historyAlertMatchId/nameMatchId — see
+  // lib/matchClusters.ts) now renders as one visually merged card instead of
+  // separate cards linked by a clickable Ring chip. Display-only: doesn't
+  // touch any data, every member screening stays fully independent
+  // underneath (own status, own flag, own everything) — this only changes
+  // how they're grouped in the DOM. Fraud-signal clusters (duplicateFlag/
+  // historyAlertType present on any member) get a red-tinted header instead
+  // of the neutral gray one, so a merged card still reads as a fraud flag at
+  // a glance rather than looking identical to an ordinary resubmission.
+  function clusterHasFraudSignal(cluster: MatchCluster | undefined): boolean {
+    if (!cluster) return false;
+    return cluster.memberIds.some((id) => {
+      const m = screenings.find((r) => r.id === id);
+      return m?.duplicateFlag || m?.historyAlertType != null;
+    });
+  }
+
   // Distinct recruiters present in this project, sorted by email for a
   // stable dropdown order. Falls back to the raw id for anyone missing an
   // email (matches attachRecruiterEmails' own fallback in lib/screenings.ts).
@@ -874,6 +901,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
       if (statusFilter && s.status !== statusFilter) return false;
       if (recruiterFilter && s.recruiterId !== recruiterFilter) return false;
+      if (flaggedFilter && !s.flagged) return false;
       return true;
     })
     .slice()
@@ -940,6 +968,28 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flagged: next, flagNote: note }) });
     } catch {
       setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, flagged: current } : s));
+    }
+  }
+
+  // Saves the source picked in the popover below. Applicant/LinkedIn clear
+  // any stored agency name (mutually exclusive, matches ScreenTab's picker);
+  // Agency requires a non-empty name or the save is a no-op (button is
+  // disabled in that case too — see the popover JSX).
+  async function handleSourceChange(id: number, type: SourceType, agencyName: string) {
+    const linkedInMode = type === "linkedin";
+    const trimmedAgencyName = type === "agency" ? agencyName.trim() : "";
+    if (type === "agency" && !trimmedAgencyName) return;
+    const previous = screenings.find((s) => s.id === id);
+    setPendingSourceId(null);
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, linkedInMode, agencyName: trimmedAgencyName || undefined } : s));
+    try {
+      await fetch(`/api/history/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linkedInMode, agencyName: trimmedAgencyName }),
+      });
+    } catch {
+      if (previous) setScreenings((prev) => prev.map((s) => s.id === id ? previous : s));
     }
   }
 
@@ -1015,12 +1065,18 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               {p.label}
             </button>
           ))}
-          {highlightCluster != null && (
-            <button type="button" onClick={() => setHighlightCluster(null)}
-              className="flex items-center gap-1 rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">
-              Highlighting Ring {highlightCluster} · clear
-            </button>
-          )}
+          <button type="button" onClick={() => setFlaggedFilter((v) => !v)}
+            className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              flaggedFilter
+                ? "bg-amber-500 text-white"
+                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+            }`}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill={flaggedFilter ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" className="shrink-0">
+              <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 22V15" strokeLinecap="round" />
+            </svg>
+            Flagged
+          </button>
           {recruiterOptions.length > 1 && (
             <div className="flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
@@ -1069,6 +1125,29 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         // archived cards (idx 0 would be archived — divider still renders,
         // which is fine, it just labels the single-group list).
         const isFirstArchived = isSettledArchived(s) && !isSettledArchived(filteredScreenings[idx - 1]);
+        // Card merging (continued from the clusterHasFraudSignal comment
+        // above): the existing "Ring grouping" sort tiebreaker (see
+        // filteredScreenings's .sort() above) already places every member of
+        // the same cluster adjacent to each other, so merge position can be
+        // read straight off array neighbors — no separate reordering needed.
+        // "first"/"middle"/"last" only apply when 2+ members of a cluster are
+        // actually adjacent-and-visible right now; a lone visible member (its
+        // match filtered out) just renders solo, badges and all.
+        const cluster = matchClusters.get(s.id);
+        const isMergeable = cluster != null;
+        const prevSameCluster = isMergeable && idx > 0 && matchClusters.get(filteredScreenings[idx - 1].id)?.index === cluster!.index;
+        const nextSameCluster = isMergeable && idx < filteredScreenings.length - 1 && matchClusters.get(filteredScreenings[idx + 1].id)?.index === cluster!.index;
+        const mergePosition: "solo" | "first" | "middle" | "last" =
+          !isMergeable || (!prevSameCluster && !nextSameCluster) ? "solo"
+          : !prevSameCluster ? "first"
+          : nextSameCluster ? "middle"
+          : "last";
+        let mergeGroupSize = 0;
+        if (mergePosition === "first") {
+          for (let j = idx; j < filteredScreenings.length && matchClusters.get(filteredScreenings[j].id)?.index === cluster!.index; j++) mergeGroupSize++;
+        }
+        const clusterIsFraud = clusterHasFraudSignal(cluster);
+        const mergeIsFraud = mergePosition === "first" && clusterIsFraud;
         return (
           <Fragment key={s.id}>
           {isFirstArchived && (
@@ -1080,9 +1159,30 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
             </li>
           )}
-          <li data-candidate-id={s.id} className={`scroll-mt-24 rounded-2xl border bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
-            matchClusters.get(s.id) && highlightCluster === matchClusters.get(s.id)!.index
-              ? "border-2"
+          {mergePosition === "first" && (
+            <li aria-hidden className={`flex items-center gap-1.5 rounded-t-2xl border border-b-0 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide ${
+              mergeIsFraud
+                ? "border-rose-200 bg-rose-50/70 text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400"
+                : "border-zinc-200 bg-zinc-50/70 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40 dark:text-zinc-500"
+            }`}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
+                <circle cx="9" cy="9" r="4" /><circle cx="15" cy="15" r="4" />
+              </svg>
+              {mergeIsFraud ? "Possible duplicate" : "Same person"} · {mergeGroupSize} submissions
+            </li>
+          )}
+          <li data-candidate-id={s.id} className={`${mergePosition !== "solo" ? "-mt-3" : ""} scroll-mt-24 bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
+            mergePosition === "solo" ? "rounded-2xl"
+            : mergePosition === "first" ? "rounded-t-none rounded-b-none"
+            : mergePosition === "last" ? "rounded-t-none rounded-b-2xl"
+            : "rounded-none"
+          } ${
+            // Fraud-cluster merged cards get a rose border instead of the
+            // default gray, so a merged group still reads as flagged at a
+            // glance (replaces the old per-click Ring highlight, which this
+            // card-merging feature supersedes entirely).
+            mergePosition !== "solo" && clusterIsFraud
+              ? "border border-rose-200 dark:border-rose-500/30"
               : "border border-zinc-200 dark:border-zinc-800"
           } ${
             // Card Visuals, 2026-07-15 (Vlad's ask): archived candidates are
@@ -1094,21 +1194,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             // opacity was the actual complaint, so `expanded` clears the
             // toned-out treatment entirely while it's open.
             isSettledArchived(s) && !expanded ? "opacity-50 saturate-[0.6] hover:opacity-90" : ""
-          } ${
-            // Ring highlight, 2026-07-17: clicking a Ring chip used to remove
-            // every non-member card from the list entirely — Vlad reported
-            // that was a regression from an earlier rebuild; the original
-            // behavior only ever dimmed non-members while keeping the whole
-            // list visible. See the matching note on app/candidates/page.tsx.
-            highlightCluster != null && matchClusters.get(s.id)?.index !== highlightCluster && !expanded
-              ? "opacity-40 saturate-[0.7] hover:opacity-80"
-              : ""
-          }`}
-          style={
-            matchClusters.get(s.id) && highlightCluster === matchClusters.get(s.id)!.index
-              ? { borderColor: matchClusters.get(s.id)!.color, boxShadow: `0 0 0 3px ${matchClusters.get(s.id)!.color}33` }
-              : undefined
-          }>
+          }`}>
             <div role="button" tabIndex={0}
               onClick={() => setExpandedId(expanded ? null : s.id)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedId(expanded ? null : s.id); }}
@@ -1158,7 +1244,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       {s.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
                     </Link>
                   )}
-                  {s.nameMatchId != null && (
+                  {s.nameMatchId != null && mergePosition === "solo" && (
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); setExpandedId(s.nameMatchId ?? null); }}
@@ -1168,28 +1254,60 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       Name match
                     </button>
                   )}
-                  <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} />
+                  <button type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (pendingSourceId === s.id) { setPendingSourceId(null); return; }
+                      setPendingSourceType(getSourceType(s));
+                      setPendingSourceAgencyName(s.agencyName ?? "");
+                      setPendingSourceId(s.id);
+                    }}
+                    title="Click to set source"
+                    className="shrink-0 rounded-full transition-opacity hover:opacity-70">
+                    <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} showApplicant />
+                  </button>
+                  {pendingSourceId === s.id && (
+                    <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
+                      <button type="button" title="Applicant"
+                        onClick={() => handleSourceChange(s.id, "applicant", "")}
+                        className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "applicant" ? "ring-2 ring-green-400" : "opacity-40 hover:opacity-100"}`}>
+                        <SourceIcon type="applicant" size={13} showApplicant />
+                      </button>
+                      <button type="button" title="Sourced (LinkedIn)"
+                        onClick={() => handleSourceChange(s.id, "linkedin", "")}
+                        className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "linkedin" ? "ring-2 ring-violet-400" : "opacity-40 hover:opacity-100"}`}>
+                        <SourceIcon type="linkedin" size={13} />
+                      </button>
+                      {pendingSourceType === "agency" ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={pendingSourceAgencyName}
+                          onChange={(e) => setPendingSourceAgencyName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSourceChange(s.id, "agency", pendingSourceAgencyName);
+                            if (e.key === "Escape") setPendingSourceId(null);
+                          }}
+                          onBlur={() => {
+                            if (pendingSourceAgencyName.trim()) handleSourceChange(s.id, "agency", pendingSourceAgencyName);
+                            else setPendingSourceId(null);
+                          }}
+                          placeholder="Agency name…"
+                          className="w-28 rounded-full border border-red-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-red-500 dark:border-red-500/40 dark:bg-zinc-900 dark:text-zinc-100"
+                        />
+                      ) : (
+                        <button type="button" title="Agency"
+                          onClick={() => setPendingSourceType("agency")}
+                          className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-red-400" : "opacity-40 hover:opacity-100"}`}>
+                          <SourceIcon type="agency" agencyName={s.agencyName} size={13} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {s.flagged && s.flagNote && (
                     <span className="shrink-0 truncate rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:bg-amber-500/15 dark:text-amber-400">{s.flagNote}</span>
                   )}
-                  {(() => {
-                    const cluster = matchClusters.get(s.id);
-                    if (!cluster) return null;
-                    return (
-                      <button
-                        type="button"
-                        title={`${cluster.size} candidates linked in this ring — click to highlight`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHighlightCluster((prev) => prev === cluster.index ? null : cluster.index);
-                        }}
-                        className="flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-zinc-600 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: cluster.color }} />
-                        {cluster.label} · {cluster.size}
-                      </button>
-                    );
-                  })()}
                 </div>
                 {/* Meta row — date · notes indicator */}
                 <div className="flex items-center gap-1.5">
