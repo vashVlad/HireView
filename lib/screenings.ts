@@ -16,6 +16,7 @@ import { logAction } from "./screeningActions";
 import { getProject } from "./projects";
 import { getPrimaryTeamId } from "./teams";
 import { getAuthUser } from "./auth";
+import { getRecruiterEmailMap } from "./recruiters";
 import type {
   CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
   Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage,
@@ -56,6 +57,7 @@ interface ScreeningRow {
   name_match_id: number | null;
   previous_status: CandidateStatus | null;
   archive_reason: string | null;
+  user_id: string | null;
   created_at: string;
 }
 
@@ -95,8 +97,23 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.name_match_id != null ? { nameMatchId: row.name_match_id } : {}),
     ...(row.previous_status != null ? { previousStatus: row.previous_status } : {}),
     ...(row.archive_reason ? { archiveReason: row.archive_reason } : {}),
+    ...(row.user_id != null ? { recruiterId: row.user_id } : {}),
     createdAt: row.created_at,
   };
+}
+
+/**
+ * Resolves each record's recruiterId (raw auth user id) to a human-readable
+ * recruiterEmail, mirroring lib/funnelview/data.ts's getFunnelData() pattern.
+ * Separate from rowToRecord because the id->email lookup is one Supabase
+ * Auth admin call for the whole batch, not per-row.
+ */
+async function attachRecruiterEmails(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  if (!records.some((r) => r.recruiterId != null)) return records;
+  const emailByUserId = await getRecruiterEmailMap();
+  return records.map((r) =>
+    r.recruiterId != null ? { ...r, recruiterEmail: emailByUserId.get(r.recruiterId) ?? r.recruiterId } : r
+  );
 }
 
 // ── Name match (same-project, free) ─────────────────────────────────────────
@@ -507,7 +524,7 @@ export async function saveScreening(params: {
 // ── List ───────────────────────────────────────────────────────────────────
 
 const SCREENING_COLUMNS =
-  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, archive_reason, created_at";
+  "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, archive_reason, user_id, created_at";
 
 /**
  * Fills in the matched candidate's name and project (name + id) for any
@@ -581,7 +598,7 @@ export async function listScreenings(
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
 
-  return enrichHistoryAlerts((data ?? []).map(rowToRecord));
+  return attachRecruiterEmails(await enrichHistoryAlerts((data ?? []).map(rowToRecord)));
 }
 
 export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord[]> {
@@ -592,7 +609,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
     .in("id", ids)
     .returns<ScreeningRow[]>();
   if (error) throw error;
-  return enrichHistoryAlerts((data ?? []).map(rowToRecord));
+  return attachRecruiterEmails(await enrichHistoryAlerts((data ?? []).map(rowToRecord)));
 }
 
 // ── Get resume ─────────────────────────────────────────────────────────────

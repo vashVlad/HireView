@@ -707,6 +707,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [screenings, setScreenings] = useState(initialScreenings);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
+  // Recruiter filter, 2026-07-20 (Vlad's ask): screenings.user_id is now
+  // surfaced as recruiterId/recruiterEmail (lib/screenings.ts, mirrors
+  // FunnelView's getRecruiterEmailMap pattern), so multi-recruiter projects
+  // can be narrowed to "who screened this" the same way status/score already
+  // filter. null = all recruiters.
+  const [recruiterFilter, setRecruiterFilter] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
   // Click-to-highlight: clicking a Ring chip highlights that cluster's
   // members (colored glow) and dims everyone else, without removing anyone
@@ -720,11 +726,17 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     setExpandedIdState(id);
     onExpandedChange?.(id);
   }
-  // Auto-scroll to the expanded card when navigating from Tracker tab
+  // Auto-scroll to the expanded card when navigating from Tracker tab (or,
+  // 2026-07-20, from a FunnelView deep link). `block: "start"` (was
+  // "center") so the recruiter lands on the top of the card — name, score,
+  // status — instead of wherever the middle happens to fall on a long
+  // expanded card. Needs the matching `scroll-mt-*` on the card element
+  // itself (see the `<li data-candidate-id>` below) so "start" doesn't land
+  // the card's top edge underneath SiteHeader's sticky bar.
   useEffect(() => {
     if (expandedId == null) return;
     const el = document.querySelector(`[data-candidate-id="${expandedId}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [expandedId]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -787,10 +799,22 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
   const matchClusters = useMemo(() => computeMatchClusters(screenings), [screenings]);
 
+  // Distinct recruiters present in this project, sorted by email for a
+  // stable dropdown order. Falls back to the raw id for anyone missing an
+  // email (matches attachRecruiterEmails' own fallback in lib/screenings.ts).
+  const recruiterOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const s of screenings) {
+      if (s.recruiterId != null) byId.set(s.recruiterId, s.recruiterEmail ?? s.recruiterId);
+    }
+    return [...byId.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [screenings]);
+
   const filteredScreenings = screenings
     .filter((s) => {
       if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
       if (statusFilter && s.status !== statusFilter) return false;
+      if (recruiterFilter && s.recruiterId !== recruiterFilter) return false;
       return true;
     })
     .slice()
@@ -886,9 +910,15 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     }
   }
 
+  // "Recruiter Screen" was missing here — Vlad flagged it, 2026-07-20. It's
+  // a real CandidateStatus (lib/types.ts) that sits between New and
+  // Contacted in the actual pipeline order, but this pill list was never
+  // updated to include it, so there was no way to filter down to it even
+  // though candidates can carry that status.
   const STATUS_PILLS: { label: string; value: CandidateStatus | null }[] = [
     { label: "All", value: null },
     { label: "New", value: "new_applicant" },
+    { label: "Recruiter Screen", value: "recruiter_screen" },
     { label: "Contacted", value: "contacted" },
     { label: "Screening", value: "screening" },
     { label: "Archived", value: "archived" },
@@ -932,6 +962,24 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               Highlighting Ring {highlightCluster} · clear
             </button>
           )}
+          {recruiterOptions.length > 1 && (
+            <div className="flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <select
+                value={recruiterFilter ?? ""}
+                onChange={(e) => setRecruiterFilter(e.target.value || null)}
+                className="max-w-[160px] truncate bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
+              >
+                <option value="">All recruiters</option>
+                {recruiterOptions.map(([id, email]) => (
+                  <option key={id} value={id}>{email}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="ml-auto flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
               <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
@@ -973,7 +1021,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
             </li>
           )}
-          <li data-candidate-id={s.id} className={`rounded-2xl border bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
+          <li data-candidate-id={s.id} className={`scroll-mt-24 rounded-2xl border bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
             matchClusters.get(s.id) && highlightCluster === matchClusters.get(s.id)!.index
               ? "border-2"
               : "border border-zinc-200 dark:border-zinc-800"
@@ -2283,6 +2331,28 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             .then((r) => r.json())
             .then((d) => setTrackerData(d.entries ?? {}))
             .catch(() => {});
+        }
+
+        // Deep-link support (2026-07-20, Vlad's ask — FunnelView candidate
+        // names link here). Also fixes a pre-existing gap: the "click to jump
+        // to matching candidate" duplicate/history-alert links already built
+        // `?tab=pipeline` URLs (ResultCard.tsx), but nothing on this page ever
+        // read that param — they landed on Filters every time. Read via
+        // window.location.search (not useSearchParams()) to avoid Next.js's
+        // Suspense-boundary requirement for that hook; this only needs a
+        // one-time read right after data loads, not reactive URL tracking.
+        const urlParams = new URLSearchParams(window.location.search);
+        const candidateParam = urlParams.get("candidate");
+        const tabParam = urlParams.get("tab");
+        const validTabs: Tab[] = ["filters", "screen", "pipeline", "tracker", "settings"];
+        if (candidateParam) {
+          const candidateId = Number(candidateParam);
+          if (!Number.isNaN(candidateId) && allScreenings.some((s) => s.id === candidateId)) {
+            setTab("pipeline");
+            setExpandedId(candidateId);
+          }
+        } else if (tabParam && (validTabs as string[]).includes(tabParam)) {
+          setTab(tabParam as Tab);
         }
       })
       .catch(console.error)
