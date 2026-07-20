@@ -66,6 +66,26 @@ const SCORE_TOOL = {
   },
 };
 
+// Weighting curve, 2026-07-20 (Vlad's explicit ask, do-not-touch exception —
+// see memory/decisions-log.md for the full reasoning trail). Intent: the JD
+// alone should drive scoring when there's little or no real screening
+// experience yet for a role, but as calibration examples accumulate from
+// actual recruiter decisions, they become a more precise signal than the JD
+// text itself for what "qualified" really means for THIS role in practice —
+// so trust in them should scale up with count, gradually, not as a hard
+// cutover. Thresholds (4 / 8) are a first judgment call, not derived from any
+// measured data — flagged for Vlad to confirm once he's seen it live against
+// a role with a real, growing example set.
+function calibrationWeightGuidance(count: number): string {
+  if (count >= 8) {
+    return `You have ${count} calibration examples for this role — a substantial, reliable sample built from real recruiter decisions. Weight resemblance to these HIREABLE examples' core competencies, depth, and practical experience ABOVE literal job-description requirement-matching. Treat the job description as a secondary sanity check at this point — flag only a genuine, disqualifying mismatch against it — and let these examples define what "qualified" actually looks like for this specific role, since they reflect real outcomes more precisely than the JD text can.`;
+  }
+  if (count >= 4) {
+    return `You have ${count} calibration examples for this role — a moderate, growing sample. Weight them close to equally with the job description: let resemblance to the HIREABLE examples meaningfully raise or lower a score, not just nudge it — but don't let them override a genuine job-description must-have gap on their own.`;
+  }
+  return `You have ${count} calibration example${count === 1 ? "" : "s"} for this role — still a small sample. Treat the job description as primary; use ${count === 1 ? "this example" : "these examples"} only as a light, secondary signal, since ${count === 1 ? "one example isn't" : "this few aren't"} enough yet to trust as the real bar for this role. That trust should grow as more examples accumulate from real screening decisions.`;
+}
+
 function buildCalibrationBlock(calibrationExamples: CalibrationExample[]): string {
   const examples = calibrationExamples
     .map((example) => {
@@ -75,7 +95,7 @@ function buildCalibrationBlock(calibrationExamples: CalibrationExample[]): strin
     })
     .join("\n\n---\n\n");
 
-  return `The recruiter has provided example resumes from past candidates they advanced or rejected for this type of role. Use these as anchors — they show what a hireable candidate looks like in practice, not as additional requirements to match against. If the candidate being evaluated has a similar depth, relevance, and coverage of core requirements as the HIREABLE examples, that should be reflected positively in their score.
+  return `The recruiter has provided example resumes from past candidates they advanced or rejected for this type of role — accumulated from real screening decisions on this project, not hypothetical. ${calibrationWeightGuidance(calibrationExamples.length)}
 
 ${examples}`;
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
+import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening } from "@/lib/screenings";
 import { saveScreeningBatch } from "@/lib/screeningBatches";
 import { getProject } from "@/lib/projects";
@@ -83,8 +84,14 @@ export async function POST(request: NextRequest) {
   const errors: ScreenResumesError[] = [];
 
   // Best-effort: a calibration library issue shouldn't block screening.
-  // Scoped to the current project so examples from other projects don't bleed in.
-  const calibrationExamples = await listCalibrationExamples(projectId, userId).catch(() => []);
+  // Scoped to the current project so examples from other projects don't bleed
+  // in — deliberately NOT scoped to userId (2026-07-20, Vlad's explicit ask,
+  // do-not-touch exception, see memory/decisions-log.md): calibration
+  // examples should accumulate project-wide as real screening experience and
+  // benefit every recruiter working this role, not just whoever uploaded
+  // them. Matching change on the display side in
+  // app/api/calibration-examples/route.ts's GET handler.
+  const calibrationExamples = await listCalibrationExamples(projectId).catch(() => []);
 
   // Extract text for every resume first — this is local parsing, no API
   // calls, so it's free to fully parallelize.
@@ -113,15 +120,32 @@ export async function POST(request: NextRequest) {
 
   async function score(resume: (typeof parsed)[number]) {
     try {
-      const result = await scoreCandidate(
-        jobDescription,
-        resume.fileName,
-        resume.text,
-        calibrationExamples,
-        roleContext,
-        linkedInContext,
-        linkedInModeOverride
-      );
+      // DO-NOT-TOUCH EXCEPTION (flagged, 2026-07-20 perf pass — see
+      // decisions-log.md): fingerprinting (fraud/duplicate detection) only
+      // needs the raw resume text, not the score, so it never actually had to
+      // wait for scoring to finish — it was just written sequentially before.
+      // Running both Claude calls concurrently cuts the wait to roughly
+      // whichever one is slower instead of the sum of both, with no change to
+      // what either call does or what the response contains. A fingerprint
+      // failure resolves to `null` (not a rejection) so it can never fail the
+      // scoring half of this Promise.all — saveScreening treats an explicit
+      // `null` as "don't retry, just skip duplicate/history matching for this
+      // save," same as its pre-existing best-effort behavior.
+      const [result, fingerprint] = await Promise.all([
+        scoreCandidate(
+          jobDescription,
+          resume.fileName,
+          resume.text,
+          calibrationExamples,
+          roleContext,
+          linkedInContext,
+          linkedInModeOverride
+        ),
+        generateFingerprint(resume.text).catch((err) => {
+          console.error("Fingerprint generation failed (scoring unaffected):", err);
+          return null;
+        }),
+      ]);
       results.push(result);
 
       // Persist every screened candidate, regardless of score (Teti's
@@ -141,11 +165,18 @@ export async function POST(request: NextRequest) {
       // soon as the response is sent, which would silently drop an
       // un-awaited write.
       try {
+        // DO-NOT-TOUCH EXCEPTION (flagged, 2026-07-20 perf pass — see
+        // decisions-log.md): passes the resume text already extracted above
+        // (in `parsed`, for scoring) through to saveScreening instead of
+        // letting it silently re-extract the same PDF/DOCX a second time
+        // internally. Same text, zero behavior change — pure perf.
         const { id } = await saveScreening({
           result,
           jobDescription,
           resumeFile: resume.buffer,
           resumeMimeType: resume.mimeType,
+          resumeText: resume.text,
+          fingerprint,
           linkedInMode: linkedInModeOverride,
           projectId,
           userId,

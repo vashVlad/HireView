@@ -49,9 +49,15 @@ export async function POST(request: NextRequest) {
 
   const buffer = Buffer.from(await resumeFile.arrayBuffer());
 
-  // Verify text is extractable before saving
+  // Verify text is extractable before saving — and keep the result (2026-07-20
+  // perf pass, DO-NOT-TOUCH EXCEPTION per this file's existing convention,
+  // see decisions-log.md): this used to extract the text just to check it
+  // doesn't throw, discard it, then saveScreening silently re-extracted the
+  // same PDF/DOCX again internally. Passing it through below removes that
+  // second, fully redundant parse — same text, zero behavior change.
+  let extractedResumeText: string;
   try {
-    await extractResumeText(resumeFile.name, buffer);
+    extractedResumeText = await extractResumeText(resumeFile.name, buffer);
   } catch {
     return NextResponse.json({ error: "Could not read the resume file" }, { status: 400 });
   }
@@ -71,6 +77,7 @@ export async function POST(request: NextRequest) {
     jobDescription: jobDescriptionField,
     resumeFile: buffer,
     resumeMimeType: mimeType,
+    resumeText: extractedResumeText,
     linkedInMode,
     projectId,
     userId,

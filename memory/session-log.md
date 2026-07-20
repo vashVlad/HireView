@@ -12,6 +12,22 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (latest) — Perf audit: fixed double resume-text extraction, flagged two bigger findings unfixed
+
+- Vlad asked for a full pass on screening speed before merging today's changes ("no empty prompts or anything that take up screening time"). Full detail in decisions-log.md.
+- **Fixed:** `lib/screenings.ts`'s `saveScreening()` was silently re-extracting resume text from the PDF/DOCX a second time internally, even though both callers (`app/api/screen-resumes/route.ts`, `app/api/screenings/save-one/route.ts`) already had it extracted. Added an optional `resumeText` param, wired both callers through — one fewer parse per resume, zero behavior change.
+- **Flagged, deliberately not fixed (Vlad's explicit call):** calibration examples have no cap on how many get sent per screening prompt — unbounded growth, worse now that today's project-wide sharing accelerates accumulation. Vlad's answer: leave uncapped for now, current volume nowhere near a real problem, flagged for revisit once a project's calibration set actually grows large. Logged in open-questions.md too.
+- **Fixed (was flagged, then resolved same session):** fingerprinting used to run as a second, sequential Claude call after scoring inside the concurrency-limited batch loop. Walked through the "make it async" tradeoff with Vlad (faster, but fraud badges would land a beat after the score) — then realized there was a third option: the two calls don't depend on each other at all (fingerprinting only needs raw resume text), so they can just run concurrently. `Promise.all([scoreCandidate(...), generateFingerprint(...).catch(() => null)])` in `app/api/screen-resumes/route.ts`, fingerprint passed through to `saveScreening()` instead of it generating its own. Cuts the wait to roughly the slower of the two calls instead of the sum, with fraud badges still arriving in the same response — no tradeoff needed after all. Full detail in decisions-log.md.
+- Not build-verified in this sandbox. Needs Claude Code pass before merge.
+
+## 2026-07-20 (even later) — Calibration: project-wide scoping + count-aware JD-to-calibration weighting curve
+
+- Real complaint that started this: Vlad uploaded Sandeep Chavan as a calibration example, screened the same resume, got a 44 despite Chavan already being in the real hiring process. Diagnosed before touching anything — full trail in decisions-log.md. Short version: calibration was designed as a soft JD-match nudge, not an override, and examples were siloed per-recruiter (`userIdFilter`), so a self-referential single example in one account likely wasn't doing anything useful.
+- Asked Vlad directly (AskUserQuestion) on the two real judgment calls: project-wide vs per-recruiter scoping (chose project-wide), hard threshold vs gradual count-aware weighting curve (chose gradual).
+- **Do-not-touch exception, Vlad's explicit ask, both flagged in decisions-log.md:** `lib/scoreCandidate.ts` (new `calibrationWeightGuidance(count)` — under 4 examples JD stays primary, 4-7 weighted near-equally, 8+ calibration weighted above literal JD matching) and `app/api/screen-resumes/route.ts` (calibration fetch dropped its `userId` scoping, now project-wide). Also touched the non-protected `app/api/calibration-examples/route.ts` GET to match on the display side.
+- Thresholds (4/8) are a first judgment call, not measured — flagged in decisions-log.md and open-questions.md for Vlad to confirm once there's a real, growing calibration set to test against.
+- Not build-verified in this sandbox, not live-tested. Needs Claude Code build-verification + do-not-touch diff confirmation (only the two flagged files + one normal route touched), then Vlad's own live test.
+
 ## 2026-07-20 (later) — Credibility section's LinkedIn indicator: text chip → real logo
 
 - `components/CredibilitySection.tsx`: after a LinkedIn cross-reference check, the Credibility section header showed a text pill reading "LinkedIn" instead of the actual LinkedIn mark. Replaced with the same 24x24 "in" logo SVG (`#0A66C2` background, white glyph) already used consistently for the source-sourced-from-LinkedIn badge in `ResultCard.tsx`/Pipeline/`app/candidates/page.tsx` (fixed to match each other 2026-07-17) — same asset, same visual language, just a new place it needed to appear. Only this one spot used text instead of the logo.
