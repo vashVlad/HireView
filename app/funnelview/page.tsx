@@ -5,7 +5,7 @@ import * as XLSX from "xlsx";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
-import type { FunnelData } from "@/lib/funnelview/types";
+import type { FunnelCandidate, FunnelData } from "@/lib/funnelview/types";
 
 function StageBar({ stages }: { stages: FunnelData["stages"] }) {
   const max = Math.max(...stages.map((s) => s.count), 1);
@@ -60,9 +60,27 @@ const STAGE_LABELS: Record<string, string> = {
   recruiter_screen: "Recruiter Screen",
   contacted: "Contacted",
   screening: "Screening",
-  interview: "Interview",
+  interview: "Screening",
   archived: "Archived",
 };
+
+// "Past Stage" — 2026-07-20 fix. `previousTrackerStage` only exists once a
+// candidate has actually entered the Tracker (TA/L1/L2/Offer/Reject) and
+// moved between at least two of those stages, so it was always blank for
+// anyone still in the pre-Tracker funnel (New Applicant → Recruiter Screen →
+// Contacted → Screening) — even though those candidates clearly did come
+// from somewhere. Falls back to `previousStatus` (trigger-maintained on
+// every status UPDATE, same source as the funnel's own "Reached Out" logic
+// in lib/funnelview/data.ts) so a candidate's most recent prior position
+// shows regardless of whether that transition happened inside the Tracker
+// or in the status pipeline before it.
+function pastStageLabel(c: FunnelCandidate): string {
+  if (c.previousTrackerStage) return c.previousTrackerStage;
+  if (c.previousStatus && c.previousStatus !== c.status) {
+    return STAGE_LABELS[c.previousStatus] ?? c.previousStatus;
+  }
+  return "—";
+}
 
 export default function FunnelViewPage() {
   const [data, setData] = useState<FunnelData | null>(null);
@@ -152,7 +170,7 @@ export default function FunnelViewPage() {
         Source: c.source === "outbound" ? "Sourced" : "Applied",
         Score: c.score,
         "Current Stage": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
-        "Previous Stage": c.previousTrackerStage ?? "",
+        "Past Stage": pastStageLabel(c) === "—" ? "" : pastStageLabel(c),
         Recruiter: c.recruiterEmail ?? "",
         "Screened Date": new Date(c.createdAt).toLocaleDateString(),
         "Fraud Flags (Y/N)": c.hasFraudFlag ? "Y" : "N",
@@ -330,6 +348,7 @@ export default function FunnelViewPage() {
                       <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Candidate</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Role</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Stage</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Past Stage</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Source</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Recruiter</th>
                     </tr>
@@ -341,11 +360,9 @@ export default function FunnelViewPage() {
                         <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{c.projectName}</td>
                         <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
                           {c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status}
-                          {c.previousTrackerStage && c.trackerStage && c.previousTrackerStage !== c.trackerStage && (
-                            <span className="ml-1.5 text-xs text-zinc-400">
-                              (from {c.previousTrackerStage})
-                            </span>
-                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-zinc-400 dark:text-zinc-500">
+                          {pastStageLabel(c)}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span

@@ -12,6 +12,20 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (later) — Credibility section's LinkedIn indicator: text chip → real logo
+
+- `components/CredibilitySection.tsx`: after a LinkedIn cross-reference check, the Credibility section header showed a text pill reading "LinkedIn" instead of the actual LinkedIn mark. Replaced with the same 24x24 "in" logo SVG (`#0A66C2` background, white glyph) already used consistently for the source-sourced-from-LinkedIn badge in `ResultCard.tsx`/Pipeline/`app/candidates/page.tsx` (fixed to match each other 2026-07-17) — same asset, same visual language, just a new place it needed to appear. Only this one spot used text instead of the logo.
+- No logic change — `isLinkedIn` gating and everything else in the header untouched.
+
+## 2026-07-20 — FunnelView: Past Stage column added, then fixed to cover the pre-Tracker funnel too
+
+- `app/funnelview/page.tsx`: the on-page candidate table only ever surfaced a candidate's previous tracker stage as small inline text under the current stage ("(from L1)"), not its own column — the data (`previousTrackerStage`) was already computed correctly in `lib/funnelview/data.ts`, just not given a first-class column. Added a dedicated "Past Stage" `<th>`/`<td>` right after "Stage", removed the now-redundant inline annotation. The Excel export already had this as a full column (`"Previous Stage"`) — renamed to "Past Stage" to match.
+- Confirmed the Export button already scopes to whichever role is selected in the dropdown (shared `selectedProjectId` state drives table + export together, was already correct, nothing to fix there).
+- **Real bug, same session:** Vlad noticed Past Stage only ever showed a value for candidates in Tracker stages (TA/L1/L2/Offer/Reject). Root cause: `previousTrackerStage` comes from the `tracker` table's `previous_stage` column, which only exists once a candidate has entered the Tracker and moved between at least two stages there — anyone still in the pre-Tracker funnel (New Applicant → Recruiter Screen → Contacted → Screening) has no tracker row at all, so the field was always null for them even though they clearly came from somewhere. Fixed with a new `pastStageLabel()` helper that falls back to `previousStatus` (already on `FunnelCandidate`, trigger-maintained) when there's no tracker history yet — same fallback pattern the "Stage" column itself already uses (`trackerStage ?? STAGE_LABELS[status]`). Wired into both the table and the export.
+- No data-layer or migration changes — `previousTrackerStage` and `previousStatus` were both already correct in `lib/funnelview/data.ts`, this was purely a display-layer gap.
+- Not build-verified in this sandbox (known mount artifact makes `tsc`/build output here unreliable — see 2026-07-10 entries) — verified by direct read of the full diff instead. Needs Vlad's own build pass + a look at the live page before merge.
+- Same-session, Vlad's ask: `STAGE_LABELS.interview` relabeled `"Interview"` → `"Screening"`. Dead code either way — `CandidateStatus` no longer includes `"interview"` since the earlier pipeline-status restructuring, so this key can never actually match real data — but changed as asked rather than left inconsistent.
+
 ## 2026-07-17 (later still) — Code-review pass on the 7-item testing brief (`fix/resume-hash-write-and-cancel-button-and-ring-highlight`)
 
 - No live app access this session (docs-only folder was mounted at first; once repointed to the real `C:\Portfolio\HireView` tree there was still no way to run `npm run dev` or click through the UI from this sandbox) — so this was a direct source read of all 7 items against the uploaded testing brief, not a live click-through. `npx tsc --noEmit` reconfirmed the same mount-layer artifact logged 2026-07-10 (cascading fake syntax errors in files just confirmed correct via `Read`) — ignored, not treated as real.
