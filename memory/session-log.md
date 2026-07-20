@@ -12,6 +12,23 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (newest of all, round 17) — Recruiter filter moved next to the score sort dropdown
+
+Vlad: "move the recruiter drop-down from the filters lower to the drop-down of the score filter on the project pipeline page." The recruiter `<select>` used to sit inline among the status/flag filter pills; the score sort `<select>` was the only thing pinned to the far right (`ml-auto`) of that row.
+
+- `app/projects/[id]/page.tsx` (Pipeline tab's filter row) — both dropdowns are now wrapped in one shared `ml-auto` flex group, recruiter first then score/sort, so they render together on the right edge of the filter row regardless of whether the recruiter dropdown is present (it's conditionally hidden entirely when there's only one recruiter — `recruiterOptions.length > 1`). Purely a layout move — no filtering logic touched.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+## 2026-07-20 (newest of all, round 16) — Source-editor popover no longer re-shows the already-chosen source
+
+Vlad: "Remove the already chosen source icon from the list when I try to change it on the result card." The popover's alternatives row used to always render all of Applicant/LinkedIn (plus Agency, unless the current source is already Agency — see below), with the currently-active one just ring-highlighted rather than actually removed — a redundant repeat of the source already shown by the anchor icon to its left.
+
+- `app/projects/[id]/page.tsx` (Pipeline card) and `app/candidates/page.tsx` (mirrors it exactly) — the Applicant and LinkedIn buttons in the popover's alternatives row are now each conditionally rendered only `if (getSourceType(s) !== "<that type>")`; when currently selected, that button no longer renders at all (not just de-highlighted). Simplified their className since the ring-highlight branch is now unreachable (a button never renders while representing the current source).
+- **Agency intentionally left as-is** — it already avoided this problem a different way: opening the popover while Agency is the current source auto-reveals the editable agency-name input (not a duplicated icon button) via `pendingSourceType` being seeded from `getSourceType(s)` on open, which lets a recruiter fix a typo in the agency name without switching away and back. Filtering "current source out of the list" the same way Applicant/LinkedIn now work would have removed that rename-in-place capability, so it wasn't touched.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
 ## 2026-07-20 (newest of all, round 15) — Recruiter-attribution backfill script written
 
 Follow-up on round 12's bug fix (screenings.user_id silently null for admin-run screenings). Fix was forward-only; Vlad asked to "get it out of the way" — i.e. write the backfill now rather than leave it as an open question.

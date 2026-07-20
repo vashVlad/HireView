@@ -1077,37 +1077,39 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
             </svg>
             Flagged
           </button>
-          {recruiterOptions.length > 1 && (
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {recruiterOptions.length > 1 && (
+              <div className="flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <circle cx="12" cy="7" r="4"/>
+                </svg>
+                <select
+                  value={recruiterFilter ?? ""}
+                  onChange={(e) => setRecruiterFilter(e.target.value || null)}
+                  className="max-w-[160px] truncate bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
+                >
+                  <option value="">All recruiters</option>
+                  {recruiterOptions.map(([id, email]) => (
+                    <option key={id} value={id}>{email}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round"/>
-                <circle cx="12" cy="7" r="4"/>
+                <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
               </svg>
               <select
-                value={recruiterFilter ?? ""}
-                onChange={(e) => setRecruiterFilter(e.target.value || null)}
-                className="max-w-[160px] truncate bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc")}
+                className="bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
               >
-                <option value="">All recruiters</option>
-                {recruiterOptions.map(([id, email]) => (
-                  <option key={id} value={id}>{email}</option>
-                ))}
+                <option value="default">Default</option>
+                <option value="desc">Score ↓</option>
+                <option value="asc">Score ↑</option>
               </select>
             </div>
-          )}
-          <div className="ml-auto flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-900">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-zinc-400">
-              <path d="M3 6h18M6 12h12M10 18h4" strokeLinecap="round"/>
-            </svg>
-            <select
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc")}
-              className="bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
-            >
-              <option value="default">Default</option>
-              <option value="desc">Score ↓</option>
-              <option value="asc">Score ↑</option>
-            </select>
           </div>
         </div>
       </div>
@@ -1269,16 +1271,20 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   {pendingSourceId === s.id && (
                     <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
-                      <button type="button" title="Applicant"
-                        onClick={() => handleSourceChange(s.id, "applicant", "")}
-                        className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "applicant" ? "ring-2 ring-green-400" : "opacity-40 hover:opacity-100"}`}>
-                        <SourceIcon type="applicant" size={13} showApplicant />
-                      </button>
-                      <button type="button" title="Sourced (LinkedIn)"
-                        onClick={() => handleSourceChange(s.id, "linkedin", "")}
-                        className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "linkedin" ? "ring-2 ring-violet-400" : "opacity-40 hover:opacity-100"}`}>
-                        <SourceIcon type="linkedin" size={13} />
-                      </button>
+                      {getSourceType(s) !== "applicant" && (
+                        <button type="button" title="Applicant"
+                          onClick={() => handleSourceChange(s.id, "applicant", "")}
+                          className="rounded-full p-0.5 opacity-40 transition-opacity hover:opacity-100">
+                          <SourceIcon type="applicant" size={13} showApplicant />
+                        </button>
+                      )}
+                      {getSourceType(s) !== "linkedin" && (
+                        <button type="button" title="Sourced (LinkedIn)"
+                          onClick={() => handleSourceChange(s.id, "linkedin", "")}
+                          className="rounded-full p-0.5 opacity-40 transition-opacity hover:opacity-100">
+                          <SourceIcon type="linkedin" size={13} />
+                        </button>
+                      )}
                       {pendingSourceType === "agency" ? (
                         <input
                           autoFocus
