@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
 import { extractResumeText } from "./parseResume";
-import { generateFingerprint } from "./generateFingerprint";
+import { generateFingerprint, type ResumeFingerprint } from "./generateFingerprint";
 import { hashResumeText, normalizeCandidateName } from "./resumeContentHash";
 import { extractCandidateNameFromPdf, looksLikeMissingName } from "./extractCandidateNameFallback";
 import {
@@ -219,6 +219,33 @@ export async function saveScreening(params: {
    * behavior, e.g. for callers with no project context.
    */
   scoreThreshold?: number;
+  /**
+   * Pre-extracted resume text, when the caller already has it (both current
+   * callers do — app/api/screen-resumes/route.ts extracts once up front to
+   * parallelize parsing across a batch, save-one/route.ts extracts once to
+   * verify the file is readable). Passing it through here skips a second,
+   * fully redundant PDF/DOCX parse that used to happen unconditionally below
+   * — same resume, same bytes, same result, just recomputed. Optional and
+   * falls back to extracting internally, so this is backward-compatible with
+   * any future caller that doesn't have the text on hand. 2026-07-20 perf
+   * pass, see decisions-log.md.
+   */
+  resumeText?: string;
+  /**
+   * Pre-computed fingerprint, when the caller already generated one (2026-07-20
+   * perf pass — see decisions-log.md). Fingerprinting only needs the raw resume
+   * text, not the score, so it doesn't actually have to wait for scoring to
+   * finish — a caller that kicks it off in parallel with scoreCandidate() can
+   * pass the result straight through here instead of letting this function
+   * generate a second, redundant fingerprint sequentially. Optional; falls
+   * back to generating it internally so this stays backward-compatible.
+   * Pass explicit `null` (not just omit the field) when the caller already
+   * attempted fingerprinting in parallel and it failed — signals "don't
+   * retry, just skip duplicate/history matching for this save" rather than
+   * "generate one internally," matching the existing best-effort behavior
+   * (a fingerprinting failure must never block the screening from saving).
+   */
+  fingerprint?: ResumeFingerprint | null;
 }): Promise<{ id: number }> {
   const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, projectId, userId, scoreThreshold } = params;
   const supabase = getSupabaseClient();
@@ -353,9 +380,9 @@ export async function saveScreening(params: {
   // Fix: hash extraction/write gets its own try/catch, decoupled from the
   // fingerprinting pipeline, so a fingerprinting hiccup can never also cost
   // the free, always-should-work duplicate-hash signal.
-  let resumeText: string | null = null;
+  let resumeText: string | null = params.resumeText ?? null;
   try {
-    resumeText = await extractResumeText(result.fileName, resumeFile);
+    if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
     // Cheap exact-match dedupe signal for the pre-screen duplicate check
     // (app/api/screen-resumes/check-existing) — independent of the
     // fingerprint below, stored even if fingerprint matching fails
@@ -368,9 +395,17 @@ export async function saveScreening(params: {
     console.error("resume_content_hash write failed (screening still saved):", err);
   }
   try {
+    if (params.fingerprint === null) {
+      // Caller already attempted fingerprinting in parallel with scoring and
+      // it failed — don't retry (it would likely just fail again and cost
+      // more time), skip duplicate/history matching for this save. Matches
+      // the pre-existing best-effort guarantee: fingerprinting failures must
+      // never block the screening from being saved.
+      throw new Error("Fingerprint generation failed upstream — skipping duplicate/history matching");
+    }
     if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
 
-    const fingerprint = await generateFingerprint(resumeText);
+    const fingerprint = params.fingerprint ?? await generateFingerprint(resumeText);
     await saveFingerprint({ screeningId, projectId, teamId, fingerprint });
     const match = await findDuplicateMatch({
       projectId,
