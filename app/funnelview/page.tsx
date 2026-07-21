@@ -198,6 +198,10 @@ export default function FunnelViewPage() {
         Source: c.source === "outbound" ? "Sourced (LinkedIn)" : c.source === "agency" ? `Agency (${c.agencyName ?? "—"})` : "Applied",
         Score: c.score,
         "Current Stage": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
+        // Past Stage stays in the Excel export only — Vlad's ask, 2026-07-20:
+        // "don't show Past Stage on the Candidates tab on the FunnelView
+        // page, keep it in the report and everywhere else." Removed from the
+        // on-screen table below; this is now the only remaining place it renders.
         "Past Stage": pastStageLabel(c) === "—" ? "" : pastStageLabel(c),
         Recruiter: c.recruiterEmail ?? "",
         "Screened Date": new Date(c.createdAt).toLocaleDateString(),
@@ -376,7 +380,6 @@ export default function FunnelViewPage() {
                       <th className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Candidate</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Role</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Stage</th>
-                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Past Stage</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Source</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">Recruiter</th>
                     </tr>
@@ -400,9 +403,6 @@ export default function FunnelViewPage() {
                         <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{c.projectName}</td>
                         <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">
                           {c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-zinc-400 dark:text-zinc-500">
-                          {pastStageLabel(c)}
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span

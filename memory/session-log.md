@@ -12,6 +12,32 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (newest of all, round 24) — Credibility check could hang forever with no error: added a client-side timeout
+
+Vlad: ran a cross-reference check on a Pipeline-tab result card, "took so long to process and gave no result." Traced through `components/CredibilityChecker.tsx`'s `runCheck()` — it had no timeout of its own on the `/api/assess-credibility` fetch at all, and that route (`app/api/assess-credibility/route.ts`, not do-not-touch) has `maxDuration = 60`, same class of ceiling as the screening batch timeout diagnosed earlier this session — except here there's only ever one Claude call (comparing the full resume against the full cross-reference doc), so a single unusually large document pair can genuinely push close to that limit. When Vercel kills a function past its ceiling, the connection doesn't always tear down cleanly enough for `fetch` to reject — worst case, the promise never settles at all, leaving "Checking…" spinning forever with zero feedback and no way to retry short of leaving the page.
+
+- `components/CredibilityChecker.tsx` — `runCheck()` now uses an `AbortController` with a 55-second timeout (just under the route's own 60s ceiling), so this always resolves to a clear, actionable error ("Credibility check timed out — this can happen with an unusually long resume or cross-reference document. Try again, or with a smaller file.") instead of an indefinite silent hang. Distinguishes a real timeout (`DOMException` named `AbortError`) from any other error so the message stays accurate.
+- Not Pipeline-specific — this same fix covers every call site (Pipeline, All Candidates, ResultCard, AlreadyScreenedCard's future use if any) since they all go through this one shared component.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+## 2026-07-20 (newest of all, round 23) — Past Stage column removed from FunnelView's Candidates table, kept in the Excel export
+
+Vlad: "Don't show Past Stage on the Candidates Tab on the FunnelView page. Keep it in the report tho and everywhere else. Just remove it from the visual dashboard."
+
+- `app/funnelview/page.tsx` — removed the "Past Stage" `<th>`/`<td>` from the on-screen Candidates table only. `pastStageLabel(c)` and its column are untouched in the Excel export (`candidateRows`, a few lines above the table) — confirmed it's now the only remaining place that function is called.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+## 2026-07-20 (newest of all, round 22) — Archiving now requires a reason before it commits, everywhere a status can be changed
+
+Vlad: filtered the Pipeline to "Recruiter Screen," picked "Archived" on a candidate, and it moved (vanished from that filtered view) immediately — no chance to pick a reason first, only after re-finding it under Archived. "Only when the reason is added then it can be moved. It must be [that way]."
+
+- Root cause was structural, not a bug in one place: both `components/StatusStageControl.tsx` (Pipeline/All Candidates cards) and `components/StatusSelect.tsx` (post-screening ResultCard, and AlreadyScreenedCard as of round 18) fired the real status change the instant "Archived" was picked — the archive-reason segment only ever appeared as a disconnected follow-up, once status was already archived.
+- Fixed in both: picking "Archived" now only reveals the reason picker (status select visually shows "Archived" chosen) without calling the real `onStatusChange`/`onChange` yet. The real status transition — and the reason — only commit together, in the same step, once an actual reason is picked from the second dropdown. Picking any other status while this pending state is showing just cancels it, no extra UI needed. Gated behind `onArchiveReasonChange` being provided at all, so any call site that doesn't wire it up keeps the old immediate-archive behavior unchanged (none currently — all 4 call sites across `ResultCard.tsx`, `AlreadyScreenedCard.tsx`, Pipeline, and All Candidates already wire it up).
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
 ## 2026-07-20 (newest of all, round 21) — Cross-project fit banner layout bug: text and button squeezed unreadable on narrow widths
 
 Vlad shared a screenshot (converted from HEIC via pillow-heif, sandbox has no native HEIC viewer) of the below-threshold "Stronger fit for X — scored Y there" banner on a post-screening ResultCard, on a narrow viewport — the paragraph and the "Transfer to X" button were both squeezed into unreadable, overlapping-looking narrow columns instead of laying out properly.
