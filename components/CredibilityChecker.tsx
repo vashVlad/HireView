@@ -159,8 +159,23 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
     }
     if (roleContext) formData.set("roleContext", roleContext);
 
+    // Client-side timeout, 2026-07-20 (Vlad: a Pipeline-tab check "took so
+    // long to process and gave no result"). Root cause: this fetch had no
+    // timeout of its own, and app/api/assess-credibility/route.ts's
+    // `maxDuration = 60` can be hit by an unusually large resume/cross-
+    // reference document pair (the single Claude call has to compare both
+    // in full). When Vercel kills a function past that ceiling, the
+    // connection doesn't always tear down cleanly enough for `fetch` to
+    // reject — in the worst case the promise just never settles, leaving
+    // "Checking…" spinning forever with no error and no way to retry short
+    // of leaving the page. A 55-second client-side abort (just under the
+    // route's own ceiling) guarantees this always resolves to a clear,
+    // actionable error instead of an indefinite silent hang.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 55_000);
+
     try {
-      const res = await fetch("/api/assess-credibility", { method: "POST", body: formData });
+      const res = await fetch("/api/assess-credibility", { method: "POST", body: formData, signal: controller.signal });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "Credibility check failed");
@@ -178,8 +193,17 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
         setError("Check completed, but the result couldn't be saved — it will be lost on reload. Retry saving below.");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      const timedOut = err instanceof DOMException && err.name === "AbortError";
+      setError(
+        timedOut
+          ? "Credibility check timed out — this can happen with an unusually long resume or cross-reference document. Try again, or with a smaller file."
+          : err instanceof Error
+          ? err.message
+          : "Unknown error"
+      );
       setCheckState("error");
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 

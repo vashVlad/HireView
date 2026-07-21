@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { ARCHIVE_REASONS, CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS, type CandidateStatus } from "@/lib/types";
 
 // Exported so StatusStageControl.tsx (the merged status+stage pill used on
@@ -39,15 +42,31 @@ export function StatusSelect({
   archiveReason?: string | null;
   onArchiveReasonChange?: (reason: string) => void;
 }) {
-  const showArchiveReason = status === "archived" && onArchiveReasonChange !== undefined;
+  // Archiving requires a reason before it commits — Vlad's ask, 2026-07-20
+  // (same fix as StatusStageControl.tsx, see that component's doc comment
+  // for the full reasoning). Picking "Archived" reveals the reason picker
+  // without changing the real status yet; `onChange("archived")` only fires
+  // once an actual reason is picked, alongside `onArchiveReasonChange`.
+  const [pendingArchive, setPendingArchive] = useState(false);
+  const gateOnReason = onArchiveReasonChange !== undefined;
+  const displayStatus = pendingArchive ? "archived" : status;
+  const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
 
   const statusSelect = (
     <select
-      value={status}
-      onChange={(e) => onChange(e.target.value as CandidateStatus)}
+      value={displayStatus}
+      onChange={(e) => {
+        const next = e.target.value as CandidateStatus;
+        if (next === "archived" && gateOnReason) {
+          setPendingArchive(true);
+          return;
+        }
+        setPendingArchive(false);
+        onChange(next);
+      }}
       className={showArchiveReason
         ? "cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 text-xs font-medium outline-none"
-        : `shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium outline-none ${STATUS_COLORS[status]}`}
+        : `shrink-0 rounded-full border px-2.5 py-1 text-xs font-medium outline-none ${STATUS_COLORS[displayStatus]}`}
     >
       {CANDIDATE_STATUSES.map((s) => (
         <option key={s} value={s}>
@@ -60,14 +79,22 @@ export function StatusSelect({
   if (!showArchiveReason) return statusSelect;
 
   return (
-    <div className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[status]}`}>
+    <div className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}>
       {statusSelect}
       <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
       <select
-        value={archiveReason ?? ""}
-        onChange={(e) => { if (e.target.value) onArchiveReasonChange!(e.target.value); }}
+        value={pendingArchive ? "" : (archiveReason ?? "")}
+        onChange={(e) => {
+          const reason = e.target.value;
+          if (!reason) return;
+          onArchiveReasonChange!(reason);
+          if (pendingArchive) {
+            onChange("archived");
+            setPendingArchive(false);
+          }
+        }}
         title={archiveReason || "Reason"}
-        className={`w-16 max-w-16 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason ? "" : "opacity-60"}`}
+        className={`w-16 max-w-16 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason && !pendingArchive ? "" : "opacity-60"}`}
       >
         <option value="" disabled>Reason</option>
         {ARCHIVE_REASONS.map((r) => (

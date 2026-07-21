@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ARCHIVE_REASONS, CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS, TRACKER_STAGES, type CandidateStatus, type TrackerStage } from "@/lib/types";
 import { STATUS_COLORS } from "./StatusSelect";
 
@@ -39,6 +40,18 @@ const STAGE_TEXT_COLORS: Record<TrackerStage, string> = {
  * itself, since Archived is reachable from any status (not just from within
  * the Tracker). `archiveReason`/`onArchiveReasonChange` are optional so
  * callers that don't care about this yet don't have to wire it up.
+ *
+ * Archiving now REQUIRES a reason before it actually commits — Vlad's ask,
+ * 2026-07-20: picking "Archived" used to flip the real status immediately
+ * (and, filtered to a status like "Recruiter Screen," made the card vanish
+ * from view right then), with the reason only capturable as a disconnected
+ * follow-up afterward. Now, when `onArchiveReasonChange` is wired up,
+ * picking "Archived" just reveals the reason picker without committing
+ * anything yet — the status select visually shows "Archived" as chosen, but
+ * `onStatusChange` doesn't fire (and the candidate doesn't move) until an
+ * actual reason is picked from the second dropdown, at which point both the
+ * status and the reason commit together in one step. Picking any other
+ * status while this pending state is showing just cancels it normally.
  */
 export function StatusStageControl({
   status,
@@ -55,17 +68,28 @@ export function StatusStageControl({
   archiveReason?: string | null;
   onArchiveReasonChange?: (reason: string) => void;
 }) {
-  const showStage = status === "screening";
-  const showArchiveReason = status === "archived" && onArchiveReasonChange !== undefined;
+  const [pendingArchive, setPendingArchive] = useState(false);
+  const gateOnReason = onArchiveReasonChange !== undefined;
+  const displayStatus = pendingArchive ? "archived" : status;
+  const showStage = status === "screening" && !pendingArchive;
+  const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
 
   return (
     <div
-      className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[status]}`}
+      className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}
       onClick={(e) => e.stopPropagation()}
     >
       <select
-        value={status}
-        onChange={(e) => onStatusChange(e.target.value as CandidateStatus)}
+        value={displayStatus}
+        onChange={(e) => {
+          const next = e.target.value as CandidateStatus;
+          if (next === "archived" && gateOnReason) {
+            setPendingArchive(true);
+            return;
+          }
+          setPendingArchive(false);
+          onStatusChange(next);
+        }}
         className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
       >
         {CANDIDATE_STATUSES.map((s) => (
@@ -93,10 +117,21 @@ export function StatusStageControl({
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
           <select
-            value={archiveReason ?? ""}
-            onChange={(e) => { if (e.target.value) onArchiveReasonChange!(e.target.value); }}
+            value={pendingArchive ? "" : (archiveReason ?? "")}
+            onChange={(e) => {
+              const reason = e.target.value;
+              if (!reason) return;
+              onArchiveReasonChange!(reason);
+              // Completes the gated transition: status only actually becomes
+              // "archived" once a reason is picked — see this component's
+              // doc comment above.
+              if (pendingArchive) {
+                onStatusChange("archived");
+                setPendingArchive(false);
+              }
+            }}
             title={archiveReason || "Reason"}
-            className={`w-16 max-w-16 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason ? "" : "opacity-60"}`}
+            className={`w-16 max-w-16 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason && !pendingArchive ? "" : "opacity-60"}`}
           >
             <option value="" disabled>Reason</option>
             {ARCHIVE_REASONS.map((r) => (
