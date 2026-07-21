@@ -12,6 +12,16 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-20 (newest of all, round 25) — Real bug: a plain second resume with a LinkedIn URL in its header got misdetected as a LinkedIn PDF export
+
+Vlad: "cross-reference got confused and it took a second resume as a linkedin profile... LinkedIn icon and activity shows when the pdf from LinkedIn is uploaded, but it doesn't have to show when a second resume is being uploaded."
+
+- Root cause: `lib/assessCredibility.ts`'s `detectLinkedIn()` was a plain OR of three signals — a LinkedIn profile URL, a connections count, or a "Skills & Endorsements" heading. The URL signal alone is nearly always true for ordinary resumes too, since almost every modern resume lists the candidate's own LinkedIn URL as a contact detail in the header — so any second-resume cross-reference with a LinkedIn link in its header tripped this, showing the LinkedIn icon and the LinkedIn-signals activity panel (`CredibilitySection.tsx`'s `isLinkedIn = !!assessment.linkedInSignals`) for something that wasn't an actual export.
+- Fixed: now requires at least 2 of the 3 signals together. The connections count and "Skills & Endorsements" heading are both wording specific to LinkedIn's own PDF export format — a genuine export reliably has one of those alongside the URL, while a plain resume with just a LinkedIn link in its header only ever satisfies 1 of 3 and no longer trips it.
+- Single point of definition/usage (`app/api/assess-credibility/route.ts`'s only call), so this fix covers every call site of the credibility checker automatically — Pipeline, All Candidates, ResultCard, and the name-match compare flow.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
 ## 2026-07-20 (newest of all, round 24) — Credibility check could hang forever with no error: added a client-side timeout
 
 Vlad: ran a cross-reference check on a Pipeline-tab result card, "took so long to process and gave no result." Traced through `components/CredibilityChecker.tsx`'s `runCheck()` — it had no timeout of its own on the `/api/assess-credibility` fetch at all, and that route (`app/api/assess-credibility/route.ts`, not do-not-touch) has `maxDuration = 60`, same class of ceiling as the screening batch timeout diagnosed earlier this session — except here there's only ever one Claude call (comparing the full resume against the full cross-reference doc), so a single unusually large document pair can genuinely push close to that limit. When Vercel kills a function past its ceiling, the connection doesn't always tear down cleanly enough for `fetch` to reject — worst case, the promise never settles at all, leaving "Checking…" spinning forever with zero feedback and no way to retry short of leaving the page.
