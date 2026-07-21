@@ -1,4 +1,5 @@
 import { getAnthropicClient, CLAUDE_MODEL } from "./anthropic";
+import { selectCalibrationExamples } from "./calibrationSelection";
 import type { CalibrationExample, CandidateResult } from "./types";
 
 function detectLinkedInProfile(fileName: string, text: string): boolean {
@@ -86,8 +87,21 @@ function calibrationWeightGuidance(count: number): string {
   return `You have ${count} calibration example${count === 1 ? "" : "s"} for this role — still a small sample. Treat the job description as primary; use ${count === 1 ? "this example" : "these examples"} only as a light, secondary signal, since ${count === 1 ? "one example isn't" : "this few aren't"} enough yet to trust as the real bar for this role. That trust should grow as more examples accumulate from real screening decisions.`;
 }
 
-function buildCalibrationBlock(calibrationExamples: CalibrationExample[]): string {
-  const examples = calibrationExamples
+// DO-NOT-TOUCH EXCEPTION (2026-07-20, Vlad's explicit ask — see
+// memory/decisions-log.md for the full reasoning and research trail):
+// `examplesToShow` is a bounded, outcome-balanced subset (see
+// lib/calibrationSelection.ts, a normal file — the actual selection logic
+// lives there, not here) while `totalCount` is the TRUE number of
+// calibration examples the project has accumulated. These are deliberately
+// separate: calibrationWeightGuidance()'s trust narrative below is keyed off
+// the real total (a role with 50 real examples should still be treated as
+// having a substantial, reliable sample), while the raw example text that
+// actually gets sent to Claude is capped regardless of how large that total
+// gets — this is the enterprise-scale fix for calibration examples growing
+// unbounded per project, which used to mean every screening call got larger
+// and slower forever as a role accumulated more hiring history.
+function buildCalibrationBlock(examplesToShow: CalibrationExample[], totalCount: number): string {
+  const examples = examplesToShow
     .map((example) => {
       const verdict = example.label === "good" ? "HIREABLE" : "NOT HIREABLE";
       const note = example.note ? `Recruiter's note: ${example.note}\n` : "";
@@ -95,8 +109,15 @@ function buildCalibrationBlock(calibrationExamples: CalibrationExample[]): strin
     })
     .join("\n\n---\n\n");
 
-  return `The recruiter has provided example resumes from past candidates they advanced or rejected for this type of role — accumulated from real screening decisions on this project, not hypothetical. ${calibrationWeightGuidance(calibrationExamples.length)}
+  // Told explicitly to Claude when the two counts diverge, so it doesn't
+  // read as a contradiction that the trust narrative above describes a
+  // "substantial" sample while only a handful of raw examples are shown.
+  const subsetNote = examplesToShow.length < totalCount
+    ? `\n(Showing ${examplesToShow.length} of ${totalCount} total examples on file for this role — a recency- and outcome-balanced subset, not the full set.)\n`
+    : "";
 
+  return `The recruiter has provided example resumes from past candidates they advanced or rejected for this type of role — accumulated from real screening decisions on this project, not hypothetical. ${calibrationWeightGuidance(totalCount)}
+${subsetNote}
 ${examples}`;
 }
 
@@ -115,7 +136,7 @@ export async function scoreCandidate(
   if (calibrationExamples.length > 0) {
     content.push({
       type: "text",
-      text: buildCalibrationBlock(calibrationExamples),
+      text: buildCalibrationBlock(selectCalibrationExamples(calibrationExamples), calibrationExamples.length),
       cache_control: { type: "ephemeral" },
     });
   }

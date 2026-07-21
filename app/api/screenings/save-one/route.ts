@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
 import { saveScreening } from "@/lib/screenings";
-import { getAuthUser, userIdFilter } from "@/lib/auth";
+import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import { getProject } from "@/lib/projects";
 import type { CandidateResult } from "@/lib/types";
 
@@ -45,6 +45,15 @@ export async function POST(request: NextRequest) {
   const projectId = typeof projectIdField === "string" && projectIdField.trim()
     ? parseInt(projectIdField.trim(), 10) || undefined
     : undefined;
+  // DO-NOT-TOUCH EXCEPTION (2026-07-21 — see decisions-log.md, same fix and
+  // reasoning as app/api/screen-resumes/route.ts): this route trusted a
+  // client-supplied projectId to pull the project's score threshold and to
+  // tag the saved screening's team_id, with no check that the requester's
+  // team owns that project. Additive only — skipped when no projectId is
+  // supplied, otherwise 403 via the existing canAccessProject helper.
+  if (projectId && !(await canAccessProject(user, projectId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const linkedInMode = linkedInModeField === "true";
   // DO-NOT-TOUCH EXCEPTION (2026-07-20, Vlad's ask — see decisions-log.md):
   // Agency source, same additive-metadata shape as the resumeText passthrough
