@@ -4,16 +4,30 @@ import type { CredibilityAssessment, CredibilityRow } from "./types";
 /**
  * Heuristic LinkedIn PDF detector — runs on extracted text before the
  * credibility call so the prompt can be tailored without a second Claude
- * round-trip. LinkedIn PDFs reliably contain at least one of: a profile
- * URL, a connection count, or the "Skills & Endorsements" section header.
- * Phase 2.4.
+ * round-trip.
+ *
+ * Real bug found 2026-07-20 (Vlad: cross-reference "got confused and took a
+ * second resume as a LinkedIn profile"). This used to be a plain OR of three
+ * signals — but a single one of them, "mentions a linkedin.com/in/ URL," is
+ * true for the overwhelming majority of ordinary resumes too, since nearly
+ * every modern resume lists the candidate's LinkedIn URL as a contact
+ * detail in the header. That made this detector fire on any second-resume
+ * cross-reference whose header happened to include a LinkedIn link — a
+ * plain resume, not an actual LinkedIn PDF export — showing the LinkedIn
+ * icon and the LinkedIn-signals activity panel for something that wasn't
+ * one. Now requires at least 2 of the 3 signals together: the connections
+ * count and the "Skills & Endorsements" heading are both wording specific
+ * to LinkedIn's own PDF export format, so a genuine export reliably has
+ * those alongside the profile URL — an ordinary resume with just a LinkedIn
+ * link in its header only ever satisfies 1 of the 3 and no longer trips it.
  */
 export function detectLinkedIn(text: string): boolean {
-  return (
-    /linkedin\.com\/in\//i.test(text) ||
-    /\d{1,4}\+?\s*connections?\b/i.test(text) ||
-    /\bSkills\s*&\s*Endorsements\b/i.test(text)
-  );
+  const signals = [
+    /linkedin\.com\/in\//i.test(text),
+    /\d{1,4}\+?\s*connections?\b/i.test(text),
+    /\bSkills\s*&\s*Endorsements\b/i.test(text),
+  ];
+  return signals.filter(Boolean).length >= 2;
 }
 
 const CREDIBILITY_TOOL = {

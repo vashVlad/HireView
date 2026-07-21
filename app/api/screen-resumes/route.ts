@@ -6,7 +6,7 @@ import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening } from "@/lib/screenings";
 import { saveScreeningBatch } from "@/lib/screeningBatches";
 import { getProject } from "@/lib/projects";
-import { getAuthUser, userIdFilter } from "@/lib/auth";
+import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -35,6 +35,26 @@ export async function POST(request: NextRequest) {
   const projectId = typeof projectIdField === "string" && projectIdField.trim()
     ? parseInt(projectIdField.trim(), 10) || undefined
     : undefined;
+  // DO-NOT-TOUCH EXCEPTION (2026-07-21 — see decisions-log.md): this route
+  // took a client-supplied projectId and used it to pull that project's JD
+  // analysis, score threshold, and full calibration-example text into the
+  // scoring call — and to tag the saved screening's team_id — with no check
+  // that the requesting user's team actually owns that project. Every other
+  // by-id route got this check in the 2026-07-16 audit
+  // (canAccessProject/canAccessScreening in lib/auth.ts); this route and
+  // screenings/save-one/route.ts were missed since they're POST routes with
+  // a projectId buried in form data, not the "/api/x/[id]" shape that audit
+  // was framed around. Without it, any authenticated recruiter on any team
+  // could screen against another team's project — leaking that team's JD
+  // and calibration examples into their own scoring call, and writing a
+  // screening record with the victim team's team_id. Fix is additive: skip
+  // the check entirely when no projectId was supplied (ad hoc screening,
+  // nothing to leak); otherwise 403 exactly like the existing
+  // app/api/projects/[id]/route.ts pattern. No other logic in this route
+  // was touched.
+  if (projectId && !(await canAccessProject(user, projectId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
   const linkedInModeOverride = formData.get("linkedInMode") === "true";
   // DO-NOT-TOUCH EXCEPTION (2026-07-20, Vlad's ask — see decisions-log.md):
   // Agency source, purely additive metadata plumbing, same shape as the

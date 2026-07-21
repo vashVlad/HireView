@@ -12,6 +12,38 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-21 (newest of all, round 27) — Full architecture / multi-team-readiness audit; found and fixed a real cross-team IDOR gap
+- Audit requested by Vlad ("check if you braked anything... ready for real multi-team screenings"). Confirmed clean: `tsc` passes, every do-not-touch file diffs empty, almost all of this session's prior work already merged to `origin/main` (PRs #40/#42/#43).
+- Found the one real gap: `app/api/screen-resumes/route.ts` and `app/api/screenings/save-one/route.ts` never called `canAccessProject` before trusting a client-supplied `projectId` — the 2026-07-16 by-id audit missed these two since they're POST routes, not `/api/x/[id]` GET/PATCH/DELETE. Any recruiter on any team could screen against another team's project, leaking their JD/calibration examples and writing the screening back with the victim team's `team_id`. Pre-existing, not introduced this session.
+- Fixed both (see decisions-log.md for full reasoning) — additive `canAccessProject` check, same pattern already used correctly elsewhere. Verified it can't block real usage (every current project gets a team_id at creation). `tsc --noEmit` clean.
+- Also hit and fixed a CRLF line-ending issue the Edit tool introduced across both files mid-fix — normalized back to LF, confirmed with `file`/`git diff --stat` before finishing.
+- Next: hand off to Claude Code for commit/push (build-verify only, no logic changes) alongside the still-unpushed `detectLinkedIn` fix and calibration-cap work. Remember to manually `rm` the stray untracked `__test_selection_tmp.ts` first — sandbox can't delete it.
+
+---
+
+## 2026-07-20 (newest of all, round 26) — Calibration examples capped per scoring call, ahead of enterprise scale
+
+Vlad's idea: use calibration to refine the JD itself, to save tokens/time. Talked it through rather than building blind — researched whether raw few-shot examples vs. summarized guidance actually holds up (Anthropic's own guidance + published example-selection research), asked him to weigh in on where the refinement should live and whether changes need his approval, then asked him to specifically factor in enterprise scale (many calibration resumes per project) before finalizing the design. Full reasoning and sources in decisions-log.md.
+
+- Rejected rewriting the JD/requirements based on calibration — must-haves aren't a separate structured object today (Claude derives them fresh from raw JD text every call), so this would mean either silently mutating the recruiter's own posted JD over many small approved changes, or a much bigger structured-requirements redesign of "validated core" than the actual problem needs.
+- Built instead: new `lib/calibrationSelection.ts` (normal file) — `selectCalibrationExamples()` caps what's shown per call at 6, split evenly between hired/rejected outcomes with backfill, recency-ordered. Below the cap, zero behavior change (every project today, per the existing "not a real problem yet" note).
+- `lib/scoreCandidate.ts` (do-not-touch exception, flagged) — `buildCalibrationBlock()` now takes the capped subset separately from the TRUE total example count; the existing 4/8-threshold trust narrative (`calibrationWeightGuidance()`) still reads the real total, so a role with many real examples is still described as having a substantial sample even though only 6 raw resumes are shown. Claude is told explicitly when the two counts diverge.
+- Deliberately not built yet: similarity-based retrieval (embeddings, picking the most relevant examples for the specific candidate rather than just recent+balanced) — the properly-scaled version per the research, flagged as the natural next step once real project volume justifies the added infrastructure.
+- Verified with a small throwaway script exercising the selection function directly (under-cap no-op, balanced split, lopsided-backfill, recency order all confirmed correct) before relying on it. `npx tsc --noEmit -p tsconfig.json` clean. Confirmed neither `screen-resumes/route.ts` nor `cross-project-fit/route.ts` needed any change — smallest possible do-not-touch footprint.
+- Cap of 6 flagged in open-questions.md as unconfirmed, same category as the existing 4/8 thresholds.
+- **Leftover, harmless:** a scratch verification file (`__test_selection_tmp.ts`) couldn't be deleted from this sandbox (same permission quirk as `.git/index.lock` seen earlier this session) — untracked, won't get committed unless explicitly added, safe to delete manually (`rm __test_selection_tmp.ts`) before or during the next commit.
+- Not yet committed — same uncommitted batch as everything else this session.
+
+## 2026-07-20 (newest of all, round 25) — Real bug: a plain second resume with a LinkedIn URL in its header got misdetected as a LinkedIn PDF export
+
+Vlad: "cross-reference got confused and it took a second resume as a linkedin profile... LinkedIn icon and activity shows when the pdf from LinkedIn is uploaded, but it doesn't have to show when a second resume is being uploaded."
+
+- Root cause: `lib/assessCredibility.ts`'s `detectLinkedIn()` was a plain OR of three signals — a LinkedIn profile URL, a connections count, or a "Skills & Endorsements" heading. The URL signal alone is nearly always true for ordinary resumes too, since almost every modern resume lists the candidate's own LinkedIn URL as a contact detail in the header — so any second-resume cross-reference with a LinkedIn link in its header tripped this, showing the LinkedIn icon and the LinkedIn-signals activity panel (`CredibilitySection.tsx`'s `isLinkedIn = !!assessment.linkedInSignals`) for something that wasn't an actual export.
+- Fixed: now requires at least 2 of the 3 signals together. The connections count and "Skills & Endorsements" heading are both wording specific to LinkedIn's own PDF export format — a genuine export reliably has one of those alongside the URL, while a plain resume with just a LinkedIn link in its header only ever satisfies 1 of 3 and no longer trips it.
+- Single point of definition/usage (`app/api/assess-credibility/route.ts`'s only call), so this fix covers every call site of the credibility checker automatically — Pipeline, All Candidates, ResultCard, and the name-match compare flow.
+- `npx tsc --noEmit -p tsconfig.json`: clean.
+- Not yet committed — same uncommitted batch as everything else this session.
+
 ## 2026-07-20 (newest of all, round 24) — Credibility check could hang forever with no error: added a client-side timeout
 
 Vlad: ran a cross-reference check on a Pipeline-tab result card, "took so long to process and gave no result." Traced through `components/CredibilityChecker.tsx`'s `runCheck()` — it had no timeout of its own on the `/api/assess-credibility` fetch at all, and that route (`app/api/assess-credibility/route.ts`, not do-not-touch) has `maxDuration = 60`, same class of ceiling as the screening batch timeout diagnosed earlier this session — except here there's only ever one Claude call (comparing the full resume against the full cross-reference doc), so a single unusually large document pair can genuinely push close to that limit. When Vercel kills a function past its ceiling, the connection doesn't always tear down cleanly enough for `fetch` to reject — worst case, the promise never settles at all, leaving "Checking…" spinning forever with zero feedback and no way to retry short of leaving the page.
