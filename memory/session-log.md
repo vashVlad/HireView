@@ -12,6 +12,23 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-23 (newest of all, round 29) — Vision fallback for PDFs with no text layer at all
+- Bug: Vlad's "Brillio_Resume (1).pdf" couldn't be screened — pdf-parse extracted 4 meaningless characters. Diagnosed with pdftotext/pdffonts/pdfimages/pikepdf against the raw file: not a scan, not corrupt — the PDF has zero font/image objects, every glyph exported as filled vector outline paths (no Tj/TJ text operators at all). Confirmed by rendering it — fully legible, normal-looking resume, just with literally no text anywhere in the file structure.
+- Fix (do-not-touch exception, `lib/parseResume.ts`, see decisions-log.md): when pdf-parse returns under ~150 chars, falls back to sending the raw PDF to Claude as a native `document` content block and has it transcribe visually — no new dependency, no PDF-to-image rendering pipeline (checked: pdfjs-dist's own optional canvas dep already fails to load its native binding in this sandbox, exactly the fragility a canvas/OCR pipeline would risk on Vercel). Throws a clear error if the fallback also comes back empty, instead of silently scoring near-nothing.
+- Could not live-test against api.anthropic.com from this sandbox — outbound calls are blocked at the egress proxy (separate from the known no-live-Supabase limitation). `tsc --noEmit` clean; design rests on a stable, documented Claude API feature already present in the installed SDK's types. Recommend a real smoke test with this exact file once deployed.
+- Also hit the same CRLF-injection quirk as the two prior fixes — normalized back to LF before confirming the diff.
+- Next: hand off to Claude Code — flag the "please live-test this exact resume upload once deployed" ask explicitly, since it's the one thing not yet confirmed end-to-end.
+
+---
+
+## 2026-07-22 (newest of all, round 28) — Fixed unreachable rows in Add member / Add project pickers
+- Bug: "users at the bottom of the list can't be reached" in the admin Team page's Add member dropdown. Root cause: both portalled pickers (`app/admin/users/page.tsx`) already had an internal `overflow-y-auto` list, but were always anchored `top: rect.bottom + 6` with a hardcoded `max-h-64` and zero viewport awareness — for a team row near the bottom of the page, the popover rendered partly/fully below the visible screen. `position: fixed` isn't viewport-clipped, so it just draws off-screen; since page-scroll closes the picker by design, there was no way to reach those rows. Not a missing scrollbar, an unreachable one.
+- Fix: new `computePickerVerticalPos()` picks whichever side (above/below the button) has more room, clamps the list's max-height to whatever's actually available, and flips to anchor via `bottom` when placed above so a short list hugs the button. Applied to both the member picker and the twin project picker (same bug, same file). `tsc --noEmit` clean.
+- Also hit the same CRLF-injection quirk as the 2026-07-21 fix (Edit tool converts line endings on this file) — normalized back to LF via `sed` before confirming the diff was clean.
+- Next: hand off to Claude Code for commit/push whenever Vlad's ready — not yet requested for this specific fix.
+
+---
+
 ## 2026-07-21 (newest of all, round 27) — Full architecture / multi-team-readiness audit; found and fixed a real cross-team IDOR gap
 - Audit requested by Vlad ("check if you braked anything... ready for real multi-team screenings"). Confirmed clean: `tsc` passes, every do-not-touch file diffs empty, almost all of this session's prior work already merged to `origin/main` (PRs #40/#42/#43).
 - Found the one real gap: `app/api/screen-resumes/route.ts` and `app/api/screenings/save-one/route.ts` never called `canAccessProject` before trusting a client-supplied `projectId` — the 2026-07-16 by-id audit missed these two since they're POST routes, not `/api/x/[id]` GET/PATCH/DELETE. Any recruiter on any team could screen against another team's project, leaking their JD/calibration examples and writing the screening back with the victim team's `team_id`. Pre-existing, not introduced this session.

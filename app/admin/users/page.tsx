@@ -32,6 +32,38 @@ function teamPalette(key: string) {
   return TEAM_PALETTE[hash % TEAM_PALETTE.length];
 }
 
+/**
+ * Fix, 2026-07-22 (Vlad's report: "the users at the bottom of the list can't
+ * be reached" in the Add member picker). Both portalled pickers below already
+ * had an internal `overflow-y-auto` list — the real bug was that they were
+ * always anchored `top: rect.bottom + 6` with a hardcoded `max-h-64`, with no
+ * awareness of how much viewport space was actually left below the button.
+ * For a team row near the bottom of a long page, that meant the popover
+ * (and its scrollable list) rendered partly or fully below the visible
+ * screen — `position: fixed` doesn't get clipped by the viewport, it just
+ * draws off-screen, and since scrolling the page closes the picker (by
+ * design, see the scroll-close effect below), there was no way to reach the
+ * items that ended up past the fold. Not a missing scrollbar — an
+ * unreachable one.
+ *
+ * This computes how much room is actually available below vs. above the
+ * anchor button and returns whichever side fits better, capping the list's
+ * max-height to that available space (never more than `preferredMaxHeight`)
+ * so the whole popover — including its own scrollbar — always stays fully
+ * on-screen and reachable. When flipped above, anchors via `bottom` (not a
+ * computed `top`) so a shorter list hugs the button instead of floating with
+ * a gap.
+ */
+function computePickerVerticalPos(rect: DOMRect, preferredMaxHeight = 256, margin = 8) {
+  const viewportH = window.innerHeight;
+  const spaceBelow = viewportH - rect.bottom - margin;
+  const spaceAbove = rect.top - margin;
+  if (spaceBelow >= 120 || spaceBelow >= spaceAbove) {
+    return { top: rect.bottom + 6, maxHeight: Math.max(80, Math.min(preferredMaxHeight, spaceBelow)) };
+  }
+  return { bottom: viewportH - rect.top + 6, maxHeight: Math.max(80, Math.min(preferredMaxHeight, spaceAbove)) };
+}
+
 interface UserRow {
   id: string;
   email: string;
@@ -108,8 +140,8 @@ export default function UsersPage() {
   // Fixed-position rects captured at button-click time so the portalled
   // dropdowns float above everything regardless of ancestor containing blocks
   // (the animate-fade-in-up <li> creates one via its transform keyframe).
-  const [memberPickerPos, setMemberPickerPos] = useState<{ top: number; left: number } | null>(null);
-  const [projectPickerPos, setProjectPickerPos] = useState<{ top: number; right: number } | null>(null);
+  const [memberPickerPos, setMemberPickerPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null);
+  const [projectPickerPos, setProjectPickerPos] = useState<{ top?: number; bottom?: number; right: number; maxHeight: number } | null>(null);
 
   // Projects — for the drag-and-drop team assignment panel below.
   const [projects, setProjects] = useState<ProjectRow[]>([]);
@@ -825,7 +857,7 @@ export default function UsersPage() {
                                 setMemberPickerPos(null);
                               } else {
                                 setOpenMemberPickerTeamId(team.id);
-                                setMemberPickerPos({ top: rect.bottom + 6, left: rect.left });
+                                setMemberPickerPos({ ...computePickerVerticalPos(rect), left: rect.left });
                               }
                             }}
                             className={`flex items-center gap-1 rounded-full border border-dashed px-2.5 py-1 text-xs font-medium transition-colors ${
@@ -874,7 +906,7 @@ export default function UsersPage() {
                                     setProjectPickerPos(null);
                                   } else {
                                     setOpenProjectPickerTeamId(team.id);
-                                    setProjectPickerPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right });
+                                    setProjectPickerPos({ ...computePickerVerticalPos(rect), right: window.innerWidth - rect.right });
                                   }
                                 }}
                                 title="Add a project"
@@ -1044,10 +1076,16 @@ export default function UsersPage() {
         return createPortal(
           <div
             data-team-picker
-            style={{ position: "fixed", top: memberPickerPos.top, left: memberPickerPos.left, zIndex: 9999 }}
+            style={{
+              position: "fixed",
+              top: memberPickerPos.top,
+              bottom: memberPickerPos.bottom,
+              left: memberPickerPos.left,
+              zIndex: 9999,
+            }}
             className="w-60 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800"
           >
-            <ul className="max-h-64 overflow-y-auto">
+            <ul className="overflow-y-auto" style={{ maxHeight: memberPickerPos.maxHeight }}>
               {available.map((u) => (
                 <li key={u.id}>
                   <button
@@ -1073,10 +1111,16 @@ export default function UsersPage() {
         return createPortal(
           <div
             data-team-picker
-            style={{ position: "fixed", top: projectPickerPos.top, right: projectPickerPos.right, zIndex: 9999 }}
+            style={{
+              position: "fixed",
+              top: projectPickerPos.top,
+              bottom: projectPickerPos.bottom,
+              right: projectPickerPos.right,
+              zIndex: 9999,
+            }}
             className="w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-800"
           >
-            <ul className="max-h-64 overflow-y-auto">
+            <ul className="overflow-y-auto" style={{ maxHeight: projectPickerPos.maxHeight }}>
               {eligible.map((p) => (
                 <li key={p.id}>
                   <button
