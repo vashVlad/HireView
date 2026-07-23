@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify({
           from: "HireView <onboarding@resend.dev>",
-          to: ["vladvashchuk2005@gmail.com"],
+          to: [process.env.NOTIFICATION_EMAIL ?? "vladvashchuk2005@gmail.com"],
           subject: `New access request from ${name || email}`,
           html: `
             <div style="font-family:sans-serif;max-width:480px">
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
               ${name ? `<p><strong>Name:</strong> ${name}</p>` : ""}
               ${message ? `<p><strong>Message:</strong> ${message}</p>` : ""}
               <p style="margin-top:24px">
-                <a href="https://hire-view.vercel.app/admin/users" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+                <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "https://hire-view.vercel.app"}/admin/users" style="background:#7c3aed;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">
                   Review in HireView →
                 </a>
               </p>

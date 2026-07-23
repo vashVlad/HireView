@@ -5,9 +5,15 @@ import { getSupabaseClient } from "@/lib/supabase";
 /**
  * POST /api/feedback — requires a session. Backs the "Send feedback" form
  * in the SiteHeader account dropdown. Saves to the `feedback` table
- * (supabase-migration-feedback.sql) and best-effort emails Vlad via Resend
- * — same non-blocking pattern as /api/access-requests, so an email hiccup
- * never loses the submission itself.
+ * (supabase-migration-feedback.sql) and best-effort emails the configured
+ * notification address via Resend — same non-blocking pattern as
+ * /api/access-requests, so an email hiccup never loses the submission
+ * itself.
+ *
+ * DO-NOT-TOUCH scope note: this file is not do-not-touch. Recipient address
+ * is `NOTIFICATION_EMAIL` (falls back to Vlad's personal address only for
+ * backward compatibility with existing deployments that haven't set the env
+ * var yet — 2026-07-23 enterprise-pilot credential audit, see decisions-log.md).
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthUser();
@@ -46,7 +52,7 @@ export async function POST(request: NextRequest) {
         },
         body: JSON.stringify({
           from: "HireView <onboarding@resend.dev>",
-          to: ["vladvashchuk2005@gmail.com"],
+          to: [process.env.NOTIFICATION_EMAIL ?? "vladvashchuk2005@gmail.com"],
           subject: `New feedback from ${user.email ?? "a recruiter"}`,
           html: `
             <div style="font-family:sans-serif;max-width:480px">

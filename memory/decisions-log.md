@@ -4,6 +4,13 @@ Append-only. Newest at top. Each entry: the decision, and the reason — so futu
 
 ---
 
+**2026-07-23 — HireView moves to Brillio enterprise infrastructure.**
+Trigger: Vlad — a global pilot was approved across Brillio's TA function, 56 recruiters across 5 geographies (India, USA, UK, Romania, Mexico), following a call with Ritu Sharma (Global TA Ops & AI Adoption Lead), Ahmed Abouelkhir (Managing Director of TA), and Suchin Bhat (Director of TA). Recorded here as reported by Vlad, same standing as every other business/product decision in this log — not independently verified by any session.
+**Reason:** personal accounts (Vlad's own Anthropic API key, his own Supabase instance) cannot handle the security, scale, or compliance requirements of an enterprise deployment at this size. All credentials, database, and hosting need to migrate to Brillio-controlled infrastructure before the pilot goes live.
+**Scope of this decision:** infrastructure only. Core scoring logic (`lib/scoreCandidate.ts`, `lib/analyzeJD.ts`, `lib/parseResume.ts`, `lib/calibrationExamples.ts`) stays exactly as-is — untouched by the readiness pass done the same day (credential audit, DB migration package, teams-for-geographies docs, load assessment, Lever integration brief — see session-log.md and state.md's ENTERPRISE PILOT STATUS section for full detail). The actual account cutover (real Brillio Anthropic key, real Brillio-hosted database) is still pending as of this entry — this decision covers the direction and the codebase-readiness work, not a completed migration.
+
+---
+
 **2026-07-23 — Do-not-touch exception, `lib/parseResume.ts`: added a Claude-vision fallback for PDFs with no extractable text layer at all.**
 Trigger: Vlad uploaded a real resume (`Brillio_Resume (1).pdf`, "Producer: Microsoft: Print To PDF") that couldn't be screened — "This resume cannot be screened because it has no available text copy. fix that."
 **Diagnosed before touching anything:** this isn't a scanned image and isn't corrupt. Checked directly against the raw PDF with poppler's `pdftotext`/`pdffonts`/`pdfimages` and with `pikepdf` against the page's `/Resources` and content stream: zero font objects, zero image objects, and the content stream is nothing but `m`/`c`/`l`/`h`/`f` fill operators (vector path-drawing) — no `Tj`/`TJ` text-showing operators anywhere in the file. Every glyph was exported as a filled outline shape, not real text. Rendered to an image to confirm the page is fully legible (it is — crisp, normal-looking resume) — the text is only ever present visually, never as extractable text, so no text-layer parser (pdf-parse or otherwise) could ever read it, no matter how it's tuned.
