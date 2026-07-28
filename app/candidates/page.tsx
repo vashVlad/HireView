@@ -68,6 +68,7 @@ function formatActionText(a: ScreeningAction, candidateName: string): string {
     case "unflagged": return `removed the flag from ${candidateName}`;
     case "note": return `added a note on ${candidateName}`;
     case "credibility_check": return `ran a credibility check on ${candidateName}`;
+    case "rescreen": return `rescreened ${candidateName}`;
     default: return `updated ${candidateName}`;
   }
 }

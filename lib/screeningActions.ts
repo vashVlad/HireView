@@ -7,7 +7,12 @@ export type ActionType =
   | "flagged"
   | "unflagged"
   | "note"
-  | "credibility_check";
+  | "credibility_check"
+  // Added 2026-07-27 — a recruiter re-ran scoring on an already-saved
+  // candidate (see app/api/history/[id]/rescreen/route.ts). action_type is
+  // a plain `text` column (supabase-migration-screening-actions.sql), not a
+  // DB enum/CHECK constraint, so a new value here needs no migration.
+  | "rescreen";
 
 export interface ScreeningAction {
   id: number;

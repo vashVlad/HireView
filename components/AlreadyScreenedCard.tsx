@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { STATUS_COLORS, StatusSelect } from "@/components/StatusSelect";
 import { CANDIDATE_STATUS_LABELS, type CandidateStatus, type CheckExistingResult } from "@/lib/types";
@@ -100,7 +101,18 @@ export function AlreadyScreenedCard({
 
       <p className="text-sm text-zinc-600 dark:text-zinc-300">{existing.summary}</p>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        {/* View full result, added 2026-07-27 (Vlad: "the already screened in
+            this project card, during screening stage") — links to the
+            existing saved screening's full result page
+            (app/candidates/[id]/page.tsx), so a recruiter can see everything
+            about the already-screened candidate without leaving this card. */}
+        <Link
+          href={`/candidates/${existing.id}`}
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-amber-700 underline decoration-dotted underline-offset-2 transition-colors hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
+        >
+          View full result
+        </Link>
         <button
           type="button"
           disabled={rescoring}

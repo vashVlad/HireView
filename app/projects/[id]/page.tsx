@@ -80,6 +80,7 @@ function formatActionText(a: ScreeningAction, candidateName: string): string {
     case "unflagged": return `removed the flag from ${candidateName}`;
     case "note": return `added a note on ${candidateName}`;
     case "credibility_check": return `ran a credibility check on ${candidateName}`;
+    case "rescreen": return `rescreened ${candidateName}`;
     default: return `updated ${candidateName}`;
   }
 }
@@ -599,7 +600,21 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
             // more) is assumed to not need it. Below-threshold candidates
             // (the original case) are still fully covered, since anything
             // under threshold is also under threshold + 15.
-            const eligibleForFitCheck = result.score < project.scoreThreshold + FIT_CHECK_MARGIN;
+            //
+            // Suppressed entirely, 2026-07-27, when a cross-project NAME
+            // match already fired (Vlad: "don't try to screen again for
+            // that already screened project... don't show looking for a
+            // better fit — just show that it was already screened"). If we
+            // already positively know this exact candidate was screened for
+            // a specific other project (crossProjectNameMatchScreeningId,
+            // set in lib/screenings.ts), there's no point spending a Claude
+            // call guessing which OTHER project might fit better — we
+            // already know exactly where they exist. ResultCard shows the
+            // "Also screened in [project]" mention instead (unconditional
+            // on crossProjectNameMatchScreeningId, independent of this flag).
+            const eligibleForFitCheck =
+              result.score < project.scoreThreshold + FIT_CHECK_MARGIN
+              && result.crossProjectNameMatchScreeningId == null;
             return (
             <ResultCard
               key={result.fileName}
@@ -840,6 +855,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   }, [expandedId]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Rescreen, added 2026-07-27 (Vlad's ask) — re-runs scoring for an
+  // already-saved candidate in place. rescreenErrorId is cleared on the next
+  // attempt (success or failure) rather than ever building up a list, since
+  // only the most recent attempt's outcome is worth showing inline.
+  const [rescreeningId, setRescreeningId] = useState<number | null>(null);
+  const [rescreenErrorId, setRescreenErrorId] = useState<number | null>(null);
   const [pendingFlagId, setPendingFlagId] = useState<number | null>(null);
   const [pendingFlagNote, setPendingFlagNote] = useState("");
   // Editable source, 2026-07-20 (Vlad's ask): clicking the SourceIcon on a
@@ -1047,6 +1068,30 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     finally {
       setDeletingId(null);
       setConfirmDeleteId(null);
+    }
+  }
+
+  // Re-runs scoring for an already-saved candidate against the project's
+  // CURRENT job description + calibration library, and updates this same
+  // screening row in place (app/api/history/[id]/rescreen/route.ts) — added
+  // 2026-07-27 (Vlad's ask). Only the scoring fields come back; status,
+  // notes, flags, credibility, etc. are untouched both server- and
+  // client-side, so a rescore never disturbs where the recruiter already
+  // has this candidate parked.
+  async function handleRescreen(id: number) {
+    setRescreeningId(id);
+    setRescreenErrorId(null);
+    try {
+      const res = await fetch(`/api/history/${id}/rescreen`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      if (data.screening) {
+        setScreenings((prev) => prev.map((s) => (s.id === id ? { ...s, ...data.screening } : s)));
+      }
+    } catch {
+      setRescreenErrorId(id);
+    } finally {
+      setRescreeningId(null);
     }
   }
 
@@ -1573,20 +1618,50 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <button type="button"
-                    onClick={() => {
-                      const sw = window.screen.availWidth;
-                      const sh = window.screen.availHeight;
-                      const halfW = Math.floor(sw / 2);
-                      window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
-                    }}
-                    className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                    View resume
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button type="button"
+                      onClick={() => {
+                        const sw = window.screen.availWidth;
+                        const sh = window.screen.availHeight;
+                        const halfW = Math.floor(sw / 2);
+                        window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+                      }}
+                      className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      View resume
+                    </button>
+                    {/* Rescreen, added 2026-07-27 (Vlad: "add a rescreen
+                        button on actual pipeline cards somewhere at the
+                        bottom") — re-runs scoring for this ALREADY-SAVED
+                        candidate against the project's current job
+                        description + calibration library and updates this
+                        same screening record in place (see
+                        app/api/history/[id]/rescreen/route.ts). Distinct
+                        from AlreadyScreenedCard's "Re-screen anyway", which
+                        only ever handles a pre-save duplicate upload and
+                        creates a NEW screening row — this one is for a
+                        recruiter who wants a stale score refreshed (JD
+                        changed, more calibration examples since) without
+                        losing the candidate's stage/notes/history. Status is
+                        deliberately left untouched by the route itself. */}
+                    <button type="button"
+                      disabled={rescreeningId === s.id}
+                      onClick={() => handleRescreen(s.id)}
+                      className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={rescreeningId === s.id ? "animate-spin" : ""}>
+                        <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      {rescreeningId === s.id ? "Rescreening…" : "Rescreen"}
+                    </button>
+                    {rescreenErrorId === s.id && (
+                      <span className="text-xs text-rose-600 dark:text-rose-400">Rescreen failed — try again.</span>
+                    )}
+                  </div>
                   {confirmDeleteId === s.id ? (
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-zinc-500 dark:text-zinc-400">Delete this record?</span>

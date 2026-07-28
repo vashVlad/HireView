@@ -778,6 +778,21 @@ export async function updateScreening(
      */
     linkedInMode?: boolean;
     agencyName?: string;
+    /**
+     * Rescore fields, added 2026-07-27 (Vlad's ask: "add a rescreen button on
+     * actual pipeline cards") — app/api/history/[id]/rescreen/route.ts is the
+     * only caller. Deliberately excludes candidateName, fileName, and status:
+     * a rescore refreshes the scoring output against the current JD/
+     * calibration library, it doesn't re-identify the candidate or move them
+     * off whatever stage a recruiter already parked them on.
+     */
+    score?: number;
+    mustHaveScore?: number;
+    niceToHaveScore?: number;
+    summary?: string;
+    strengths?: string[];
+    concerns?: string[];
+    recommendation?: Recommendation;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -805,6 +820,13 @@ export async function updateScreening(
   // (see decisions-log.md, 2026-07-20) — same column already wired into
   // saveScreening()'s INSERT unconditionally, so it's already a live column.
   if (fields.agencyName !== undefined) update.agency_name = fields.agencyName || null;
+  if (fields.score !== undefined) update.score = fields.score;
+  if (fields.mustHaveScore !== undefined) update.must_have_score = fields.mustHaveScore;
+  if (fields.niceToHaveScore !== undefined) update.nice_to_have_score = fields.niceToHaveScore;
+  if (fields.summary !== undefined) update.summary = fields.summary;
+  if (fields.strengths !== undefined) update.strengths = fields.strengths;
+  if (fields.concerns !== undefined) update.concerns = fields.concerns;
+  if (fields.recommendation !== undefined) update.recommendation = fields.recommendation;
   if (Object.keys(update).length === 0) return;
 
   // Attribution needs the "before" value for status/flagged — everything else
@@ -841,6 +863,9 @@ export async function updateScreening(
     }
     if (fields.credibility !== undefined) {
       await logAction({ screeningId: id, userId: actorUserId, actionType: "credibility_check" });
+    }
+    if (fields.score !== undefined) {
+      await logAction({ screeningId: id, userId: actorUserId, actionType: "rescreen" });
     }
   }
 }
