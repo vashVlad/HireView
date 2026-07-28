@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -37,9 +37,26 @@ function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "lin
 // ActivityLine tooltip on the Analytics page (hoveredIdx state, absolute-
 // positioned box, role="tooltip"). Shows the stage's total plus the exact
 // per-source breakdown and each source's share of that stage.
+//
+// Follows the cursor's exact x position, added 2026-07-27 (Vlad's follow-up:
+// "have it shown on exact mouse position") — tracked via onMouseMove's
+// nativeEvent.offsetX (relative to the bar container itself, since the
+// listener is bound directly on it), clamped so the w-56 tooltip can't run
+// past either edge of that row's own width. Vertical position stays pinned
+// just above the bar (bottom-full) rather than also following Y — the bar is
+// only 28px tall, so tracking Y added jitter without adding anything useful.
+const TOOLTIP_HALF_WIDTH = 112; // half of w-56 (224px)
+
 function StageBar({ stages }: { stages: FunnelData["stages"] }) {
-  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ key: string; x: number } | null>(null);
   const max = Math.max(...stages.map((s) => s.count), 1);
+
+  function updateHoverX(key: string, e: MouseEvent<HTMLDivElement>) {
+    const width = e.currentTarget.clientWidth;
+    const x = Math.min(Math.max(e.nativeEvent.offsetX, TOOLTIP_HALF_WIDTH), Math.max(width - TOOLTIP_HALF_WIDTH, TOOLTIP_HALF_WIDTH));
+    setHover({ key, x });
+  }
+
   return (
     <div className="flex flex-col gap-3">
       {stages.map((s) => {
@@ -47,14 +64,15 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
         const inboundPct = s.count > 0 ? (s.bySource.inbound / s.count) * 100 : 0;
         const outboundPct = s.count > 0 ? (s.bySource.outbound / s.count) * 100 : 0;
         const agencyPct = s.count > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
-        const isHovered = hoveredKey === s.key;
+        const isHovered = hover?.key === s.key;
         return (
           <div key={s.key} className="flex items-center gap-3">
             <span className="w-32 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.label}</span>
             <div
               className="relative h-7 flex-1 overflow-visible rounded-lg bg-zinc-100 dark:bg-zinc-800"
-              onMouseEnter={() => setHoveredKey(s.key)}
-              onMouseLeave={() => setHoveredKey(null)}
+              onMouseEnter={(e) => updateHoverX(s.key, e)}
+              onMouseMove={(e) => updateHoverX(s.key, e)}
+              onMouseLeave={() => setHover(null)}
             >
               <div className="h-full overflow-hidden rounded-lg">
                 <div className="flex h-full rounded-lg transition-all" style={{ width: `${barWidthPct}%` }}>
@@ -69,7 +87,8 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
               {isHovered && (
                 <div
                   role="tooltip"
-                  className="absolute bottom-full left-0 z-20 mb-2 w-56 rounded-lg border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                  className="pointer-events-none absolute bottom-full z-20 mb-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                  style={{ left: hover.x }}
                 >
                   <p className="mb-1.5 font-semibold text-zinc-800 dark:text-zinc-100">
                     {s.label} — {s.count.toLocaleString()}
