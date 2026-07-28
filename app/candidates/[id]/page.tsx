@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ResultCard } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
@@ -59,12 +60,29 @@ function toCandidateResult(s: ScreeningRecord): CandidateResult {
 export default function CandidateFullResultPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const numId = parseInt(id, 10);
+  const router = useRouter();
 
   const [screening, setScreening] = useState<ScreeningRecord | null>(null);
   const [projectName, setProjectName] = useState<string | undefined>(undefined);
   const [jdAnalysis, setJdAnalysis] = useState<JDAnalysis | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Back should return to wherever the recruiter actually came from — most
+  // often the Screen tab's results view mid-batch (e.g. clicked "View full
+  // result" on an already-screened candidate while reviewing a batch of
+  // freshly-uploaded resumes), which is client-side React state with no URL
+  // of its own, so a hardcoded href here would always dump them onto the
+  // Pipeline tab instead and lose that in-progress batch view. Vlad's ask,
+  // 2026-07-28. document.referrer is set once per real page load and is
+  // unaffected by client-side <Link> transitions within the same tab, so it
+  // reliably distinguishes "arrived via clicking around in the app this
+  // session" (same-origin — safe to router.back()) from "opened via a
+  // bookmarked/shared link" (this page is explicitly designed to support
+  // that, per the comment above — falls back to the project's Pipeline tab).
+  const [cameFromWithinApp, setCameFromWithinApp] = useState(false);
+  useEffect(() => {
+    setCameFromWithinApp(document.referrer.startsWith(window.location.origin));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,15 +160,26 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
           title={screening?.candidateName ?? "Candidate"}
           subtitle={projectName ? `Screened in "${projectName}"` : undefined}
           action={
-            <Link
-              href={projectName && screening?.projectId != null ? `/projects/${screening.projectId}?tab=pipeline` : "/candidates"}
+            <button
+              type="button"
+              onClick={() => {
+                if (cameFromWithinApp) {
+                  router.back();
+                } else {
+                  const fallbackHref =
+                    projectName && screening?.projectId != null
+                      ? `/projects/${screening.projectId}?tab=pipeline`
+                      : "/candidates";
+                  router.push(fallbackHref);
+                }
+              }}
               className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M19 12H5m0 0 6 6m-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               Back
-            </Link>
+            </button>
           }
         />
 
