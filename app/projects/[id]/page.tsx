@@ -9,7 +9,7 @@ import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
-import { ResultCard, type FitSuggestion } from "@/components/ResultCard";
+import { ResultCard, type FitSuggestion, type AlreadyInProject } from "@/components/ResultCard";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -631,20 +631,24 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               onCheckCrossProjectPromise={eligibleForFitCheck ? () => {
                 const run = async () => {
                   const file = files.find((f) => f.name === result.fileName);
-                  if (!file) return false;
+                  if (!file) return { promising: false, alreadyIn: [] as AlreadyInProject[] };
                   const fd = new FormData();
                   fd.set("resumeFile", file);
                   fd.set("currentProjectId", String(project.id));
+                  fd.set("candidateName", result.candidateName);
                   const res = await fetch("/api/cross-project-fit/gate", { method: "POST", body: fd });
-                  if (!res.ok) return false;
+                  if (!res.ok) return { promising: false, alreadyIn: [] as AlreadyInProject[] };
                   const data = await res.json().catch(() => null);
-                  return Boolean(data?.promising);
+                  return {
+                    promising: Boolean(data?.promising),
+                    alreadyIn: (data?.alreadyIn ?? []) as AlreadyInProject[],
+                  };
                 };
                 // Chained onto the same shared queue as onFindBetterFit below —
                 // gate checks and real checks never run concurrently either.
                 const chained = fitQueueRef.current.then(run, run);
                 fitQueueRef.current = chained.catch(() => {});
-                return chained as Promise<boolean>;
+                return chained as Promise<{ promising: boolean; alreadyIn: AlreadyInProject[] }>;
               } : undefined}
               onFindBetterFit={eligibleForFitCheck ? () => {
                 const run = async () => {
@@ -653,19 +657,23 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
                   const fd = new FormData();
                   fd.set("resumeFile", file);
                   fd.set("currentProjectId", String(project.id));
+                  fd.set("candidateName", result.candidateName);
                   const res = await fetch("/api/cross-project-fit", { method: "POST", body: fd });
                   if (!res.ok) {
                     const body = await res.json().catch(() => null);
                     throw new Error(body?.error ?? "Could not check other roles");
                   }
                   const data = await res.json();
-                  return data.suggestion as FitSuggestion | null;
+                  return {
+                    suggestion: (data.suggestion ?? null) as FitSuggestion | null,
+                    alreadyIn: (data.alreadyIn ?? []) as AlreadyInProject[],
+                  };
                 };
                 // Chain onto the shared queue so this call waits for anything
                 // already in flight, regardless of which card triggered it.
                 const chained = fitQueueRef.current.then(run, run);
                 fitQueueRef.current = chained.catch(() => {});
-                return chained as Promise<FitSuggestion | null>;
+                return chained as Promise<{ suggestion: FitSuggestion | null; alreadyIn: AlreadyInProject[] }>;
               } : undefined}
               onTransferToProject={eligibleForFitCheck ? async (suggestion: FitSuggestion) => {
                 const file = files.find((f) => f.name === result.fileName);

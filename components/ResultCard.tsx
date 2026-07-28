@@ -25,6 +25,18 @@ export interface FitSuggestion {
   jobDescription: string;
 }
 
+/**
+ * A project the candidate is already screened in — excluded from cross-
+ * project fit scoring entirely (nothing to suggest there) and surfaced as a
+ * plain mention instead. Vlad's ask, 2026-07-28: "if the person already
+ * exists in one of the projects just simply mention that and don't screen
+ * it again."
+ */
+export interface AlreadyInProject {
+  projectId: number;
+  projectName: string;
+}
+
 export function ResultCard({
   result,
   rank,
@@ -65,9 +77,9 @@ export function ResultCard({
    * 50 threshold here, 80 elsewhere, never checked under the old rule).
    */
   eligibleForFitCheck?: boolean;
-  onFindBetterFit?: () => Promise<FitSuggestion | null>;
+  onFindBetterFit?: () => Promise<{ suggestion: FitSuggestion | null; alreadyIn: AlreadyInProject[] }>;
   /** Cheap Claude classification call — decides whether this candidate is worth auto-firing the full cross-project check for. */
-  onCheckCrossProjectPromise?: () => Promise<boolean>;
+  onCheckCrossProjectPromise?: () => Promise<{ promising: boolean; alreadyIn: AlreadyInProject[] }>;
   onTransferToProject?: (suggestion: FitSuggestion) => Promise<void>;
   /** Count of other active projects across every team this recruiter belongs to. undefined = not checked yet, 0 = nothing to suggest against. */
   otherActiveCount?: number;
@@ -111,6 +123,7 @@ export function ResultCard({
   const [checkingFit, setCheckingFit] = useState(false);
   const [fitChecked, setFitChecked] = useState(false);
   const [fitSuggestion, setFitSuggestion] = useState<FitSuggestion | null>(null);
+  const [alreadyInProjects, setAlreadyInProjects] = useState<AlreadyInProject[]>([]);
   const [fitError, setFitError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
@@ -143,8 +156,9 @@ export function ResultCard({
     setCheckingFit(true);
     setFitError(null);
     try {
-      const suggestion = await onFindBetterFit();
+      const { suggestion, alreadyIn } = await onFindBetterFit();
       setFitSuggestion(suggestion);
+      if (alreadyIn.length > 0) setAlreadyInProjects(alreadyIn);
       setFitChecked(true);
     } catch (err) {
       setFitError(err instanceof Error ? err.message : "Could not check other roles");
@@ -192,7 +206,9 @@ export function ResultCard({
       setCheckingGate(true);
       let promising = false;
       try {
-        promising = await onCheckCrossProjectPromise();
+        const gateResult = await onCheckCrossProjectPromise();
+        promising = gateResult.promising;
+        if (gateResult.alreadyIn.length > 0) setAlreadyInProjects(gateResult.alreadyIn);
       } catch {
         promising = false;
       }
@@ -413,7 +429,30 @@ export function ResultCard({
           stronger-fitting open role exists elsewhere. A cheap Claude gate decides
           whether to auto-fire the real check; manual link otherwise. */}
       {eligibleForFitCheck && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
-        <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
+        <div className="mt-3 flex flex-col gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
+          {/* Already-in-project mention, added 2026-07-28 (Vlad's ask): these
+              projects were excluded from scoring entirely (free name-match
+              pre-check, no Claude call spent) since there's nothing to
+              suggest where the candidate already exists — just say so.
+              Shown independently of fitChecked/fitSuggestion below, since it
+              can resolve from either the gate call or the full check. */}
+          {alreadyInProjects.length > 0 && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Already screened in{" "}
+              {alreadyInProjects.map((p, i) => (
+                <span key={p.projectId}>
+                  {i > 0 && ", "}
+                  <Link
+                    href={`/projects/${p.projectId}?tab=pipeline`}
+                    className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                  >
+                    {p.projectName}
+                  </Link>
+                </span>
+              ))}
+              .
+            </p>
+          )}
           {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
           {!fitError && (checkingGate || checkingFit) && (
             <p className="text-xs text-violet-500 dark:text-violet-400">Checking other active roles…</p>

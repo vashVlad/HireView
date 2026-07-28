@@ -193,6 +193,42 @@ async function findCrossProjectNameMatch(params: {
   return match ? { screeningId: match.id, projectId: match.project_id, score: match.score } : null;
 }
 
+// ── Cross-project candidate lookup (Fit Suggestion pre-check) ───────────────
+//
+// Vlad's ask, 2026-07-28: before spending a Claude call re-scoring a
+// candidate against another project (the Cross-Project Fit Suggestion, see
+// app/api/cross-project-fit/route.ts and its /gate sibling), check for free
+// whether they're already screened there — if so there's nothing to
+// suggest, so skip scoring that project entirely and just mention it
+// instead. Same normalizeCandidateName comparison as
+// findCrossProjectNameMatch above, just returning "which of these
+// projectIds already have them" instead of a single best match. Scoped to
+// an explicit project list the caller already team-scoped (via
+// listProjects(teamIds)), so no team_id filter is needed here.
+export async function findProjectsWithCandidate(params: {
+  candidateName: string;
+  projectIds: number[];
+}): Promise<Set<number>> {
+  const { candidateName, projectIds } = params;
+  if (projectIds.length === 0) return new Set();
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("project_id, candidate_name")
+    .in("project_id", projectIds)
+    .returns<{ project_id: number | null; candidate_name: string }[]>();
+  if (error || !data) return new Set();
+
+  const target = normalizeCandidateName(candidateName);
+  const matched = new Set<number>();
+  for (const row of data) {
+    if (row.project_id != null && normalizeCandidateName(row.candidate_name) === target) {
+      matched.add(row.project_id);
+    }
+  }
+  return matched;
+}
+
 // ── Rejection history (system-wide, any recruiter) ──────────────────────────
 //
 // Teti's request, 2026-07-10: since every candidate is now saved regardless

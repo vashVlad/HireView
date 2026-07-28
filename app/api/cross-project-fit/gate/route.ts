@@ -4,6 +4,7 @@ import { listProjects } from "@/lib/projects";
 import { getUserTeamIds } from "@/lib/teams";
 import { getAuthUser } from "@/lib/auth";
 import { getAnthropicClient, CLAUDE_MODEL } from "@/lib/anthropic";
+import { findProjectsWithCandidate } from "@/lib/screenings";
 
 export const maxDuration = 30;
 
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const resumeFile = formData.get("resumeFile");
   const currentProjectIdField = formData.get("currentProjectId");
+  const candidateNameField = formData.get("candidateName");
 
   if (!(resumeFile instanceof File)) {
     return NextResponse.json({ error: "resumeFile is required" }, { status: 400 });
@@ -61,28 +63,44 @@ export async function POST(request: NextRequest) {
   const currentProjectId = typeof currentProjectIdField === "string" && currentProjectIdField.trim()
     ? parseInt(currentProjectIdField.trim(), 10) || undefined
     : undefined;
+  const candidateName = typeof candidateNameField === "string" ? candidateNameField.trim() : "";
 
   const teamIds = await getUserTeamIds(user.id);
-  if (teamIds.length === 0) return NextResponse.json({ promising: false });
+  if (teamIds.length === 0) return NextResponse.json({ promising: false, alreadyIn: [] });
 
   const projects = await listProjects(teamIds);
   const candidates = projects.filter(
     (p) => p.id !== currentProjectId && p.status === "active" && p.jobDescription.trim().length > 0
   );
-  if (candidates.length === 0) return NextResponse.json({ promising: false });
+  if (candidates.length === 0) return NextResponse.json({ promising: false, alreadyIn: [] });
+
+  // Free (no Claude call) pre-check, same as POST's full check, Vlad's ask
+  // 2026-07-28: if the candidate is already screened in a project, there's
+  // nothing to classify it for — exclude it before the (paid) gate call.
+  const alreadyInIds = candidateName
+    ? await findProjectsWithCandidate({ candidateName, projectIds: candidates.map((p) => p.id) })
+    : new Set<number>();
+  const alreadyIn = candidates
+    .filter((p) => alreadyInIds.has(p.id))
+    .map((p) => ({ projectId: p.id, projectName: p.name }));
+  const remaining = candidates.filter((p) => !alreadyInIds.has(p.id));
+
+  // Nothing left to classify — every other active project already has this
+  // candidate. Return without spending a Claude call at all.
+  if (remaining.length === 0) return NextResponse.json({ promising: false, alreadyIn });
 
   let resumeText: string;
   try {
     const buffer = Buffer.from(await resumeFile.arrayBuffer());
     resumeText = await extractResumeText(resumeFile.name, buffer);
   } catch {
-    return NextResponse.json({ promising: false });
+    return NextResponse.json({ promising: false, alreadyIn });
   }
 
   // Short role summaries, not full JDs — this is the "cheap" half of the
   // cost savings versus POST (the other half is the minimal output schema
   // below: one boolean, not a full scored result per project).
-  const roleList = candidates
+  const roleList = remaining
     .map((p) => `- ${p.name}: ${(p.jdAnalysis?.mustHaveSkills ?? []).join(", ") || "(no analyzed requirements on file)"}`)
     .join("\n");
 
@@ -103,12 +121,12 @@ export async function POST(request: NextRequest) {
 
     const toolUse = response.content.find((block) => block.type === "tool_use");
     if (!toolUse || toolUse.type !== "tool_use") {
-      return NextResponse.json({ promising: false });
+      return NextResponse.json({ promising: false, alreadyIn });
     }
     const promising = Boolean((toolUse.input as { promising?: boolean }).promising);
-    return NextResponse.json({ promising });
+    return NextResponse.json({ promising, alreadyIn });
   } catch (err) {
     console.error("Cross-project gate error:", err);
-    return NextResponse.json({ promising: false });
+    return NextResponse.json({ promising: false, alreadyIn });
   }
 }
