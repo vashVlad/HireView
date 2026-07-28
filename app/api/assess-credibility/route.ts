@@ -163,6 +163,15 @@ export async function POST(request: NextRequest) {
   // Persist cross-reference doc path (reuses linkedin_pdf_path column — no schema change)
   if (crossRefPath) {
     await updateScreening(screeningId, { linkedInPdfPath: crossRefPath }).catch(() => {});
+    // Separate, independent call — deliberately NOT merged into the update
+    // above. cross_ref_is_linkedin requires its own migration
+    // (supabase-migration-cross-ref-doc-type.sql, NOT YET CONFIRMED RUN as of
+    // this comment); keeping it as its own UPDATE means a missing column
+    // here can never fail/roll back persisting linkedInPdfPath, which already
+    // worked before this column existed. Lets the Interview View document
+    // popup label the second tab correctly ("LinkedIn" vs "Cross-Reference")
+    // instead of always assuming LinkedIn.
+    await updateScreening(screeningId, { crossRefIsLinkedIn: isLinkedIn }).catch(() => {});
   }
 
   return NextResponse.json({ assessment });

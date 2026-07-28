@@ -605,11 +605,23 @@ export async function listScreenings(
   if (teamIds != null && teamIds.length === 0) return [];
   const supabase = getSupabaseClient();
 
+  // No .limit() here — there used to be a hardcoded .limit(200), with no
+  // decisions-log/open-questions entry anywhere explaining why 200 was
+  // chosen (looks like an unflagged, undocumented safety cap from early in
+  // the project, back when 200 candidates was more than this app would ever
+  // see). Real bug, found 2026-07-27 (Vlad: "the numbers in the pipeline
+  // don't update, it stopped adding up at 200") — every count that reads
+  // through listScreenings (Pipeline tab counts, All Candidates counts,
+  // status/stage filters, search) silently stopped growing past 200 rows the
+  // moment a project or team's real candidate count crossed that line, which
+  // is exactly what the Brillio pilot's real usage volume was starting to
+  // hit. Removed outright rather than raised to a bigger number, since any
+  // fixed cap recreates the same silent-cliff bug later, just at a higher
+  // count.
   let request = supabase
     .from("screenings")
     .select(SCREENING_COLUMNS)
-    .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false })
-    .limit(200);
+    .order(statuses && statuses.length > 0 ? "score" : "created_at", { ascending: false });
 
   if (query?.trim()) request = request.ilike("candidate_name", `%${query.trim()}%`);
   if (statuses && statuses.length > 0) request = request.in("status", statuses);
@@ -668,6 +680,17 @@ export async function updateScreening(
     careerTrajectory?: string;
     photoUrl?: string;
     linkedInPdfPath?: string;
+    /**
+     * Whether the cross-reference doc stored at linkedInPdfPath is an actual
+     * LinkedIn profile PDF vs. a second resume version — computed via
+     * detectLinkedIn() in app/api/assess-credibility/route.ts, previously
+     * discarded after steering the credibility-assessment prompt. Persisted
+     * so the Interview View document popup can label the tab correctly
+     * instead of always saying "LinkedIn". Requires
+     * supabase-migration-cross-ref-doc-type.sql — NOT YET CONFIRMED RUN as of
+     * this comment; see that file's header for the sequencing rationale.
+     */
+    crossRefIsLinkedIn?: boolean;
     interviewQuestions?: string[];
     /** See ARCHIVE_REASONS (lib/types.ts) and supabase-migration-archive-reason.sql. */
     archiveReason?: string;
@@ -699,6 +722,10 @@ export async function updateScreening(
   if (fields.careerTrajectory !== undefined) update.career_trajectory = fields.careerTrajectory;
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
+  // cross_ref_is_linkedin requires supabase-migration-cross-ref-doc-type.sql
+  // — NOT YET CONFIRMED RUN. Written conditionally (only when the caller
+  // passes it) same as archive_reason was before its migration was confirmed.
+  if (fields.crossRefIsLinkedIn !== undefined) update.cross_ref_is_linkedin = fields.crossRefIsLinkedIn;
   if (fields.interviewQuestions !== undefined) update.interview_questions = fields.interviewQuestions;
   // archive_reason column not yet confirmed run (supabase-migration-archive-reason.sql)
   // — see that file's header for the sequencing rationale.

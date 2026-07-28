@@ -14,6 +14,8 @@ import { StatusStageControl } from "@/components/StatusStageControl";
 import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
 import { getSourceType, type SourceType } from "@/lib/sourceType";
+import { avatarColor, avatarInitial } from "@/lib/avatarColor";
+import type { ScreeningAction } from "@/lib/screeningActions";
 import {
   CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS,
   type CandidateStatus, type CredibilityAssessment, type CredibilitySignal,
@@ -46,6 +48,28 @@ function formatStatusDate(iso: string) {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+// Added 2026-07-27 (Vlad: "activities are not shown on the result card on
+// the all candidates page") — this page has always had its own separate
+// CandidateCard component (not a shared ResultCard), and it never grew the
+// Activity/attribution timeline that app/projects/[id]/page.tsx's Pipeline
+// tab has had since Phase 1.2. Same GET /api/history/[id]/actions endpoint,
+// same ScreeningAction type, same formatActionText mapping — copied here
+// rather than extracted into a shared helper, matching how this file already
+// duplicates formatDate/SIGNAL_BADGE/etc. instead of importing from the
+// Pipeline tab's page module (which isn't set up to export anything).
+function formatActionText(a: ScreeningAction, candidateName: string): string {
+  switch (a.actionType) {
+    case "created": return `screened ${candidateName}`;
+    case "status_change": return `moved ${candidateName} to ${CANDIDATE_STATUS_LABELS[a.toValue as CandidateStatus] ?? a.toValue}`;
+    case "stage_change": return `moved ${candidateName} to ${a.toValue} stage`;
+    case "flagged": return `flagged ${candidateName}`;
+    case "unflagged": return `removed the flag from ${candidateName}`;
+    case "note": return `added a note on ${candidateName}`;
+    case "credibility_check": return `ran a credibility check on ${candidateName}`;
+    default: return `updated ${candidateName}`;
+  }
 }
 
 // ── Candidate card ─────────────────────────────────────────────────────────
@@ -111,6 +135,21 @@ function CandidateCard({
   const [credibility, setCredibility] = useState<CredibilityAssessment | undefined>(s.credibility);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [actions, setActions] = useState<ScreeningAction[] | "loading" | undefined>(undefined);
+
+  // Lazy-load the attribution timeline the first time this card is expanded —
+  // same pattern as PipelineTab's actionsMap in app/projects/[id]/page.tsx,
+  // just scoped to this card's own local state instead of a page-level map,
+  // since this component already manages everything else (credibility,
+  // notes) locally per-card rather than via a parent-held map.
+  useEffect(() => {
+    if (!expanded || actions !== undefined) return;
+    setActions("loading");
+    fetch(`/api/history/${s.id}/actions`)
+      .then((res) => res.json())
+      .then((data) => setActions(data.actions ?? []))
+      .catch(() => setActions([]));
+  }, [expanded, actions, s.id]);
 
   async function handleSaveNotes(text: string) {
     setNoteSaveState("saving");
@@ -420,6 +459,30 @@ function CandidateCard({
               onBlur={(e) => handleSaveNotes(e.target.value)}
               placeholder="Add notes about this candidate..." rows={3}
               className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
+          </div>
+
+          {/* ── Attribution timeline ──────────────────────────────────── */}
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Activity</p>
+            {actions === undefined || actions === "loading" ? (
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">Loading…</p>
+            ) : actions.length === 0 ? (
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">No activity recorded yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {actions.map((a) => (
+                  <li key={a.id} className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(a.userEmail)}`}>
+                      {avatarInitial(a.userEmail)}
+                    </span>
+                    <span>
+                      <span className="font-semibold text-zinc-700 dark:text-zinc-300">{a.userEmail}</span>{" "}
+                      {formatActionText(a, s.candidateName)} on {formatDate(a.createdAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Calibration feedback */}

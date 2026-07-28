@@ -1,0 +1,26 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Cross-Reference Document Type
+-- Run this in Supabase SQL editor → Run
+--
+-- The Credibility Checker's second document (stored in linkedin_pdf_path,
+-- see supabase-migration-... history for that column) can actually be EITHER
+-- a real LinkedIn profile PDF OR a second resume version — the uploader itself
+-- says as much ("Cross-reference doc — LinkedIn PDF or second resume",
+-- components/CredibilityChecker.tsx). app/api/assess-credibility/route.ts
+-- already computes which one it is via detectLinkedIn(crossRefText) (the
+-- `isLinkedIn` boolean, used today only to steer the credibility-assessment
+-- prompt) but never persisted that classification anywhere — so the
+-- Interview View document popup (app/interview/[id]/document/page.tsx) had
+-- no way to know, and always hardcoded the second tab's label to "LinkedIn"
+-- regardless of what was actually uploaded. This column persists that
+-- already-computed classification so the popup can label the tab correctly.
+--
+-- Additive only, nullable, no backfill: existing rows with an already-stored
+-- linkedin_pdf_path from before this migration will read NULL here (unknown
+-- type — we never recorded which kind of file it was at the time). The UI
+-- treats NULL as "Cross-Reference" (generic) rather than guessing "LinkedIn".
+-- Only newly-run credibility checks after this migration populate it, same
+-- pattern as every other additive signal column in this project.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE screenings ADD COLUMN IF NOT EXISTS cross_ref_is_linkedin boolean;

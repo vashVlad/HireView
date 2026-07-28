@@ -40,13 +40,32 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
   const [activeDoc, setActiveDoc] = useState<"resume" | "linkedin">("resume");
   const [hasLinkedIn, setHasLinkedIn] = useState(false);
   const [checking, setChecking] = useState(true);
+  // The cross-reference doc stored under this candidate can be a real
+  // LinkedIn PDF OR a second resume version (see CredibilityChecker.tsx's
+  // uploader copy: "LinkedIn PDF or second resume") — the tab used to always
+  // say "LinkedIn" regardless of which it actually was. The HEAD check now
+  // reports this via a response header (X-Cross-Ref-Is-Linkedin), backed by
+  // the already-computed detectLinkedIn() classification from the
+  // credibility check itself. null = unknown (pre-migration row, or the
+  // header wasn't present) — treated as "don't assume LinkedIn."
+  const [crossRefIsLinkedIn, setCrossRefIsLinkedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
     fetch(`/api/history/${id}/linkedin`, { method: "HEAD" })
-      .then((r) => setHasLinkedIn(r.ok))
+      .then((r) => {
+        setHasLinkedIn(r.ok);
+        const header = r.headers.get("X-Cross-Ref-Is-Linkedin");
+        setCrossRefIsLinkedIn(header === "true" ? true : header === "false" ? false : null);
+      })
       .catch(() => setHasLinkedIn(false))
       .finally(() => setChecking(false));
   }, [id]);
+
+  // Display label/icon for the second tab — only call it "LinkedIn" when
+  // we actually know that's what was uploaded. Anything else (a second
+  // resume, or an unknown/pre-migration row) gets a neutral, generic label
+  // instead of a guess.
+  const crossRefLabel = crossRefIsLinkedIn === true ? "LinkedIn" : "Cross-Reference";
 
   // The caller already has the resume's mime type in memory (it's on
   // ScreeningRecord) and passes it straight through as a URL param — see
@@ -113,20 +132,32 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
             type="button"
             onClick={() => hasLinkedIn && setActiveDoc("linkedin")}
             disabled={checking || !hasLinkedIn}
-            title={!hasLinkedIn && !checking ? "Run a credibility check first to store the LinkedIn PDF" : undefined}
+            title={!hasLinkedIn && !checking ? "Run a credibility check first to store this document" : undefined}
             className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
               activeDoc === "linkedin"
-                ? "bg-[#0077B5] text-white shadow"
+                ? crossRefIsLinkedIn === true
+                  ? "bg-[#0077B5] text-white shadow"
+                  : "bg-white text-zinc-900 shadow"
                 : hasLinkedIn
                 ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
                 : "cursor-not-allowed bg-zinc-900 text-zinc-700"
             }`}
           >
-            {/* LinkedIn icon */}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-            </svg>
-            LinkedIn
+            {crossRefIsLinkedIn === true ? (
+              /* LinkedIn icon — only shown when we actually know this is a LinkedIn PDF */
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+              </svg>
+            ) : (
+              /* Generic document icon — used whenever the cross-reference
+                 doc isn't confirmed to be a LinkedIn PDF (a second resume,
+                 or an unknown/pre-migration row). */
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+            {crossRefLabel}
             {!hasLinkedIn && !checking && (
               <span className="ml-1 text-[10px] font-normal text-zinc-600">(not stored)</span>
             )}
@@ -134,6 +165,26 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Back button — added 2026-07-27 (Vlad: "in case I follow some
+              link"). A previewed doc (docx preview HTML, or a resume with an
+              embedded LinkedIn/portfolio/email link) can navigate the iframe
+              away from the document view with no way back short of closing
+              the whole popup. window.history.back() targets the popup
+              window's own joint session history, which includes same-origin
+              iframe navigations in this app (both the raw file endpoints and
+              /resume/preview are same-origin), so this reliably returns to
+              the last document view instead of just closing the window. */}
+          <button
+            type="button"
+            onClick={() => window.history.back()}
+            className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5m0 0 6 6m-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Back
+          </button>
+
           {/* Download original — always available for the resume, even
               when a preview is showing (Vlad, 2026-07-16: "keep both").
               Always points at the raw file endpoint, never the HTML
@@ -175,7 +226,7 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
           key={docUrl}
           src={docUrl}
           className="flex-1 w-full border-0"
-          title={activeDoc === "resume" ? "Resume" : "LinkedIn PDF"}
+          title={activeDoc === "resume" ? "Resume" : crossRefLabel}
         />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
