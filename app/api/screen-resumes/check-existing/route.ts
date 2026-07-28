@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
 import { hashResumeText, normalizeCandidateName } from "@/lib/resumeContentHash";
 import { getSupabaseClient } from "@/lib/supabase";
-import { getAuthUser } from "@/lib/auth";
+import { canAccessProject, getAuthUser } from "@/lib/auth";
 import { listRejectionHistory } from "@/lib/screenings";
 import type { CandidateStatus, CheckExistingResult, ExistingCandidateRef, Recommendation, RejectionHistoryEntry } from "@/lib/types";
 
@@ -67,6 +67,14 @@ export async function POST(request: NextRequest) {
 
   if (files.length === 0) {
     return NextResponse.json({ error: "At least one resume file is required" }, { status: 400 });
+  }
+
+  // Same by-id ownership check as screen-resumes/route.ts and save-one/
+  // route.ts — without this, any authenticated user on any team could pass
+  // another team's numeric projectId and read back that project's full
+  // candidate list (names, scores, summaries, strengths, concerns).
+  if (projectId != null && !(await canAccessProject(user, projectId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // System-wide (any project, any team) — independent of projectId, so it's
