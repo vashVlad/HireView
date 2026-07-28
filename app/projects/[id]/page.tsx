@@ -253,6 +253,54 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
 }
 
 // ── Screen tab ─────────────────────────────────────────────────────────────
+//
+// Batch results persistence (sessionStorage), added 2026-07-28 (Vlad's ask):
+// after screening a batch and clicking "View full result" on an
+// already-screened candidate's card, pressing Back should return to that
+// exact batch — not a blank Screen form. ScreenTab is conditionally rendered
+// by its parent (`{tab === "screen" && <ScreenTab .../>}`), so it fully
+// unmounts on any tab switch; the results view previously lived only in this
+// component's React state with no URL of its own, so switching tabs and back
+// (even without ever leaving the page) already lost it before this fix, not
+// just the round trip through the candidate page. sessionStorage, keyed per
+// project, survives both: read once synchronously on mount (via the lazy
+// useState initializers below, before first paint) and written whenever the
+// results view's data changes. Cleared on "Screen more" (handleReset).
+//
+// Raw File objects can't be persisted (not JSON-serializable) — restored
+// existingMatches entries carry `file: undefined`, which
+// AlreadyScreenedCard already handles gracefully (disables "Re-screen
+// anyway" with a "try re-uploading" tooltip, the same pattern ResultCard's
+// fit-suggestion/transfer actions already use for a missing original file).
+// Everything else (viewing scores, status changes, "View full result",
+// cross-project fit on the real results) is unaffected — those act on saved
+// ids, not the raw file.
+function batchStorageKey(projectId: number): string {
+  return `hv:screen-batch:${projectId}`;
+}
+
+interface PersistedBatch {
+  results: CandidateResult[];
+  existingMatches: { match: CheckExistingResult }[];
+  existingCandidates: ExistingCandidateRef[];
+  nameMatches: [string, ExistingCandidateRef][];
+  rejectionHistoryBaseline: RejectionHistoryEntry[];
+  rejectionMatches: [string, RejectionHistoryEntry][];
+  fileErrors: ScreenResumesError[];
+}
+
+function readPersistedBatch(projectId: number): PersistedBatch | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(batchStorageKey(projectId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedBatch;
+    if (!Array.isArray(parsed.results) || parsed.results.length === 0) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   project: Project;
@@ -271,10 +319,15 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
    */
   onScreeningFieldSaved?: (id: number, fields: Partial<ScreeningRecord>) => void;
 }) {
+  // Read once per mount — see the block comment above this component for
+  // why this exists. `initialBatch` is resolved before any of the state
+  // below initializes, so each field below can restore from it in one pass.
+  const [initialBatch] = useState(() => readPersistedBatch(project.id));
+
   const [files, setFiles] = useState<File[]>([]);
-  const [screenView, setScreenView] = useState<ScreenView>("form");
-  const [results, setResults] = useState<CandidateResult[]>([]);
-  const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
+  const [screenView, setScreenView] = useState<ScreenView>(() => (initialBatch ? "results" : "form"));
+  const [results, setResults] = useState<CandidateResult[]>(() => initialBatch?.results ?? []);
+  const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>(() => initialBatch?.fileErrors ?? []);
   const [formError, setFormError] = useState<string | null>(null);
   // Files that matched an existing screening in this project via the free
   // pre-check (app/api/screen-resumes/check-existing) — set aside before
@@ -293,22 +346,29 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // covered more reliably by the post-score name-match check below
   // (existingCandidates/nameMatches), which compares actual extracted
   // identity instead of a filename. See decisions-log.md, 2026-07-15.
+  // `file` is optional — undefined right after a sessionStorage restore
+  // (raw File objects aren't JSON-serializable), see the block comment
+  // above this component. AlreadyScreenedCard already handles that case.
   const [existingMatches, setExistingMatches] = useState<
-    { match: CheckExistingResult; file: File }[]
-  >([]);
+    { match: CheckExistingResult; file?: File }[]
+  >(() => initialBatch?.existingMatches ?? []);
   // Candidates already saved in this project, by normalized name — the one
   // signal exact-content hashing can't catch (two different resume files
   // for the same person). Populated during the pre-check, compared against
   // AFTER scoring since candidate name doesn't exist before then.
-  const [existingCandidates, setExistingCandidates] = useState<ExistingCandidateRef[]>([]);
+  const [existingCandidates, setExistingCandidates] = useState<ExistingCandidateRef[]>(() => initialBatch?.existingCandidates ?? []);
   // fileName -> matched existing candidate, purely informational (scoring
   // already happened by the time a name match is knowable).
-  const [nameMatches, setNameMatches] = useState<Map<string, ExistingCandidateRef>>(new Map());
+  const [nameMatches, setNameMatches] = useState<Map<string, ExistingCandidateRef>>(
+    () => new Map(initialBatch?.nameMatches ?? [])
+  );
   // System-wide (any project, any team) prior rejections, by normalized
   // name — Teti's request, 2026-07-10. Same pattern as nameMatches, just
   // sourced from checkData.rejectionHistory instead of existingCandidates.
-  const [rejectionHistoryBaseline, setRejectionHistoryBaseline] = useState<RejectionHistoryEntry[]>([]);
-  const [rejectionMatches, setRejectionMatches] = useState<Map<string, RejectionHistoryEntry>>(new Map());
+  const [rejectionHistoryBaseline, setRejectionHistoryBaseline] = useState<RejectionHistoryEntry[]>(() => initialBatch?.rejectionHistoryBaseline ?? []);
+  const [rejectionMatches, setRejectionMatches] = useState<Map<string, RejectionHistoryEntry>>(
+    () => new Map(initialBatch?.rejectionMatches ?? [])
+  );
   // Source picker, 2026-07-20 (Vlad's ask): three mutually-exclusive types —
   // Applicant (default), LinkedIn (existing linkedin_mode, unchanged scoring
   // behavior via isLinkedInMode below), Agency (new, carries a free-text
@@ -345,6 +405,29 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       .catch(() => { if (!cancelled) setOtherActiveCount(0); });
     return () => { cancelled = true; };
   }, [screenView, project.id]);
+
+  // Keep sessionStorage in sync with the results view — see the block
+  // comment above this component. Fires on every relevant change (status
+  // updates, a forced rescore, etc.), not just once at batch-completion
+  // time, so a restored view stays consistent with anything the recruiter
+  // did before navigating away and back.
+  useEffect(() => {
+    if (screenView !== "results" || results.length === 0) return;
+    const toPersist: PersistedBatch = {
+      results,
+      existingMatches: existingMatches.map(({ match }) => ({ match })),
+      existingCandidates,
+      nameMatches: [...nameMatches.entries()],
+      rejectionHistoryBaseline,
+      rejectionMatches: [...rejectionMatches.entries()],
+      fileErrors,
+    };
+    try {
+      window.sessionStorage.setItem(batchStorageKey(project.id), JSON.stringify(toPersist));
+    } catch {
+      // Storage full/unavailable — non-fatal, just means Back won't restore this time.
+    }
+  }, [screenView, results, existingMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, fileErrors, project.id]);
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -555,6 +638,13 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     setExistingMatches([]);
     setExistingCandidates([]);
     setNameMatches(new Map());
+    setRejectionHistoryBaseline([]);
+    setRejectionMatches(new Map());
+    try {
+      window.sessionStorage.removeItem(batchStorageKey(project.id));
+    } catch {
+      // non-fatal
+    }
   }
 
   if (screenView === "results") {

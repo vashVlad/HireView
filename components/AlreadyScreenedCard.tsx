@@ -9,7 +9,16 @@ import { CANDIDATE_STATUS_LABELS, type CandidateStatus, type CheckExistingResult
 interface AlreadyScreenedCardProps {
   fileName: string;
   existing: NonNullable<CheckExistingResult["existing"]>;
-  file: File;
+  /**
+   * Undefined after a batch-results restore (sessionStorage, see ScreenTab
+   * in app/projects/[id]/page.tsx) — the raw File object can't be persisted
+   * across a remount, only the JSON-serializable `existing` data can. "View
+   * full result" and status changes still work fine (they act on
+   * `existing.id`); "Re-screen anyway" is disabled instead, same as how
+   * ResultCard.tsx's fit-suggestion/transfer actions already handle a
+   * missing original file ("try re-uploading").
+   */
+  file?: File;
   onForceRescore: (file: File) => void;
   /**
    * Vlad's ask, 2026-07-20: "let me also change the status instead of just
@@ -115,8 +124,10 @@ export function AlreadyScreenedCard({
         </Link>
         <button
           type="button"
-          disabled={rescoring}
+          disabled={rescoring || !file}
+          title={!file ? "Original file no longer available — try re-uploading" : undefined}
           onClick={() => {
+            if (!file) return;
             setRescoring(true);
             onForceRescore(file);
           }}
