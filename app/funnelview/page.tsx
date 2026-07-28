@@ -47,9 +47,12 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
                 style={{ width: `${barWidthPct}%` }}
                 title={`Applied ${s.bySource.inbound.toLocaleString()} · Sourced (LinkedIn) ${s.bySource.outbound.toLocaleString()} · Agency ${s.bySource.agency.toLocaleString()}`}
               >
-                {s.bySource.inbound > 0 && <div className="h-full bg-green-500" style={{ width: `${inboundPct}%` }} />}
-                {s.bySource.outbound > 0 && <div className="h-full bg-violet-500 dark:bg-violet-600" style={{ width: `${outboundPct}%` }} />}
-                {s.bySource.agency > 0 && <div className="h-full bg-red-500" style={{ width: `${agencyPct}%` }} />}
+                {/* Colors updated 2026-07-27 (Vlad's ask) — gray/LinkedIn-blue/orange
+                    everywhere a source is shown, not just here; see SourceIcon.tsx's
+                    header comment for the full token list and reasoning. */}
+                {s.bySource.inbound > 0 && <div className="h-full bg-zinc-400 dark:bg-zinc-500" style={{ width: `${inboundPct}%` }} />}
+                {s.bySource.outbound > 0 && <div className="h-full bg-[#0A66C2]" style={{ width: `${outboundPct}%` }} />}
+                {s.bySource.agency > 0 && <div className="h-full bg-orange-500" style={{ width: `${agencyPct}%` }} />}
               </div>
             </div>
             <span className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
@@ -72,13 +75,13 @@ function SourceLegend() {
   return (
     <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
       <span className="flex items-center gap-1.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Applied
+        <span className="h-2.5 w-2.5 rounded-full bg-zinc-400 dark:bg-zinc-500" /> Applied
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-violet-500 dark:bg-violet-600" /> Sourced (LinkedIn)
+        <span className="h-2.5 w-2.5 rounded-full bg-[#0A66C2]" /> Sourced (LinkedIn)
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Agency
+        <span className="h-2.5 w-2.5 rounded-full bg-orange-500" /> Agency
       </span>
     </div>
   );
@@ -400,10 +403,10 @@ export default function FunnelViewPage() {
                             title={c.source === "agency" ? `Agency: ${c.agencyName ?? "—"}` : undefined}
                             className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
                               c.source === "outbound"
-                                ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400"
+                                ? "bg-[#0A66C2]/10 text-[#0A66C2] dark:bg-[#0A66C2]/20 dark:text-[#5B9BD5]"
                                 : c.source === "agency"
-                                ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
-                                : "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400"
+                                ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
+                                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-500/20 dark:text-zinc-400"
                             }`}
                           >
                             <SourceIcon type={toSourceIconType(c.source)} agencyName={c.agencyName} size={11} showApplicant />

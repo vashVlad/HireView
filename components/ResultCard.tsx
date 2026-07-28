@@ -277,7 +277,7 @@ export function ResultCard({
                 accent color elsewhere in this app (the agency-name input
                 field's border, the Agency picker's selected-ring color). */}
             {getSourceType(result) === "agency" && result.agencyName && (
-              <span className={`shrink-0 font-medium text-red-600 dark:text-red-400 ${solo ? "text-sm" : "text-xs"}`}>
+              <span className={`shrink-0 font-medium text-orange-600 dark:text-orange-400 ${solo ? "text-sm" : "text-xs"}`}>
                 {result.agencyName}
               </span>
             )}

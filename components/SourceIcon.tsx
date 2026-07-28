@@ -15,6 +15,18 @@ import { sourceLabelWithDetail } from "@/lib/sourceType";
  * common case is unchanged. Pass `showApplicant` where a badge should
  * always render regardless of type (e.g. FunnelView's Source column, which
  * already showed a pill for every row before this change).
+ *
+ * Color tokens, updated 2026-07-27 (Vlad's ask, applied everywhere a source
+ * is shown, not just here): Applicant = neutral gray (#71717A, Tailwind
+ * zinc-500 — was green), LinkedIn = LinkedIn's own brand blue (#0A66C2 —
+ * unchanged, already matched this ask), Agency = orange (#F97316, Tailwind
+ * orange-500 — was red, which read as a fraud/danger color despite agency
+ * sourcing being a completely neutral, unflagged source type). Every other
+ * agency/applicant/LinkedIn-tinted UI in the app (Screen tab's source picker,
+ * FunnelView's stacked bars/legend/table badges, the visible agency-name
+ * label on ResultCard/Pipeline/All Candidates, the agency-name input's focus
+ * ring) was updated to the same three tokens in the same pass — see
+ * decisions-log.md.
  */
 export default function SourceIcon({
   type,
@@ -46,7 +58,7 @@ export default function SourceIcon({
     return (
       <span title={title} className="shrink-0">
         <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Agency" className="shrink-0">
-          <rect width="24" height="24" rx="4" fill="#DC2626" />
+          <rect width="24" height="24" rx="4" fill="#F97316" />
           <path
             fill="none"
             stroke="#fff"
@@ -65,7 +77,7 @@ export default function SourceIcon({
   return (
     <span title={title} className="shrink-0">
       <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Applicant" className="shrink-0">
-        <rect width="24" height="24" rx="4" fill="#16A34A" />
+        <rect width="24" height="24" rx="4" fill="#71717A" />
         <path
           fill="none"
           stroke="#fff"

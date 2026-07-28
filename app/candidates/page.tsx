@@ -264,7 +264,7 @@ function CandidateCard({
                 the same addition on ResultCard.tsx and the Pipeline tab
                 card, so all three source-badge surfaces stay in sync. */}
             {!pendingSource && getSourceType(s) === "agency" && s.agencyName && (
-              <span className="shrink-0 truncate text-[11px] font-medium text-red-600 dark:text-red-400">
+              <span className="shrink-0 truncate text-[11px] font-medium text-orange-600 dark:text-orange-400">
                 {s.agencyName}
               </span>
             )}
@@ -300,12 +300,12 @@ function CandidateCard({
                       else setPendingSource(false);
                     }}
                     placeholder="Agency name…"
-                    className="w-28 rounded-full border border-red-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-red-500 dark:border-red-500/40 dark:bg-zinc-900 dark:text-zinc-100"
+                    className="w-28 rounded-full border border-orange-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-orange-500 dark:border-orange-500/40 dark:bg-zinc-900 dark:text-zinc-100"
                   />
                 ) : (
                   <button type="button" title="Agency"
                     onClick={() => setPendingSourceType("agency")}
-                    className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-red-400" : "opacity-40 hover:opacity-100"}`}>
+                    className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-orange-400" : "opacity-40 hover:opacity-100"}`}>
                     <SourceIcon type="agency" agencyName={s.agencyName} size={13} />
                   </button>
                 )}

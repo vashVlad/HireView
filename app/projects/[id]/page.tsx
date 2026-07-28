@@ -730,10 +730,12 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
 
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
         <div className="flex flex-wrap gap-1.5">
+          {/* Colors updated 2026-07-27 (Vlad's ask) — gray/LinkedIn-blue/orange
+              everywhere a source is shown; see SourceIcon.tsx's header comment. */}
           <button type="button" onClick={() => setSourceType("applicant")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "applicant"
-                ? "bg-green-600 text-white"
+                ? "bg-zinc-500 text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
             <SourceIcon type="applicant" showApplicant size={14} />
@@ -742,7 +744,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
           <button type="button" onClick={() => setSourceType("linkedin")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "linkedin"
-                ? "bg-violet-600 text-white"
+                ? "bg-[#0A66C2] text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
             <SourceIcon type="linkedin" size={14} />
@@ -751,7 +753,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
           <button type="button" onClick={() => setSourceType("agency")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "agency"
-                ? "bg-red-600 text-white"
+                ? "bg-orange-500 text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
             <SourceIcon type="agency" size={14} />
@@ -771,7 +773,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
             placeholder="Agency name…"
             value={agencyNameInput}
             onChange={(e) => setAgencyNameInput(e.target.value)}
-            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm placeholder-zinc-400 focus:border-red-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
+            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm placeholder-zinc-400 focus:border-orange-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
           />
         )}
       </div>
@@ -1361,7 +1363,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       surfaces stay in sync (same convention as the LinkedIn
                       badge consistency fix, 2026-07-17). */}
                   {pendingSourceId !== s.id && getSourceType(s) === "agency" && s.agencyName && (
-                    <span className="shrink-0 truncate text-[11px] font-medium text-red-600 dark:text-red-400">
+                    <span className="shrink-0 truncate text-[11px] font-medium text-orange-600 dark:text-orange-400">
                       {s.agencyName}
                     </span>
                   )}
@@ -1397,12 +1399,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                             else setPendingSourceId(null);
                           }}
                           placeholder="Agency name…"
-                          className="w-28 rounded-full border border-red-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-red-500 dark:border-red-500/40 dark:bg-zinc-900 dark:text-zinc-100"
+                          className="w-28 rounded-full border border-orange-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-orange-500 dark:border-orange-500/40 dark:bg-zinc-900 dark:text-zinc-100"
                         />
                       ) : (
                         <button type="button" title="Agency"
                           onClick={() => setPendingSourceType("agency")}
-                          className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-red-400" : "opacity-40 hover:opacity-100"}`}>
+                          className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-orange-400" : "opacity-40 hover:opacity-100"}`}>
                           <SourceIcon type="agency" agencyName={s.agencyName} size={13} />
                         </button>
                       )}
