@@ -339,7 +339,8 @@ export default function FunnelViewPage() {
                   <select
                     value={selectedProjectId}
                     onChange={(e) => setSelectedProjectId(e.target.value === "" ? "" : Number(e.target.value))}
-                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                    title={selectedProjectId !== "" ? (roleOptions.find((p) => p.projectId === selectedProjectId)?.projectName ?? "All roles") : "All roles"}
+                    className="w-32 truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
                   >
                     <option value="">All roles</option>
                     {roleOptions.map((project) => (
