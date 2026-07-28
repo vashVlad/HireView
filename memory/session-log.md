@@ -12,6 +12,16 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-27 (round 34) — Cross-Project Fit Suggestion missed a near-threshold pass
+- **Report (Vlad):** a candidate scored 54 against FDE's threshold of 50 (a real pass) and was never suggested Data Architect for Banking, where they scored 80. Traced this to `app/projects/[id]/page.tsx`: eligibility for the whole cross-project-fit mechanism was hardcoded as `score < project.scoreThreshold` in four separate places — the feature was only ever designed for "did this project reject you," never "did you only barely clear the bar."
+- **Asked Vlad how far to widen it** (AskUserQuestion: any passing candidate on demand / near-threshold only / also add to Pipeline tab / leave as-is). He specified an exact rule directly: check other projects whenever score < threshold + 15.
+- **Fix:** new `FIT_CHECK_MARGIN = 15` constant; the four scattered conditions collapsed into one `eligibleForFitCheck` variable per result. Renamed `ResultCard.tsx`'s `belowThreshold` prop → `eligibleForFitCheck` throughout (confirmed via grep it drives nothing else in that component).
+- **Also flagged, not built:** this mechanism still only exists in the Screen tab on fresh results — no way yet to re-run it on an already-saved Pipeline candidate. Vlad didn't ask for this now.
+- **Verified:** `npx tsc --noEmit` clean. Do-not-touch files confirmed zero real diff (pre-existing CRLF noise in this sandbox's mount inflated the diff stat, not real changes — same noise seen across most of the repo this session, unrelated to any edit made). Not live-tested — needs Vlad to re-screen a similarly marginal candidate and confirm the fit-check now fires.
+- **Next:** live-test, then commit/push/PR.
+
+---
+
 ## 2026-07-27 (round 33) — Real bug: candidate counts silently capped at 200
 - **Bug (Vlad):** "the numbers in the pipeline don't update, it stopped adding up at 200." Root cause: `listScreenings()` (`lib/screenings.ts`) — the single function behind `GET /api/history`, used by both the Pipeline tab and All Candidates page for every count/filter/search — had a hardcoded `.limit(200)` with no documented reason anywhere in this vault. Any project/team whose real matching count crossed 200 silently stopped growing in every count that reads through it.
 - **Fix:** removed the limit outright (not raised to a bigger number — same cliff would just recur later). Confirmed via repo-wide grep it was the only `.limit()` call anywhere in the codebase.

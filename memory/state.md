@@ -505,6 +505,14 @@ Full detail and reasoning in `session-log.md`'s matching 2026-07-23 entry. Five 
 - **Verified:** `npx tsc --noEmit` clean. **Not live-tested** — needs Vlad to expand a real candidate card on `/candidates` and confirm the timeline matches what the same candidate shows on the Pipeline tab.
 - **Not yet committed** — needs a Claude Code handoff.
 
+## Fixed, 2026-07-27 (Cross-Project Fit Suggestion missed a near-threshold pass)
+
+- **Real gap, not a bug in the strict sense** — the feature was only ever designed to trigger when a candidate scored below the current project's threshold. A candidate at 54 against FDE's 50 threshold (a real pass) never got checked against Data Architect for Banking, where they scored 80. Traced to four separate `score < project.scoreThreshold` conditions in `app/projects/[id]/page.tsx`, all feeding `ResultCard.tsx`'s fit-suggestion UI and auto-fire gate.
+- **Vlad's direct call (after AskUserQuestion offered broader options):** widen eligibility to score < threshold + 15, not just below threshold. New `FIT_CHECK_MARGIN = 15` constant; the four scattered conditions collapsed into one `eligibleForFitCheck` variable computed per result. `ResultCard.tsx`'s `belowThreshold` prop renamed to `eligibleForFitCheck` throughout (confirmed via grep it drives nothing else in that component, so the rename was safe/contained).
+- **Still only in the Screen tab** — flagged to Vlad, not built: no way yet to re-run this check on an already-saved Pipeline candidate. Separate, bigger feature than this fix.
+- **Verified:** `npx tsc --noEmit` clean. Do-not-touch files confirmed zero real diff (large diff-stat numbers on those files this session are pre-existing CRLF/LF noise in the sandbox mount, not real edits — same noise across most of the repo here). **Not live-tested** — needs Vlad to re-screen a similarly marginal candidate and confirm the suggestion now fires.
+- **Not yet committed** — needs a Claude Code handoff.
+
 ## Fixed, 2026-07-27 (candidate counts silently capped at 200)
 
 - **Real bug, not a UI glitch.** `listScreenings()` (`lib/screenings.ts`), the single function behind every count/filter/search on the Pipeline tab and the All Candidates page, had a hardcoded `.limit(200)` with no documented reason anywhere in this vault — looks like an early, unflagged safety cap from before this app had anywhere near that many real screenings. Any project/team crossing 200 real matching rows silently stopped growing in every count that reads through it (Pipeline tab counts, "N candidates screened," status/stage filters, search) — exactly what Vlad reported ("stopped adding up at 200").
