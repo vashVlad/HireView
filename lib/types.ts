@@ -202,6 +202,20 @@ export interface CandidateResult {
   historyAlertMatchProjectId?: number;
   historyAlertMatchProjectName?: string;
   historyAlertMatchCandidateName?: string;
+  /**
+   * Cross-project NAME match (team-wide), added 2026-07-27 — see
+   * lib/screenings.ts's findCrossProjectNameMatch(). Distinct from
+   * historyAlertType above: this is a pure candidate_name comparison, no
+   * Claude call, no fraud implication — just "this same name was also
+   * screened for a different role in your team." Deliberately ephemeral:
+   * only ever set here on the live screening response, never persisted to
+   * the DB or read back via rowToRecord() — so this is NOT on
+   * ScreeningRecord, only CandidateResult. A reload of the Pipeline/All
+   * Candidates page won't show it; it's a during-screening mention only.
+   */
+  crossProjectNameMatchScreeningId?: number;
+  crossProjectNameMatchProjectId?: number;
+  crossProjectNameMatchProjectName?: string;
 }
 
 export interface ScreenResumesResponse {

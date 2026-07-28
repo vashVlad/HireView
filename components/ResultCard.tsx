@@ -266,6 +266,31 @@ export function ResultCard({
                 {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
+            {/* Cross-project NAME match, added 2026-07-27 (Vlad: "just
+                mentions that this person was also screened in a different
+                project"). Deliberately separate from historyAlertType above
+                — that one is content-fingerprint-based and can miss the
+                same real person presenting a very differently-worded resume
+                for a different role; this is a plain name match, no fraud
+                implication, neutral styling (not rose/amber like the fraud
+                signals). Skipped when historyAlertType already points at
+                this exact same screening (see lib/screenings.ts), so a
+                single match never shows two badges. */}
+            {result.crossProjectNameMatchScreeningId != null && (
+              <Link
+                href={result.crossProjectNameMatchProjectId != null ? `/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline` : "#"}
+                title={
+                  result.crossProjectNameMatchProjectName
+                    ? `Also screened for ${result.crossProjectNameMatchProjectName}`
+                    : "This candidate's name also appears in another project"
+                }
+                className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700 transition-colors hover:bg-sky-200 dark:bg-sky-500/15 dark:text-sky-400 dark:hover:bg-sky-500/25"
+              >
+                {result.crossProjectNameMatchProjectName
+                  ? `Also screened: ${result.crossProjectNameMatchProjectName}`
+                  : "Also screened elsewhere"}
+              </Link>
+            )}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} />
           </div>
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
