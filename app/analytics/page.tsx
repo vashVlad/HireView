@@ -185,7 +185,7 @@ export default function AnalyticsPage() {
                   value={projectId}
                   onChange={(e) => setProjectId(e.target.value)}
                   title={data.projectList.find((p) => String(p.id) === projectId)?.name ?? "All projects"}
-                  className="w-32 truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                  className="w-24 truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
                 >
                   <option value="">All projects</option>
                   {data.projectList.map((p) => (
