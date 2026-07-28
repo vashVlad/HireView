@@ -9,7 +9,7 @@ import { InsightList } from "./InsightList";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusSelect } from "./StatusSelect";
-import { TrajectoryRenderer, countKeywordMatches } from "./TrajectoryRenderer";
+import { TrajectoryRenderer } from "./TrajectoryRenderer";
 import SourceIcon from "./SourceIcon";
 import { getSourceType } from "@/lib/sourceType";
 import type { JDAnalysis } from "@/lib/types";
@@ -218,10 +218,13 @@ export function ResultCard({
     }
   }
 
+  // mustMatched/niceMatched (keyword match COUNTS) removed 2026-07-27,
+  // Vlad's ask — mustSkills/niceSkills themselves stay: they still drive
+  // the actual keyword HIGHLIGHTING via TrajectoryRenderer's `highlights`
+  // prop below, which is untouched by this change. Only the numeric "X/Y kw"
+  // badge that used to sit next to Must-have/Nice-to-have is gone.
   const mustSkills = jdAnalysis?.mustHaveSkills ?? [];
   const niceSkills = jdAnalysis?.niceToHaveSkills ?? [];
-  const mustMatched = trajectoryText ? countKeywordMatches(trajectoryText, mustSkills) : 0;
-  const niceMatched = trajectoryText ? countKeywordMatches(trajectoryText, niceSkills) : 0;
 
   return (
     <li className={`animate-fade-in-up rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${solo ? "p-10" : "p-5"}`}>
@@ -266,41 +269,37 @@ export function ResultCard({
                 {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
-            {/* Cross-project NAME match, added 2026-07-27 (Vlad: "just
-                mentions that this person was also screened in a different
-                project"). Deliberately separate from historyAlertType above
-                — that one is content-fingerprint-based and can miss the
-                same real person presenting a very differently-worded resume
-                for a different role; this is a plain name match, no fraud
-                implication, neutral styling (not rose/amber like the fraud
-                signals). Skipped when historyAlertType already points at
-                this exact same screening (see lib/screenings.ts), so a
-                single match never shows two badges. */}
-            {result.crossProjectNameMatchScreeningId != null && (
-              <Link
-                href={result.crossProjectNameMatchProjectId != null ? `/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline` : "#"}
-                title={
-                  // Full detail (project name) moved entirely into the
-                  // tooltip, 2026-07-27 — the visible label used to embed
-                  // the project name directly ("Also screened: Forward
-                  // Deployed Engineer"), which made the header row crowded
-                  // next to the name + recommendation badge (Vlad shared a
-                  // screenshot). Now matches the same short-label-plus-
-                  // tooltip pattern the other badges here already use
-                  // (Duplicate detected, Previously seen, Known fraud
-                  // pattern) — visible text stays a constant short length
-                  // regardless of how long the matched project's name is.
-                  result.crossProjectNameMatchProjectName
-                    ? `Also screened for ${result.crossProjectNameMatchProjectName}`
-                    : "This candidate's name also appears in another project"
-                }
-                className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700 transition-colors hover:bg-sky-200 dark:bg-sky-500/15 dark:text-sky-400 dark:hover:bg-sky-500/25"
-              >
-                Also screened
-              </Link>
-            )}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} />
           </div>
+          {/* Cross-project NAME match, added 2026-07-27 (Vlad: "just
+              mentions that this person was also screened in a different
+              project"), moved out of the crowded badge row into its own
+              line here (Vlad's follow-up, same day — a pill badge next to
+              the name/recommendation badge was too cramped; this reads as
+              plain text instead, same position as roleContext would if this
+              card showed it, between the name/badges row and the status
+              dropdown). Deliberately separate from historyAlertType above
+              — that one is content-fingerprint-based and can miss the same
+              real person presenting a very differently-worded resume for a
+              different role; this is a plain name match, no fraud
+              implication. Skipped when historyAlertType already points at
+              this exact same screening (see lib/screenings.ts), so a real
+              match is never mentioned twice. */}
+          {result.crossProjectNameMatchScreeningId != null && (
+            <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>
+              Also screened in{" "}
+              {result.crossProjectNameMatchProjectId != null ? (
+                <Link
+                  href={`/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline`}
+                  className="font-medium text-sky-600 underline decoration-dotted underline-offset-2 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+                >
+                  &#x201C;{result.crossProjectNameMatchProjectName ?? "another project"}&#x201D;
+                </Link>
+              ) : (
+                <span className="font-medium">&#x201C;another project&#x201D;</span>
+              )}
+            </p>
+          )}
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
               <StatusSelect
@@ -316,24 +315,22 @@ export function ResultCard({
           )}
           {(result.mustHaveScore !== undefined || result.niceToHaveScore !== undefined) && (
             <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {/* Keyword match counts ("X/Y kw") removed 2026-07-27, Vlad's
+                  ask — the actual keyword highlighting stays completely
+                  intact, it lives entirely in the `highlights` prop passed
+                  to TrajectoryRenderer below (mustSkills/niceSkills), which
+                  this badge never fed into or gated — it was purely an extra
+                  numeric label alongside it. mustMatched/niceMatched (the
+                  removed counts) and the now-unused countKeywordMatches
+                  import were deleted outright rather than left as dead code. */}
               {result.mustHaveScore !== undefined && (
                 <span className={`inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 ${solo ? "text-sm" : "text-xs"}`}>
                   Must-have {result.mustHaveScore}
-                  {mustSkills.length > 0 && (
-                    <span className="ml-0.5 rounded-full bg-amber-100 px-1.5 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
-                      {mustMatched}/{mustSkills.length} kw
-                    </span>
-                  )}
                 </span>
               )}
               {result.niceToHaveScore !== undefined && (
                 <span className={`inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400 ${solo ? "text-sm" : "text-xs"}`}>
                   Nice-to-have {result.niceToHaveScore}
-                  {niceSkills.length > 0 && (
-                    <span className="ml-0.5 rounded-full bg-violet-200 px-1.5 text-violet-800 dark:bg-violet-500/30 dark:text-violet-300">
-                      {niceMatched}/{niceSkills.length} kw
-                    </span>
-                  )}
                 </span>
               )}
             </div>
