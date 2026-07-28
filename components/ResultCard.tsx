@@ -271,35 +271,6 @@ export function ResultCard({
             )}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} />
           </div>
-          {/* Cross-project NAME match, added 2026-07-27 (Vlad: "just
-              mentions that this person was also screened in a different
-              project"), moved out of the crowded badge row into its own
-              line here (Vlad's follow-up, same day — a pill badge next to
-              the name/recommendation badge was too cramped; this reads as
-              plain text instead, same position as roleContext would if this
-              card showed it, between the name/badges row and the status
-              dropdown). Deliberately separate from historyAlertType above
-              — that one is content-fingerprint-based and can miss the same
-              real person presenting a very differently-worded resume for a
-              different role; this is a plain name match, no fraud
-              implication. Skipped when historyAlertType already points at
-              this exact same screening (see lib/screenings.ts), so a real
-              match is never mentioned twice. */}
-          {result.crossProjectNameMatchScreeningId != null && (
-            <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>
-              Also screened in{" "}
-              {result.crossProjectNameMatchProjectId != null ? (
-                <Link
-                  href={`/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline`}
-                  className="font-medium text-sky-600 underline decoration-dotted underline-offset-2 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
-                >
-                  &#x201C;{result.crossProjectNameMatchProjectName ?? "another project"}&#x201D;
-                </Link>
-              ) : (
-                <span className="font-medium">&#x201C;another project&#x201D;</span>
-              )}
-            </p>
-          )}
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
               <StatusSelect
@@ -335,7 +306,39 @@ export function ResultCard({
               )}
             </div>
           )}
-          <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>{result.fileName}</p>
+          {/* Cross-project NAME match, added 2026-07-27 (Vlad: "just
+              mentions that this person was also screened in a different
+              project"). Repositioned twice same day per Vlad's follow-ups:
+              first out of the crowded badge row next to the name, then here
+              — in the file name's spot — instead of between the name/badges
+              row and the status dropdown. Falls back to the file name when
+              there's no match, so this slot always shows something.
+              Deliberately separate from historyAlertType above — that one
+              is content-fingerprint-based and can miss the same real person
+              presenting a very differently-worded resume for a different
+              role; this is a plain name match, no fraud implication.
+              Skipped when historyAlertType already points at this exact
+              same screening (see lib/screenings.ts), so a real match is
+              never mentioned twice. */}
+          <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>
+            {result.crossProjectNameMatchScreeningId != null ? (
+              <>
+                Also screened in{" "}
+                {result.crossProjectNameMatchProjectId != null ? (
+                  <Link
+                    href={`/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline`}
+                    className="font-medium text-sky-600 underline decoration-dotted underline-offset-2 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+                  >
+                    &#x201C;{result.crossProjectNameMatchProjectName ?? "another project"}&#x201D;
+                  </Link>
+                ) : (
+                  <span className="font-medium">&#x201C;another project&#x201D;</span>
+                )}
+              </>
+            ) : (
+              result.fileName
+            )}
+          </p>
         </div>
       </div>
       {nameMatch && (
