@@ -90,10 +90,12 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
                   className="pointer-events-none absolute bottom-full z-20 mb-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
                   style={{ left: hover.x }}
                 >
-                  <p className="mb-1.5 font-semibold text-zinc-800 dark:text-zinc-100">
-                    {s.label} — {s.count.toLocaleString()}
+                  <p className="mb-1.5">
+                    <span className="font-semibold text-zinc-800 dark:text-zinc-100">
+                      {s.label} — {s.count.toLocaleString()}
+                    </span>
                     {s.conversionFromPrevious != null && (
-                      <span className="font-normal text-zinc-400 dark:text-zinc-500"> ({s.conversionFromPrevious}% of previous)</span>
+                      <span className="block font-normal text-zinc-400 dark:text-zinc-500">{s.conversionFromPrevious}% of previous</span>
                     )}
                   </p>
                   <div className="flex flex-col gap-1">
