@@ -216,6 +216,8 @@ export interface CandidateResult {
   crossProjectNameMatchScreeningId?: number;
   crossProjectNameMatchProjectId?: number;
   crossProjectNameMatchProjectName?: string;
+  /** The matched screening's own score — added 2026-07-27 (Vlad's ask: show a score alongside "Also screened in [project]"), same ephemeral/not-persisted treatment as the three fields above it. */
+  crossProjectNameMatchScore?: number;
 }
 
 export interface ScreenResumesResponse {

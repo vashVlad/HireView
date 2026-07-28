@@ -176,21 +176,21 @@ async function findCrossProjectNameMatch(params: {
   candidateName: string;
   excludeProjectId: number;
   excludeScreeningId: number;
-}): Promise<{ screeningId: number; projectId: number | null } | null> {
+}): Promise<{ screeningId: number; projectId: number | null; score: number } | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("screenings")
-    .select("id, candidate_name, project_id")
+    .select("id, candidate_name, project_id, score")
     .eq("team_id", params.teamId)
     .neq("id", params.excludeScreeningId)
-    .returns<{ id: number; candidate_name: string; project_id: number | null }[]>();
+    .returns<{ id: number; candidate_name: string; project_id: number | null; score: number }[]>();
   if (error || !data) return null;
 
   const target = normalizeCandidateName(params.candidateName);
   const match = data.find(
     (row) => row.project_id !== params.excludeProjectId && normalizeCandidateName(row.candidate_name) === target
   );
-  return match ? { screeningId: match.id, projectId: match.project_id } : null;
+  return match ? { screeningId: match.id, projectId: match.project_id, score: match.score } : null;
 }
 
 // ── Rejection history (system-wide, any recruiter) ──────────────────────────
@@ -599,6 +599,7 @@ export async function saveScreening(params: {
       // (e.g. a third project) still shows both.
       if (crossNameMatch && crossNameMatch.screeningId !== result.historyAlertMatchId) {
         result.crossProjectNameMatchScreeningId = crossNameMatch.screeningId;
+        result.crossProjectNameMatchScore = crossNameMatch.score;
         if (crossNameMatch.projectId != null) {
           result.crossProjectNameMatchProjectId = crossNameMatch.projectId;
           const matchedProject = await getProject(crossNameMatch.projectId).catch(() => null);

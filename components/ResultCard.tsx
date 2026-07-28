@@ -345,6 +345,10 @@ export function ResultCard({
                 ) : (
                   <span className="font-medium">&#x201C;another project&#x201D;</span>
                 )}
+                {/* Score, added 2026-07-27 (Vlad's ask) — the matched
+                    screening's own score, not this one's, so a recruiter
+                    knows at a glance how that other pass went. */}
+                {result.crossProjectNameMatchScore != null && <> &#x2014; Scored {result.crossProjectNameMatchScore}</>}
               </>
             ) : (
               result.fileName
