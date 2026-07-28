@@ -32,7 +32,7 @@ export function ResultCard({
   jdAnalysis,
   onStatusChange,
   onArchiveReasonChange,
-  belowThreshold = false,
+  eligibleForFitCheck = false,
   onFindBetterFit,
   onCheckCrossProjectPromise,
   onTransferToProject,
@@ -56,10 +56,15 @@ export function ResultCard({
   onArchiveReasonChange?: (id: number, archiveReason: string) => void;
   /**
    * Every screened candidate is saved regardless of score — this just
-   * decides whether to surface the cross-project fit suggestion (a
-   * below-threshold score on THIS project doesn't mean much for others).
+   * decides whether to surface the cross-project fit suggestion. Renamed
+   * from `belowThreshold` 2026-07-27: originally true only when the score
+   * missed this project's threshold outright. Widened (see FIT_CHECK_MARGIN
+   * in app/projects/[id]/page.tsx) to also cover a marginal PASS — scoring
+   * just above threshold on this project doesn't rule out scoring much
+   * better on another one, and a real case surfaced exactly that (54 vs. a
+   * 50 threshold here, 80 elsewhere, never checked under the old rule).
    */
-  belowThreshold?: boolean;
+  eligibleForFitCheck?: boolean;
   onFindBetterFit?: () => Promise<FitSuggestion | null>;
   /** Cheap Claude classification call — decides whether this candidate is worth auto-firing the full cross-project check for. */
   onCheckCrossProjectPromise?: () => Promise<boolean>;
@@ -179,7 +184,7 @@ export function ResultCard({
   }, []);
 
   useEffect(() => {
-    if (!onCheckCrossProjectPromise || !hasOtherActiveProjects || !belowThreshold) return;
+    if (!onCheckCrossProjectPromise || !hasOtherActiveProjects || !eligibleForFitCheck) return;
     if (gateStartedRef.current) return;
     gateStartedRef.current = true;
 
@@ -197,7 +202,7 @@ export function ResultCard({
       if (promising) handleFindBetterFit();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onCheckCrossProjectPromise, hasOtherActiveProjects, belowThreshold]);
+  }, [onCheckCrossProjectPromise, hasOtherActiveProjects, eligibleForFitCheck]);
 
   async function handleTransfer() {
     if (!onTransferToProject || !fitSuggestion || transferring) return;
@@ -358,7 +363,7 @@ export function ResultCard({
           already saved regardless of score; this is purely about whether a
           stronger-fitting open role exists elsewhere. A cheap Claude gate decides
           whether to auto-fire the real check; manual link otherwise. */}
-      {belowThreshold && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
+      {eligibleForFitCheck && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
         <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
           {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
           {!fitError && (checkingGate || checkingFit) && (

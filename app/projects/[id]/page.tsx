@@ -28,6 +28,18 @@ import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
 import { getSourceType, type SourceType } from "@/lib/sourceType";
 
+// Cross-project fit check eligibility margin, widened 2026-07-27 (Vlad: a
+// candidate scoring 54 against a 50 threshold — a real but marginal pass —
+// was never checked against another project where they scored 80). A
+// candidate is eligible for the cross-project fit check whenever their score
+// is below (project threshold + this margin) — covers the original
+// below-threshold case (score < threshold) and now also a marginal pass
+// (threshold <= score < threshold + margin). Only a comfortably-clearing
+// score (threshold + margin or higher) is assumed not to need the check.
+// See app/projects/[id]/page.tsx's ResultCard render loop and
+// decisions-log.md's matching 2026-07-27 entry.
+const FIT_CHECK_MARGIN = 15;
+
 const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string; icon: string }> = {
   clean:                { label: "Cross-ref clean",          className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400", icon: "✓" },
   minor_concerns:       { label: "Cross-ref minor concerns", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",          icon: "⚠" },
@@ -573,7 +585,22 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
         )}
 
         <ul className="flex flex-col gap-4">
-          {results.map((result, i) => (
+          {results.map((result, i) => {
+            // Cross-project fit eligibility, widened 2026-07-27 (Vlad: a
+            // candidate scored 54 against FDE's 50 threshold — a real pass —
+            // and was never checked against Data Architect for Banking,
+            // where they'd have scored 80. The original design only ever
+            // asked "did THIS project reject you" (score < threshold); it
+            // never asked "did you only barely clear the bar, when
+            // something much better might exist elsewhere." FIT_CHECK_MARGIN
+            // widens eligibility to also cover marginal passes — a
+            // candidate scoring up to 15 points above threshold is still
+            // checked, only a comfortably-clearing score (threshold + 15 or
+            // more) is assumed to not need it. Below-threshold candidates
+            // (the original case) are still fully covered, since anything
+            // under threshold is also under threshold + 15.
+            const eligibleForFitCheck = result.score < project.scoreThreshold + FIT_CHECK_MARGIN;
+            return (
             <ResultCard
               key={result.fileName}
               result={result}
@@ -584,9 +611,9 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               nameMatch={nameMatches.get(result.fileName)}
               roleContext={project.name}
               rejectionHistory={rejectionMatches.get(result.fileName)}
-              belowThreshold={result.score < project.scoreThreshold}
+              eligibleForFitCheck={eligibleForFitCheck}
               otherActiveCount={otherActiveCount}
-              onCheckCrossProjectPromise={result.score < project.scoreThreshold ? () => {
+              onCheckCrossProjectPromise={eligibleForFitCheck ? () => {
                 const run = async () => {
                   const file = files.find((f) => f.name === result.fileName);
                   if (!file) return false;
@@ -604,7 +631,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
                 fitQueueRef.current = chained.catch(() => {});
                 return chained as Promise<boolean>;
               } : undefined}
-              onFindBetterFit={result.score < project.scoreThreshold ? () => {
+              onFindBetterFit={eligibleForFitCheck ? () => {
                 const run = async () => {
                   const file = files.find((f) => f.name === result.fileName);
                   if (!file) throw new Error("Original file no longer available — try re-uploading");
@@ -625,7 +652,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
                 fitQueueRef.current = chained.catch(() => {});
                 return chained as Promise<FitSuggestion | null>;
               } : undefined}
-              onTransferToProject={result.score < project.scoreThreshold ? async (suggestion: FitSuggestion) => {
+              onTransferToProject={eligibleForFitCheck ? async (suggestion: FitSuggestion) => {
                 const file = files.find((f) => f.name === result.fileName);
                 if (!file) throw new Error("Original file no longer available — try re-uploading");
                 const fd = new FormData();
@@ -645,7 +672,8 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
                 onScreeningsSaved();
               } : undefined}
             />
-          ))}
+            );
+          })}
           {existingMatches.map(({ match, file }) => (
             <AlreadyScreenedCard
               key={match.fileName}
