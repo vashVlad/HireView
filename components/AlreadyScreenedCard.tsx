@@ -29,6 +29,14 @@ interface AlreadyScreenedCardProps {
    */
   onStatusChange?: (id: number, status: CandidateStatus) => void;
   onArchiveReasonChange?: (id: number, archiveReason: string) => void;
+  /**
+   * Durable batch-page URL to send "View full result" 's Back button to
+   * (/projects/[id]/batches/[batchId]) — Vlad's ask, 2026-07-28. Undefined
+   * when no batch has been scored yet in this session (e.g. every uploaded
+   * file was itself a duplicate skip); the candidate page falls back to its
+   * own default destination in that case.
+   */
+  returnTo?: string;
 }
 
 /**
@@ -52,6 +60,7 @@ export function AlreadyScreenedCard({
   onForceRescore,
   onStatusChange,
   onArchiveReasonChange,
+  returnTo,
 }: AlreadyScreenedCardProps) {
   const [rescoring, setRescoring] = useState(false);
 
@@ -115,9 +124,12 @@ export function AlreadyScreenedCard({
             this project card, during screening stage") — links to the
             existing saved screening's full result page
             (app/candidates/[id]/page.tsx), so a recruiter can see everything
-            about the already-screened candidate without leaving this card. */}
+            about the already-screened candidate without leaving this card.
+            returnTo (2026-07-28) carries the durable batch-page URL through
+            as a query param, so that page's Back button can return here
+            deterministically instead of guessing. */}
         <Link
-          href={`/candidates/${existing.id}`}
+          href={returnTo ? `/candidates/${existing.id}?returnTo=${encodeURIComponent(returnTo)}` : `/candidates/${existing.id}`}
           className="rounded-lg px-3 py-1.5 text-xs font-medium text-amber-700 underline decoration-dotted underline-offset-2 transition-colors hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
         >
           View full result

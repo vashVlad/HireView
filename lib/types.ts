@@ -358,6 +358,18 @@ export interface ScreeningRecord {
    */
   recruiterId?: string;
   recruiterEmail?: string;
+  /**
+   * Groups screenings saved together in one POST /api/screen-resumes call —
+   * a plain client-generated UUID, not a foreign key (see
+   * supabase-migration-batch-id.sql). Powers the durable
+   * /projects/[id]/batches/[batchId] page (Vlad's ask, 2026-07-28: a
+   * bookmarkable, cross-device way back to "the batch I just screened",
+   * since sessionStorage only lives in one browser tab and this app is
+   * explicitly used across two machines). Undefined for screenings saved
+   * before this column existed, or saved outside a batch context (e.g. a
+   * single "Transfer to project" via save-one).
+   */
+  batchId?: string;
   createdAt: string;
 }
 

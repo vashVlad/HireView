@@ -287,6 +287,8 @@ interface PersistedBatch {
   rejectionHistoryBaseline: RejectionHistoryEntry[];
   rejectionMatches: [string, RejectionHistoryEntry][];
   fileErrors: ScreenResumesError[];
+  /** See the currentBatchId state below and app/projects/[id]/batches/[batchId]/page.tsx. */
+  batchId?: string;
 }
 
 function readPersistedBatch(projectId: number): PersistedBatch | null {
@@ -329,6 +331,13 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   const [results, setResults] = useState<CandidateResult[]>(() => initialBatch?.results ?? []);
   const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>(() => initialBatch?.fileErrors ?? []);
   const [formError, setFormError] = useState<string | null>(null);
+  // Durable, database-backed link to this batch (/projects/[id]/batches/
+  // [batchId]) — set from POST /api/screen-resumes's response once
+  // something new is actually scored. Vlad's ask, 2026-07-28: a real
+  // cross-device/shareable-with-a-teammate URL, since sessionStorage (this
+  // component's own results-view restore, above) only ever lives in one
+  // browser tab.
+  const [currentBatchId, setCurrentBatchId] = useState<string | undefined>(() => initialBatch?.batchId);
   // Files that matched an existing screening in this project via the free
   // pre-check (app/api/screen-resumes/check-existing) — set aside before
   // ever reaching the scoring route, keyed by the original File so a
@@ -421,13 +430,14 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       rejectionHistoryBaseline,
       rejectionMatches: [...rejectionMatches.entries()],
       fileErrors,
+      batchId: currentBatchId,
     };
     try {
       window.sessionStorage.setItem(batchStorageKey(project.id), JSON.stringify(toPersist));
     } catch {
       // Storage full/unavailable — non-fatal, just means Back won't restore this time.
     }
-  }, [screenView, results, existingMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, fileErrors, project.id]);
+  }, [screenView, results, existingMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, fileErrors, currentBatchId, project.id]);
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -473,7 +483,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // how it's always been called — this function is the only thing that
   // decides which files reach it, so /api/screen-resumes and scoreCandidate
   // stay completely untouched either way.
-  async function scoreFiles(filesToScore: File[], signal?: AbortSignal): Promise<{ results: CandidateResult[]; errors: ScreenResumesError[] }> {
+  async function scoreFiles(filesToScore: File[], signal?: AbortSignal): Promise<{ results: CandidateResult[]; errors: ScreenResumesError[]; batchId?: string }> {
     const formData = new FormData();
     formData.set("jobDescription", project.jobDescription);
     formData.set("roleContext", project.name);
@@ -491,6 +501,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     return {
       results: Array.isArray(data.results) ? data.results : [],
       errors: Array.isArray(data.errors) ? data.errors : [],
+      batchId: typeof data.batchId === "string" ? data.batchId : undefined,
     };
   }
 
@@ -540,9 +551,9 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
         }
       }
 
-      const { results: scored, errors } = newFiles.length > 0
+      const { results: scored, errors, batchId } = newFiles.length > 0
         ? await scoreFiles(newFiles, controller.signal)
-        : { results: [], errors: [] };
+        : { results: [], errors: [], batchId: undefined as string | undefined };
 
       setResults(scored);
       setFileErrors(errors);
@@ -551,6 +562,11 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       setNameMatches(findNameMatches(scored, candidates));
       setRejectionHistoryBaseline(rejections);
       setRejectionMatches(findRejectionMatches(scored, rejections));
+      // Durable "come back to this batch" link — only set when this call
+      // actually scored something new (batchId is undefined when every file
+      // in the upload was a duplicate skip, matching newFiles.length > 0
+      // above). See the block comment above ScreenTab.
+      if (batchId) setCurrentBatchId(batchId);
       setScreenView("results");
       if (scored.length > 0) onScreeningsSaved();
     } catch (err) {
@@ -640,6 +656,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     setNameMatches(new Map());
     setRejectionHistoryBaseline([]);
     setRejectionMatches(new Map());
+    setCurrentBatchId(undefined);
     try {
       window.sessionStorage.removeItem(batchStorageKey(project.id));
     } catch {
@@ -659,10 +676,27 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               {fileErrors.length > 0 && ` · ${fileErrors.length} file${fileErrors.length !== 1 ? "s" : ""} failed`}
             </p>
           </div>
-          <button type="button" onClick={handleReset}
-            className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
-            Screen more
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Durable, bookmarkable/shareable link to this exact batch —
+                Vlad's ask, 2026-07-28. Only present once at least one new
+                candidate was actually scored (see currentBatchId above). */}
+            {currentBatchId && (
+              <Link
+                href={`/projects/${project.id}/batches/${currentBatchId}`}
+                className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Link to this batch
+              </Link>
+            )}
+            <button type="button" onClick={handleReset}
+              className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
+              Screen more
+            </button>
+          </div>
         </div>
 
         {fileErrors.length > 0 && (
@@ -796,6 +830,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               onForceRescore={handleForceRescore}
               onStatusChange={handleStatusChange}
               onArchiveReasonChange={handleArchiveReasonChange}
+              returnTo={currentBatchId ? `/projects/${project.id}/batches/${currentBatchId}` : undefined}
             />
           ))}
         </ul>

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { ResultCard } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
-import type { CandidateResult, CandidateStatus, JDAnalysis, ScreeningRecord } from "@/lib/types";
+import type { CandidateStatus, JDAnalysis, ScreeningRecord } from "@/lib/types";
+import { toCandidateResult } from "@/lib/toCandidateResult";
 
 /**
  * Full result card view for an already-saved candidate — added 2026-07-27
@@ -19,43 +20,6 @@ import type { CandidateResult, CandidateStatus, JDAnalysis, ScreeningRecord } fr
  * already-saved ScreeningRecord instead of a fresh scoring result.
  */
 
-// ScreeningRecord (read from the DB) and CandidateResult (what ResultCard
-// expects) are near-identical but not the same type — this app never had a
-// reason to unify them before now. The one real incompatibility:
-// recommendation is nullable on ScreeningRecord (an old screening from
-// before this field existed) but not on CandidateResult. Coalescing to
-// "decline" is a display-only default for the rare null case — it doesn't
-// touch the stored value, and ResultCard's own status/notes/credibility
-// controls all still act on the real saved record via its own `id`.
-function toCandidateResult(s: ScreeningRecord): CandidateResult {
-  return {
-    id: s.id,
-    fileName: s.fileName,
-    candidateName: s.candidateName,
-    score: s.score,
-    mustHaveScore: s.mustHaveScore,
-    niceToHaveScore: s.niceToHaveScore,
-    summary: s.summary,
-    strengths: s.strengths,
-    concerns: s.concerns,
-    careerTrajectory: s.careerTrajectory,
-    recommendation: s.recommendation ?? "decline",
-    status: s.status,
-    credibility: s.credibility,
-    archiveReason: s.archiveReason,
-    notes: s.notes,
-    linkedInMode: s.linkedInMode,
-    agencyName: s.agencyName,
-    duplicateFlag: s.duplicateFlag,
-    duplicateMatchId: s.duplicateMatchId,
-    historyAlertType: s.historyAlertType,
-    historyAlertMatchId: s.historyAlertMatchId,
-    historyAlertMatchProjectId: s.historyAlertMatchProjectId,
-    historyAlertMatchProjectName: s.historyAlertMatchProjectName,
-    historyAlertMatchCandidateName: s.historyAlertMatchCandidateName,
-  };
-}
-
 export default function CandidateFullResultPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const numId = parseInt(id, 10);
@@ -65,6 +29,17 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
   const [jdAnalysis, setJdAnalysis] = useState<JDAnalysis | null | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Read via window.location.search (not useSearchParams()) to avoid Next's
+  // Suspense-boundary requirement for that hook — same pattern already used
+  // in app/projects/[id]/page.tsx for its own one-time `?tab=`/`?candidate=`
+  // read. Set by AlreadyScreenedCard's "View full result" link when a
+  // durable batch page exists for the batch this candidate was skipped out
+  // of (Vlad's ask, 2026-07-28) — lets Back return there deterministically
+  // instead of guessing at a destination.
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  useEffect(() => {
+    setReturnTo(new URLSearchParams(window.location.search).get("returnTo"));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,19 +117,24 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
           title={screening?.candidateName ?? "Candidate"}
           subtitle={projectName ? `Screened in "${projectName}"` : undefined}
           action={
-            // Deterministic destination, not router.back() — this page is
-            // only ever reached from AlreadyScreenedCard's "View full
-            // result" link (Screen tab, mid-batch), so Back always targets
-            // the Screen tab specifically. ScreenTab now restores its batch
-            // results from sessionStorage on mount (see the block comment
-            // above ScreenTab in app/projects/[id]/page.tsx), which is what
-            // actually makes landing back on that tab show the batch again
-            // — an earlier router.back()-based attempt here still left the
-            // recruiter on a blank Filters tab, since Next's client router
-            // doesn't reliably preserve a fully unmounted tab's React state
-            // across a back-navigation. Vlad's ask, 2026-07-28.
+            // Deterministic destination, not router.back(). Three tiers,
+            // most specific first: (1) returnTo — the durable batch page
+            // this candidate was skipped out of (2026-07-28, real fix —
+            // see app/projects/[id]/batches/[batchId]/page.tsx); (2) the
+            // Screen tab, which restores its own live results view from
+            // sessionStorage (first attempt at this, 2026-07-28 — still
+            // useful for a quick same-tab round trip, just not durable
+            // across machines on its own, see that component's comment);
+            // (3) the candidates list as a last resort. An earlier
+            // router.back() attempt here just left the recruiter on a
+            // blank Filters tab, since Next's client router doesn't
+            // reliably preserve a fully unmounted tab's React state across
+            // a back-navigation.
             <Link
-              href={screening?.projectId != null ? `/projects/${screening.projectId}?tab=screen` : "/candidates"}
+              href={
+                returnTo
+                  ?? (screening?.projectId != null ? `/projects/${screening.projectId}?tab=screen` : "/candidates")
+              }
               className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-2 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

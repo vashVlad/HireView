@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
@@ -26,6 +27,18 @@ export async function POST(request: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const userId = userIdFilter(user);
+
+  // DO-NOT-TOUCH EXCEPTION (2026-07-28, Vlad's explicit ask — see
+  // decisions-log.md): groups every screening saved by this one call under a
+  // shared id, so the results can be reopened later via a real,
+  // database-backed, cross-device URL (/projects/[id]/batches/[batchId])
+  // instead of the client-side-only "results" view this route's response
+  // has always fed. Purely additive — generated up front, threaded through
+  // to saveScreening below, and echoed back in the response; no scoring or
+  // save logic changed. REQUIRES supabase-migration-batch-id.sql to have
+  // run first (see lib/screenings.ts's saveScreening — batch_id is written
+  // unconditionally on every save once this line exists).
+  const batchId = randomUUID();
 
   const formData = await request.formData();
   const jobDescriptionField = formData.get("jobDescription");
@@ -209,6 +222,8 @@ export async function POST(request: NextRequest) {
           projectId,
           userId,
           scoreThreshold,
+          // DO-NOT-TOUCH EXCEPTION, same batchId — see the comment at the top of this route.
+          batchId,
         });
         result.id = id;
       } catch (err) {
@@ -243,5 +258,6 @@ export async function POST(request: NextRequest) {
 
   results.sort((a, b) => b.score - a.score);
 
-  return NextResponse.json({ results, errors });
+  // DO-NOT-TOUCH EXCEPTION, same batchId — see the comment at the top of this route.
+  return NextResponse.json({ results, errors, batchId });
 }
