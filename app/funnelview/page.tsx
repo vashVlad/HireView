@@ -29,7 +29,16 @@ function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "lin
 // three colors always show that stage's actual source mix; segment order
 // (Applied, Sourced, Agency) and colors match the legend above and the old
 // standalone SourceSplit component this replaces.
+//
+// Hover tooltip, added 2026-07-27 (Vlad's ask: "an interactive field that
+// pops up when I put a mouseover the funnel rows") — replaces the native
+// `title` attribute (slow to appear, unstyled, can't show more than one line
+// well) with a real on-hover popover, same pattern as this page's own
+// ActivityLine tooltip on the Analytics page (hoveredIdx state, absolute-
+// positioned box, role="tooltip"). Shows the stage's total plus the exact
+// per-source breakdown and each source's share of that stage.
 function StageBar({ stages }: { stages: FunnelData["stages"] }) {
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const max = Math.max(...stages.map((s) => s.count), 1);
   return (
     <div className="flex flex-col gap-3">
@@ -38,22 +47,64 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
         const inboundPct = s.count > 0 ? (s.bySource.inbound / s.count) * 100 : 0;
         const outboundPct = s.count > 0 ? (s.bySource.outbound / s.count) * 100 : 0;
         const agencyPct = s.count > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
+        const isHovered = hoveredKey === s.key;
         return (
           <div key={s.key} className="flex items-center gap-3">
             <span className="w-32 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.label}</span>
-            <div className="relative h-7 flex-1 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
-              <div
-                className="flex h-full rounded-lg transition-all"
-                style={{ width: `${barWidthPct}%` }}
-                title={`Applied ${s.bySource.inbound.toLocaleString()} · Sourced (LinkedIn) ${s.bySource.outbound.toLocaleString()} · Agency ${s.bySource.agency.toLocaleString()}`}
-              >
-                {/* Colors updated 2026-07-27 (Vlad's ask) — gray/LinkedIn-blue/orange
-                    everywhere a source is shown, not just here; see SourceIcon.tsx's
-                    header comment for the full token list and reasoning. */}
-                {s.bySource.inbound > 0 && <div className="h-full bg-zinc-400 dark:bg-zinc-500" style={{ width: `${inboundPct}%` }} />}
-                {s.bySource.outbound > 0 && <div className="h-full bg-[#0A66C2]" style={{ width: `${outboundPct}%` }} />}
-                {s.bySource.agency > 0 && <div className="h-full bg-orange-500" style={{ width: `${agencyPct}%` }} />}
+            <div
+              className="relative h-7 flex-1 overflow-visible rounded-lg bg-zinc-100 dark:bg-zinc-800"
+              onMouseEnter={() => setHoveredKey(s.key)}
+              onMouseLeave={() => setHoveredKey(null)}
+            >
+              <div className="h-full overflow-hidden rounded-lg">
+                <div className="flex h-full rounded-lg transition-all" style={{ width: `${barWidthPct}%` }}>
+                  {/* Colors updated 2026-07-27 (Vlad's ask) — gray/LinkedIn-blue/orange
+                      everywhere a source is shown, not just here; see SourceIcon.tsx's
+                      header comment for the full token list and reasoning. */}
+                  {s.bySource.inbound > 0 && <div className="h-full bg-zinc-400 dark:bg-zinc-500" style={{ width: `${inboundPct}%` }} />}
+                  {s.bySource.outbound > 0 && <div className="h-full bg-[#0A66C2]" style={{ width: `${outboundPct}%` }} />}
+                  {s.bySource.agency > 0 && <div className="h-full bg-orange-500" style={{ width: `${agencyPct}%` }} />}
+                </div>
               </div>
+              {isHovered && (
+                <div
+                  role="tooltip"
+                  className="absolute bottom-full left-0 z-20 mb-2 w-56 rounded-lg border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                >
+                  <p className="mb-1.5 font-semibold text-zinc-800 dark:text-zinc-100">
+                    {s.label} — {s.count.toLocaleString()}
+                    {s.conversionFromPrevious != null && (
+                      <span className="font-normal text-zinc-400 dark:text-zinc-500"> ({s.conversionFromPrevious}% of previous)</span>
+                    )}
+                  </p>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500" /> Applied
+                      </span>
+                      <span className="tabular-nums">
+                        {s.bySource.inbound.toLocaleString()} ({Math.round(inboundPct)}%)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-[#0A66C2]" /> Sourced (LinkedIn)
+                      </span>
+                      <span className="tabular-nums">
+                        {s.bySource.outbound.toLocaleString()} ({Math.round(outboundPct)}%)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-orange-500" /> Agency
+                      </span>
+                      <span className="tabular-nums">
+                        {s.bySource.agency.toLocaleString()} ({Math.round(agencyPct)}%)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <span className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
               {s.count.toLocaleString()}
