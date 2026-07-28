@@ -280,15 +280,23 @@ export function ResultCard({
               <Link
                 href={result.crossProjectNameMatchProjectId != null ? `/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline` : "#"}
                 title={
+                  // Full detail (project name) moved entirely into the
+                  // tooltip, 2026-07-27 — the visible label used to embed
+                  // the project name directly ("Also screened: Forward
+                  // Deployed Engineer"), which made the header row crowded
+                  // next to the name + recommendation badge (Vlad shared a
+                  // screenshot). Now matches the same short-label-plus-
+                  // tooltip pattern the other badges here already use
+                  // (Duplicate detected, Previously seen, Known fraud
+                  // pattern) — visible text stays a constant short length
+                  // regardless of how long the matched project's name is.
                   result.crossProjectNameMatchProjectName
                     ? `Also screened for ${result.crossProjectNameMatchProjectName}`
                     : "This candidate's name also appears in another project"
                 }
                 className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700 transition-colors hover:bg-sky-200 dark:bg-sky-500/15 dark:text-sky-400 dark:hover:bg-sky-500/25"
               >
-                {result.crossProjectNameMatchProjectName
-                  ? `Also screened: ${result.crossProjectNameMatchProjectName}`
-                  : "Also screened elsewhere"}
+                Also screened
               </Link>
             )}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} />
