@@ -15,6 +15,8 @@ interface AnalyticsData {
   byRecruiter: { userId: string; email: string; count: number }[];
   recentActivity: { date: string; count: number; avgScore: number }[];
   recruiterList: { id: string; email: string; role: string }[];
+  /** Added 2026-07-27 (Vlad's ask) — powers the project filter below, alongside recruiterId. */
+  projectList: { id: number; name: string }[];
 }
 
 // Matches the stat-card pattern from the admin/users redesign: soft accent
@@ -112,6 +114,11 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recruiterId, setRecruiterId] = useState("");
+  // Project filter, added 2026-07-27 (Vlad's ask: "an option to choose a
+  // project and a recruiter so it shows statistics for a specific recruiter
+  // working on the specific project") — combines with recruiterId below,
+  // same pattern (empty string = no filter).
+  const [projectId, setProjectId] = useState("");
 
   // Default date range: last 90 days
   const defaultFrom = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
@@ -124,6 +131,7 @@ export default function AnalyticsPage() {
     setError(null);
     const params = new URLSearchParams({ from, to });
     if (recruiterId) params.set("recruiterId", recruiterId);
+    if (projectId) params.set("projectId", projectId);
     const res = await fetch(`/api/analytics?${params}`);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -133,7 +141,7 @@ export default function AnalyticsPage() {
     }
     setData(await res.json());
     setLoading(false);
-  }, [from, to, recruiterId]);
+  }, [from, to, recruiterId, projectId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -150,6 +158,20 @@ export default function AnalyticsPage() {
           subtitle="Team-wide screening activity. Admin only."
           action={
             <div className="flex flex-wrap items-center gap-2">
+              {data && data.projectList.length > 1 && (
+                <select
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                >
+                  <option value="">All projects</option>
+                  {data.projectList.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               {data && data.recruiterList.length > 1 && (
                 <select
                   value={recruiterId}
