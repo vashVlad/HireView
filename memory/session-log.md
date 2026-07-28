@@ -12,6 +12,17 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-07-27 (round 35) — New: cross-project candidate-NAME match mention
+- **Ask (Vlad):** "just mentions that this person was also screened in a different project if during the screening it was detected."
+- **Checked what already exists first:** Phase 1.4's `historyAlertType` already covers this via content-fingerprint matching and already reaches the Screen tab live (confirmed `saveScreening()` mutates `result` by reference, which flows straight into the response) — but it's deliberately identity-blind, so it can miss the same real person with a very differently-worded resume across two different roles (exactly the FDE-54/Data-Architect-80 case from earlier this session).
+- **Built:** `findCrossProjectNameMatch()` in `lib/screenings.ts` — plain name comparison (reuses `normalizeCandidateName`), team-scoped (not system-wide), wired into `saveScreening()` in its own independent try/catch (decoupled from fingerprinting, same lesson as the 2026-07-17 `resume_content_hash` fix). Skips if the same screening was already flagged by `historyAlertType`, avoiding duplicate badges.
+- **Deliberately ephemeral** — new fields live only on `CandidateResult`, never persisted to the `screenings` table, never on `ScreeningRecord`. Shows once in the Screen tab, doesn't reappear on Pipeline reload. Flagged in open-questions.md in case Vlad wants it to persist later (bigger change, needs a migration).
+- **UI:** new neutral sky-blue pill badge in `ResultCard.tsx`, "Also screened: [Project Name]," linking to that project's Pipeline. Zero changes to `screen-resumes/route.ts` (do-not-touch) — confirmed zero real diff via `git diff --ignore-all-space`.
+- **Verified:** `npx tsc --noEmit` clean. Not live-tested — needs a same-person/different-project/different-resume-wording test.
+- **Next:** live-test, then commit/push/PR.
+
+---
+
 ## 2026-07-27 (round 34) — Cross-Project Fit Suggestion missed a near-threshold pass
 - **Report (Vlad):** a candidate scored 54 against FDE's threshold of 50 (a real pass) and was never suggested Data Architect for Banking, where they scored 80. Traced this to `app/projects/[id]/page.tsx`: eligibility for the whole cross-project-fit mechanism was hardcoded as `score < project.scoreThreshold` in four separate places — the feature was only ever designed for "did this project reject you," never "did you only barely clear the bar."
 - **Asked Vlad how far to widen it** (AskUserQuestion: any passing candidate on demand / near-threshold only / also add to Pipeline tab / leave as-is). He specified an exact rule directly: check other projects whenever score < threshold + 15.

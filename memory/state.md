@@ -505,6 +505,14 @@ Full detail and reasoning in `session-log.md`'s matching 2026-07-23 entry. Five 
 - **Verified:** `npx tsc --noEmit` clean. **Not live-tested** — needs Vlad to expand a real candidate card on `/candidates` and confirm the timeline matches what the same candidate shows on the Pipeline tab.
 - **Not yet committed** — needs a Claude Code handoff.
 
+## Built, 2026-07-27 (new: cross-project candidate-name match mention)
+
+- **New signal, distinct from Phase 1.4's `historyAlertType`.** That one is content-fingerprint based and identity-blind by design — it can miss the same real person applying with a meaningfully different-looking resume across two roles. `findCrossProjectNameMatch()` (`lib/screenings.ts`) is a plain candidate-name comparison, team-scoped, wired into `saveScreening()` in its own independent try/catch (decoupled from fingerprinting entirely). Skips when `historyAlertType` already flagged the same matched screening.
+- **Deliberately ephemeral** — new `CandidateResult` fields (`crossProjectNameMatchScreeningId/ProjectId/ProjectName`), never persisted to the `screenings` table, never on `ScreeningRecord`. Shows once, during screening, in the Screen tab only — reloading Pipeline/All Candidates won't show it. Flagged in open-questions.md in case this should persist later (bigger change).
+- **UI:** neutral sky-blue pill badge in `ResultCard.tsx` next to the other status badges — "Also screened: [Project Name]," links to that project's Pipeline.
+- **Verified:** `npx tsc --noEmit` clean. Do-not-touch files (`screen-resumes/route.ts` included) confirmed zero real diff. **Not live-tested** — needs a same-person/different-project/different-wording resume pair to confirm it fires.
+- **Not yet committed** — needs a Claude Code handoff.
+
 ## Fixed, 2026-07-27 (Cross-Project Fit Suggestion missed a near-threshold pass)
 
 - **Real gap, not a bug in the strict sense** — the feature was only ever designed to trigger when a candidate scored below the current project's threshold. A candidate at 54 against FDE's 50 threshold (a real pass) never got checked against Data Architect for Banking, where they scored 80. Traced to four separate `score < project.scoreThreshold` conditions in `app/projects/[id]/page.tsx`, all feeding `ResultCard.tsx`'s fit-suggestion UI and auto-fire gate.

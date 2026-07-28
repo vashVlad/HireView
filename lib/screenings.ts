@@ -153,6 +153,46 @@ async function markNameMatchPair(idA: number, idB: number): Promise<void> {
   ]);
 }
 
+// ── Cross-project name match (team-wide, informational, ephemeral) ─────────
+//
+// Added 2026-07-27 (Vlad: "just mentions that this person was also screened
+// in a different project ... if during the screening it was detected").
+// Phase 1.4's historyAlertType (below) already covers cross-project
+// resubmission — but it matches on CONTENT fingerprint (skills hash,
+// responsibility vectors, career arc), deliberately identity-blind by
+// design (see Phase 1.1's comment). That means it can miss the exact case
+// this ask is about: the SAME real person, screened for a meaningfully
+// different role (e.g. FDE vs. a Data Architect role), whose resume reads
+// completely differently between the two — same gap already noted for the
+// same-project findNameMatchInProject() above, just crossing the project
+// boundary too now. Pure candidate_name comparison, no Claude call, no new
+// column — purely a heads-up mention on the immediate screening response,
+// never implies fraud/duplication the way historyAlertType does, and
+// deliberately NOT persisted to the DB (see decisions-log.md's matching
+// entry for why this is scoped to "during the screening" only, not a
+// standing Pipeline badge, at least for now).
+async function findCrossProjectNameMatch(params: {
+  teamId: number;
+  candidateName: string;
+  excludeProjectId: number;
+  excludeScreeningId: number;
+}): Promise<{ screeningId: number; projectId: number | null } | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("id, candidate_name, project_id")
+    .eq("team_id", params.teamId)
+    .neq("id", params.excludeScreeningId)
+    .returns<{ id: number; candidate_name: string; project_id: number | null }[]>();
+  if (error || !data) return null;
+
+  const target = normalizeCandidateName(params.candidateName);
+  const match = data.find(
+    (row) => row.project_id !== params.excludeProjectId && normalizeCandidateName(row.candidate_name) === target
+  );
+  return match ? { screeningId: match.id, projectId: match.project_id } : null;
+}
+
 // ── Rejection history (system-wide, any recruiter) ──────────────────────────
 //
 // Teti's request, 2026-07-10: since every candidate is now saved regardless
@@ -538,6 +578,36 @@ export async function saveScreening(params: {
     } else {
       console.error("Duplicate fingerprinting failed (screening still saved):", err);
     }
+  }
+
+  // Deliberately its OWN try/catch, decoupled from the fingerprinting block
+  // above — this check needs nothing from fingerprinting (no Claude call,
+  // just a name comparison), so a fingerprinting failure/skip must never
+  // also take out this unrelated, cheap signal. Same lesson already applied
+  // to resume_content_hash above (see its 2026-07-17 comment).
+  try {
+    if (projectId != null && teamId != null) {
+      const crossNameMatch = await findCrossProjectNameMatch({
+        teamId,
+        candidateName: result.candidateName,
+        excludeProjectId: projectId,
+        excludeScreeningId: screeningId,
+      });
+      // Skip if this is the exact same screening historyAlertType (above)
+      // already matched — showing two banners pointing at the identical
+      // candidate/project would just be noise. Different matched screening
+      // (e.g. a third project) still shows both.
+      if (crossNameMatch && crossNameMatch.screeningId !== result.historyAlertMatchId) {
+        result.crossProjectNameMatchScreeningId = crossNameMatch.screeningId;
+        if (crossNameMatch.projectId != null) {
+          result.crossProjectNameMatchProjectId = crossNameMatch.projectId;
+          const matchedProject = await getProject(crossNameMatch.projectId).catch(() => null);
+          if (matchedProject) result.crossProjectNameMatchProjectName = matchedProject.name;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Cross-project name match failed (screening still saved):", err);
   }
 
   return { id: screeningId };
