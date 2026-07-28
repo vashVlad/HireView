@@ -2,7 +2,15 @@ import { NextResponse } from "next/server";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
 
-// HEAD — lightweight check: does a LinkedIn PDF exist for this candidate?
+// HEAD — lightweight check: does a cross-reference doc exist for this
+// candidate? Also reports (via a response header, not the body — HEAD has
+// no body) whether that doc is an actual LinkedIn PDF or a second resume,
+// so the Interview View document popup can label the tab correctly instead
+// of always assuming LinkedIn. See supabase-migration-cross-ref-doc-type.sql
+// — cross_ref_is_linkedin is nullable/not-yet-confirmed-run-safe: selecting
+// a column that doesn't exist yet would 500 the whole request, so this is
+// wrapped so a missing column degrades to "unknown" rather than breaking the
+// existing has-a-doc check entirely.
 export async function HEAD(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -16,13 +24,36 @@ export async function HEAD(
   if (!(await canAccessScreening(user, numId))) return new NextResponse(null, { status: 403 });
 
   const supabase = getSupabaseClient();
-  const { data: row } = await supabase
-    .from("screenings")
-    .select("linkedin_pdf_path")
-    .eq("id", numId)
-    .single<{ linkedin_pdf_path: string | null }>();
 
-  return new NextResponse(null, { status: row?.linkedin_pdf_path ? 200 : 404 });
+  // Try the new column first; fall back to the pre-migration select if it
+  // errors (column doesn't exist yet on this database) so this check never
+  // breaks the existing "does a doc exist at all" behavior.
+  let linkedinPdfPath: string | null = null;
+  let crossRefIsLinkedIn: boolean | null = null;
+  const withType = await supabase
+    .from("screenings")
+    .select("linkedin_pdf_path, cross_ref_is_linkedin")
+    .eq("id", numId)
+    .single<{ linkedin_pdf_path: string | null; cross_ref_is_linkedin: boolean | null }>();
+
+  if (!withType.error && withType.data) {
+    linkedinPdfPath = withType.data.linkedin_pdf_path;
+    crossRefIsLinkedIn = withType.data.cross_ref_is_linkedin;
+  } else {
+    const fallback = await supabase
+      .from("screenings")
+      .select("linkedin_pdf_path")
+      .eq("id", numId)
+      .single<{ linkedin_pdf_path: string | null }>();
+    linkedinPdfPath = fallback.data?.linkedin_pdf_path ?? null;
+  }
+
+  return new NextResponse(null, {
+    status: linkedinPdfPath ? 200 : 404,
+    headers: {
+      "X-Cross-Ref-Is-Linkedin": crossRefIsLinkedIn === null ? "unknown" : String(crossRefIsLinkedIn),
+    },
+  });
 }
 
 export async function GET(

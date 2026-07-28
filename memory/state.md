@@ -491,3 +491,24 @@ Full detail and reasoning in `session-log.md`'s matching 2026-07-23 entry. Five 
 - **Infrastructure migration:** pending Brillio enterprise accounts — Anthropic API key and database access both still on Vlad's personal accounts as of this write. Codebase-side readiness (credential audit, migration runbook, teams tooling) is done; the actual cutover needs the real Brillio-owned credentials to exist first.
 - **Current blocker:** awaiting Anthropic enterprise key and internal database access from Ritu.
 - **Next action:** demo sessions with each regional group once infrastructure is confirmed.
+
+## Fixed, 2026-07-27 (Interview View: cross-reference doc mislabeling + Back button)
+
+- **Cross-reference doc mislabeling fixed.** The document popup's second tab always said "LinkedIn" even when the recruiter's cross-reference upload was actually a second resume — the uploader itself accepts either. `app/api/assess-credibility/route.ts` already computes `detectLinkedIn(crossRefText)` but never persisted it. New nullable `screenings.cross_ref_is_linkedin` column (`supabase-migration-cross-ref-doc-type.sql`, **not yet run**), written via its own independent `updateScreening` call (kept separate from the existing `linkedInPdfPath` update deliberately — see decisions-log's matching entry for why). `app/api/history/[id]/linkedin/route.ts`'s HEAD check now reports it via an `X-Cross-Ref-Is-Linkedin` header, with a fallback select so a not-yet-migrated database can't break the existing has-a-doc check. `app/interview/[id]/document/page.tsx` only shows the LinkedIn label/icon/blue styling when that header is `"true"`; a confirmed second resume or an unknown/pre-migration row gets a neutral "Cross-Reference" label instead of a guess. No backfill — old rows read `NULL` (unknown) forever, same pattern as every other additive signal column here.
+- **Back button added** to the same popup's top bar (`window.history.back()`) — Vlad's ask, in case a previewed doc's embedded link navigates the iframe away with no way back.
+- **Verified:** `npx tsc --noEmit` clean (full project, this session's sandbox). **Not live-tested** — needs Vlad to run the new migration, then confirm both cases: an uploaded second-resume cross-reference shows "Cross-Reference," and a real LinkedIn PDF export still shows "LinkedIn." See open-questions.md.
+- **Not yet committed** — needs a Claude Code handoff (branch/commit/PR), same as the enterprise-pilot-readiness batch above.
+
+## Fixed, 2026-07-27 (Activity timeline missing on All Candidates page)
+
+- **`app/candidates/page.tsx` never had the Activity/attribution timeline** that `app/projects/[id]/page.tsx`'s Pipeline tab has had since Phase 1.2 — this page has always used its own separate `CandidateCard` component, not a shared `ResultCard`, so it never inherited that feature. Fixed by porting the same pattern: `formatActionText()` copied in, a per-card `actions` state lazy-loaded via the existing `GET /api/history/[id]/actions` endpoint on first expand (scoped locally per-card here, matching how this component already handles credibility/notes, rather than PipelineTab's page-level `actionsMap`). Same rendering — avatar-initial, email, action text, date.
+- **Verified:** `npx tsc --noEmit` clean. **Not live-tested** — needs Vlad to expand a real candidate card on `/candidates` and confirm the timeline matches what the same candidate shows on the Pipeline tab.
+- **Not yet committed** — needs a Claude Code handoff.
+
+## Fixed, 2026-07-27 (candidate counts silently capped at 200)
+
+- **Real bug, not a UI glitch.** `listScreenings()` (`lib/screenings.ts`), the single function behind every count/filter/search on the Pipeline tab and the All Candidates page, had a hardcoded `.limit(200)` with no documented reason anywhere in this vault — looks like an early, unflagged safety cap from before this app had anywhere near that many real screenings. Any project/team crossing 200 real matching rows silently stopped growing in every count that reads through it (Pipeline tab counts, "N candidates screened," status/stage filters, search) — exactly what Vlad reported ("stopped adding up at 200").
+- **Fixed:** removed the limit entirely, not raised — confirmed via full-repo grep it was the only `.limit()` call anywhere in the codebase.
+- **Open, flagged for Vlad (see open-questions.md):** whether Supabase's own project-level `db-max-rows` setting caps this independently of anything in the code — needs checking directly in Supabase's dashboard. Also flagged as a future scale item, not fixed now: this function still fetches every matching row in one request with no real pagination — fine today, worth real limit/offset pagination before Brillio's full pilot volume gets much bigger.
+- **Verified:** `npx tsc --noEmit` clean. **Not live-tested** — needs a project/team with 200+ real screenings to confirm the count now keeps growing.
+- **Not yet committed** — needs a Claude Code handoff.
