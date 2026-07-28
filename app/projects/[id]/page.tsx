@@ -1355,6 +1355,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     className="shrink-0 rounded-full transition-opacity hover:opacity-70">
                     <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} showApplicant />
                   </button>
+                  {/* Visible agency name, added 2026-07-27 (Vlad's ask) —
+                      matches the same addition on ResultCard.tsx and
+                      app/candidates/page.tsx, so all three source-badge
+                      surfaces stay in sync (same convention as the LinkedIn
+                      badge consistency fix, 2026-07-17). */}
+                  {pendingSourceId !== s.id && getSourceType(s) === "agency" && s.agencyName && (
+                    <span className="shrink-0 truncate text-[11px] font-medium text-red-600 dark:text-red-400">
+                      {s.agencyName}
+                    </span>
+                  )}
                   {pendingSourceId === s.id && (
                     <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
