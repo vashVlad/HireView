@@ -40,13 +40,28 @@ function furthestStage(stage: TrackerStage | null, previousStage: TrackerStage |
   return stage;
 }
 
+// NOT `status !== "new_applicant"` — that treats every archived candidate as
+// "reached out," including ones nobody ever actually contacted:
+// below-threshold candidates are auto-archived straight from creation
+// (previousStatus stays null, no engagement ever happened), and a recruiter
+// can also archive a "new_applicant" directly without moving them through
+// recruiter_screen/contacted/screening first. Vlad flagged this 2026-07-16
+// after noticing the number looked too high. The previous_status column is
+// trigger-maintained on every status UPDATE
+// (supabase-migration-previous-status.sql) and always holds the status
+// immediately before the current one — so for an archived candidate,
+// checking previousStatus tells us whether they passed through real
+// engagement on their way there. "Reached out" now means: currently in an
+// active engagement status, OR archived after having been in one.
+const ACTIVE_ENGAGEMENT_STATUSES: CandidateStatus[] = ["recruiter_screen", "contacted", "screening"];
+
 /**
- * Builds the funnel stage bars (Total Screened → ... → Offer) plus the
- * archived/rejected count for one slice of candidates — the org-wide
- * blended view and each per-project breakdown all go through this same
- * function, so the two can never silently drift apart in how they count.
+ * Raw (label/conversion-free) stage counts for one candidate set — pulled out
+ * of computeStages 2026-07-27 so the exact same predicates can be re-run
+ * against a source-filtered subset (bySource below) without risking the two
+ * ever drifting apart from hand-duplicated filter logic.
  */
-function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { stages: FunnelStageCount[]; archivedOrRejected: number } {
+function computeRawStageCounts(totalScreened: number, candidates: FunnelCandidate[]): { key: string; label: string; count: number }[] {
   // NOT candidates.length — every screened resume gets a `screenings` row
   // regardless of score (2026-07-15 auto-archive decision), so `candidates`
   // here is the full screened set, same as totalScreened. "Passed Threshold"
@@ -55,27 +70,10 @@ function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { 
   // 2026-07-16 — see session-log follow-on #38.
   const passedThreshold = candidates.filter((c) => c.passedThreshold).length;
 
-  // NOT `status !== "new_applicant"` — that treats every archived candidate
-  // as "reached out," including ones nobody ever actually contacted:
-  // below-threshold candidates are auto-archived straight from creation
-  // (previousStatus stays null, no engagement ever happened), and a
-  // recruiter can also archive a "new_applicant" directly without moving
-  // them through recruiter_screen/contacted/screening first. Vlad flagged
-  // this 2026-07-16 after noticing the number looked too high. The
-  // previous_status column is trigger-maintained on every status UPDATE
-  // (supabase-migration-previous-status.sql) and always holds the status
-  // immediately before the current one — so for an archived candidate,
-  // checking previousStatus tells us whether they passed through real
-  // engagement on their way there. "Reached out" now means: currently in
-  // an active engagement status, OR archived after having been in one.
-  const ACTIVE_ENGAGEMENT_STATUSES: CandidateStatus[] = ["recruiter_screen", "contacted", "screening"];
   const reachedOut = candidates.filter(
     (c) =>
       ACTIVE_ENGAGEMENT_STATUSES.includes(c.status) ||
       (c.status === "archived" && c.previousStatus != null && ACTIVE_ENGAGEMENT_STATUSES.includes(c.previousStatus))
-  ).length;
-  const archivedOrRejected = candidates.filter(
-    (c) => c.status === "archived" || c.trackerStage === "Reject"
   ).length;
 
   // Cumulative funnel: "reached at least this tracker stage" — a candidate at L2
@@ -93,12 +91,41 @@ function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { 
     return { stage, count };
   });
 
-  const rawStages: { key: string; label: string; count: number }[] = [
+  return [
     { key: "screened", label: "Total Screened", count: totalScreened },
     { key: "passed_threshold", label: "Passed Threshold", count: passedThreshold },
     { key: "reached_out", label: "Reached Out", count: reachedOut },
     ...trackerCounts.map(({ stage, count }) => ({ key: stage.toLowerCase().replace(/[^a-z0-9]/g, "_"), label: stage, count })),
   ];
+}
+
+/**
+ * Builds the funnel stage bars (Total Screened → ... → Offer) plus the
+ * archived/rejected count for one slice of candidates — the org-wide
+ * blended view and each per-project breakdown all go through this same
+ * function, so the two can never silently drift apart in how they count.
+ */
+function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { stages: FunnelStageCount[]; archivedOrRejected: number } {
+  const archivedOrRejected = candidates.filter(
+    (c) => c.status === "archived" || c.trackerStage === "Reject"
+  ).length;
+
+  const rawStages = computeRawStageCounts(totalScreened, candidates);
+
+  // Per-source breakdown, added 2026-07-27 (Vlad's ask to fold the
+  // Sourced/Applied/Agency split into the main funnel bars instead of a
+  // separate section) — re-runs the exact same predicates (via
+  // computeRawStageCounts) against each source's own subset, so a stage's
+  // three segments always sum to exactly that stage's own `count`. Every
+  // screened resume has exactly one source, so subset.length is a safe stand-
+  // in for "totalScreened, filtered to this source" — same reasoning as the
+  // totalScreened === candidates.length equivalence noted above.
+  const inboundCandidates = candidates.filter((c) => c.source === "inbound");
+  const outboundCandidates = candidates.filter((c) => c.source === "outbound");
+  const agencyCandidates = candidates.filter((c) => c.source === "agency");
+  const rawInbound = computeRawStageCounts(inboundCandidates.length, inboundCandidates);
+  const rawOutbound = computeRawStageCounts(outboundCandidates.length, outboundCandidates);
+  const rawAgency = computeRawStageCounts(agencyCandidates.length, agencyCandidates);
 
   const stages: FunnelStageCount[] = rawStages.map((s, i) => {
     const prev = i > 0 ? rawStages[i - 1].count : null;
@@ -107,6 +134,11 @@ function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { 
       label: s.label,
       count: s.count,
       conversionFromPrevious: prev != null && prev > 0 ? Math.round((s.count / prev) * 100) : null,
+      bySource: {
+        inbound: rawInbound[i].count,
+        outbound: rawOutbound[i].count,
+        agency: rawAgency[i].count,
+      },
     };
   });
 

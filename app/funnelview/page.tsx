@@ -21,62 +21,65 @@ function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "lin
   return "applicant";
 }
 
+// Stacked-by-source bars, added 2026-07-27 (Vlad's ask: "combine sourced/
+// applied/agency [into] the main funnel... so it's easier to track stages
+// for those sources with the main funnel stages") — replaces the old flat
+// single-color bar. Each stage's segment widths are proportional to that
+// stage's own bySource split (not the overall max), so within one bar the
+// three colors always show that stage's actual source mix; segment order
+// (Applied, Sourced, Agency) and colors match the legend above and the old
+// standalone SourceSplit component this replaces.
 function StageBar({ stages }: { stages: FunnelData["stages"] }) {
   const max = Math.max(...stages.map((s) => s.count), 1);
   return (
     <div className="flex flex-col gap-3">
-      {stages.map((s) => (
-        <div key={s.key} className="flex items-center gap-3">
-          <span className="w-32 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.label}</span>
-          <div className="relative h-7 flex-1 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
-            <div
-              className="h-full rounded-lg bg-violet-500 dark:bg-violet-600 transition-all"
-              style={{ width: `${Math.max((s.count / max) * 100, s.count > 0 ? 2 : 0)}%` }}
-            />
+      {stages.map((s) => {
+        const barWidthPct = Math.max((s.count / max) * 100, s.count > 0 ? 2 : 0);
+        const inboundPct = s.count > 0 ? (s.bySource.inbound / s.count) * 100 : 0;
+        const outboundPct = s.count > 0 ? (s.bySource.outbound / s.count) * 100 : 0;
+        const agencyPct = s.count > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
+        return (
+          <div key={s.key} className="flex items-center gap-3">
+            <span className="w-32 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.label}</span>
+            <div className="relative h-7 flex-1 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
+              <div
+                className="flex h-full rounded-lg transition-all"
+                style={{ width: `${barWidthPct}%` }}
+                title={`Applied ${s.bySource.inbound.toLocaleString()} · Sourced (LinkedIn) ${s.bySource.outbound.toLocaleString()} · Agency ${s.bySource.agency.toLocaleString()}`}
+              >
+                {s.bySource.inbound > 0 && <div className="h-full bg-green-500" style={{ width: `${inboundPct}%` }} />}
+                {s.bySource.outbound > 0 && <div className="h-full bg-violet-500 dark:bg-violet-600" style={{ width: `${outboundPct}%` }} />}
+                {s.bySource.agency > 0 && <div className="h-full bg-red-500" style={{ width: `${agencyPct}%` }} />}
+              </div>
+            </div>
+            <span className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
+              {s.count.toLocaleString()}
+            </span>
+            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
+              {s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—"}
+            </span>
           </div>
-          <span className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
-            {s.count.toLocaleString()}
-          </span>
-          <span className="w-14 shrink-0 text-right text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
-            {s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—"}
-          </span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-// Three-way source split — Agency added 2026-07-20 (Vlad's ask) alongside
-// Applied/Sourced (LinkedIn). Green (Applied) and red (Agency) match the
-// SourceIcon fills used elsewhere on this page and on ResultCard/All
-// Candidates/Pipeline; violet (Sourced/LinkedIn) is this bar's own accent,
-// distinct from the LinkedIn-brand-blue SourceIcon uses for that same source.
-function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
-  const total = split.inbound + split.outbound + split.agency;
-  const inboundPct = total > 0 ? Math.round((split.inbound / total) * 100) : 0;
-  const outboundPct = total > 0 ? Math.round((split.outbound / total) * 100) : 0;
-  const agencyPct = total > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
+// Small color legend for StageBar's segments — shown once above the funnel
+// instead of repeating labels on every row. Same colors/order as the old
+// standalone SourceSplit section this replaces.
+function SourceLegend() {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex h-3 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-        <div className="h-full bg-green-500" style={{ width: `${inboundPct}%` }} />
-        <div className="h-full bg-violet-500" style={{ width: `${outboundPct}%` }} />
-        <div className="h-full bg-red-500" style={{ width: `${agencyPct}%` }} />
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Applied
-          <span className="font-semibold tabular-nums">{split.inbound.toLocaleString()}</span>
-        </span>
-        <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Sourced (LinkedIn)
-          <span className="font-semibold tabular-nums">{split.outbound.toLocaleString()}</span>
-        </span>
-        <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Agency
-          <span className="font-semibold tabular-nums">{split.agency.toLocaleString()}</span>
-        </span>
-      </div>
+    <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+      <span className="flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Applied
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-violet-500 dark:bg-violet-600" /> Sourced (LinkedIn)
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Agency
+      </span>
     </div>
   );
 }
@@ -303,6 +306,12 @@ export default function FunnelViewPage() {
                 </h2>
                 <span className="text-xs text-zinc-400 dark:text-zinc-500">count · % of previous stage</span>
               </div>
+              {/* Source legend, added 2026-07-27 — each bar below is now
+                  itself split by source (see StageBar), replacing the old
+                  standalone "Sourced vs. Applied" section. */}
+              <div className="mb-4">
+                <SourceLegend />
+              </div>
               {activeRecruiters.length > 0 && (
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
@@ -330,24 +339,6 @@ export default function FunnelViewPage() {
                 </p>
               ) : (
                 <StageBar stages={activeStages} />
-              )}
-              {activeArchivedOrRejected > 0 && (
-                <p className="mt-4 border-t border-zinc-100 pt-4 text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
-                  {activeArchivedOrRejected.toLocaleString()} candidate{activeArchivedOrRejected === 1 ? "" : "s"} archived or
-                  rejected along the way — excluded from the bars above, counted at whichever stage they last reached.
-                </p>
-              )}
-            </div>
-
-            {/* Source split */}
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-              <h2 className="mb-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                Sourced vs. Applied {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}
-              </h2>
-              {activeSourceSplit.inbound + activeSourceSplit.outbound + activeSourceSplit.agency === 0 ? (
-                <p className="py-2 text-center text-sm text-zinc-400">No data yet.</p>
-              ) : (
-                <SourceSplit split={activeSourceSplit} />
               )}
             </div>
 
