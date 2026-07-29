@@ -1150,9 +1150,24 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       // main pipeline list only ever contains active candidates and the
       // Archived section (rendered via a divider below, see the render map)
       // reads as a visually separated block further down the page.
-      const aArchived = isSettledArchived(a) ? 1 : 0;
-      const bArchived = isSettledArchived(b) ? 1 : 0;
-      if (aArchived !== bArchived) return aArchived - bArchived;
+      //
+      // 2026-07-29 exception: skipped entirely for "newest" — the whole
+      // point of that sort (Vlad's ask: surface recent screenings) broke
+      // under this rule, since a below-threshold candidate is
+      // auto-archived the moment it's saved (lib/screenings.ts) and would
+      // otherwise never show up near the top of "Newest" no matter how
+      // recently it was screened — exactly the candidates a recruiter
+      // reviewing "what just came in" most needs to see. "Newest" sorts
+      // strictly by createdAt across active AND archived together;
+      // archived cards still read as archived via their own dimmed/
+      // desaturated styling below, just no longer forced to the bottom.
+      // The isFirstArchived divider below is skipped in this mode too,
+      // since it assumes a single contiguous archived block at the end.
+      if (sortOrder !== "newest") {
+        const aArchived = isSettledArchived(a) ? 1 : 0;
+        const bArchived = isSettledArchived(b) ? 1 : 0;
+        if (aArchived !== bArchived) return aArchived - bArchived;
+      }
       // Ring grouping, 2026-07-17 (Vlad's ask, mirrored from the same fix on
       // app/candidates/page.tsx): within the active/archived split above,
       // candidates sharing a fraud-signal Ring are grouped together instead
@@ -1391,7 +1406,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         // archived, or if statusFilter has already narrowed the list to only
         // archived cards (idx 0 would be archived — divider still renders,
         // which is fine, it just labels the single-group list).
-        const isFirstArchived = isSettledArchived(s) && !isSettledArchived(filteredScreenings[idx - 1]);
+        //
+        // 2026-07-29: skipped for "newest" sort — archived cards are
+        // interleaved by date in that mode (see the .sort() comparator
+        // above), so there's no single contiguous block left to divide;
+        // each archived card's own dimmed styling carries that meaning
+        // instead.
+        const isFirstArchived = sortOrder !== "newest" && isSettledArchived(s) && !isSettledArchived(filteredScreenings[idx - 1]);
         // Card merging (continued from the clusterHasFraudSignal comment
         // above): the existing "Ring grouping" sort tiebreaker (see
         // filteredScreenings's .sort() above) already places every member of
