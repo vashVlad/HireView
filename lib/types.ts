@@ -6,7 +6,24 @@ export type Recommendation = "proceed" | "decline";
 // Existing DB rows are backfilled from "interview" to "screening" by
 // supabase-migration-backfill-interview-status.sql — run that BEFORE
 // deploying this change (see decisions-log.md, 2026-07-15).
-export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived";
+// "transferred" added 2026-07-29 (Vlad's ask: "add an option to transfer
+// the candidate to another project from the status dropdown").
+// CORRECTION, same day: this comment originally claimed the value itself
+// needed no migration since screenings.status is a plain text column, not
+// a Postgres enum — true of the column TYPE, but wrong about there being
+// nothing else to migrate. A live test hit "violates check constraint
+// screenings_status_check" — a CHECK constraint (predates this repo's
+// migration-file convention, added directly via the Supabase dashboard)
+// restricts status to a fixed value list independently of the column
+// type. Fixed by supabase-migration-status-transferred-check.sql, which
+// MUST run before this status value can actually be written. See
+// supabase-migration-transfer-to-project.sql for the two separate pointer
+// columns (transferredToProjectId/transferredToScreeningId) this status
+// also relies on.
+// Supersedes the earlier, purely-informational "Moved to X" Pipeline badge
+// (findBetterFitMatches, removed same day) — Vlad: once a real Transfer
+// action exists, showing that passive guess alongside it is redundant.
+export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived" | "transferred";
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
   "new_applicant",
@@ -14,6 +31,7 @@ export const CANDIDATE_STATUSES: CandidateStatus[] = [
   "contacted",
   "screening",
   "archived",
+  "transferred",
 ];
 
 export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
@@ -22,6 +40,7 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
   contacted: "Contacted",
   screening: "Screening",
   archived: "Archived",
+  transferred: "Transferred",
 };
 
 // Fixed reason list for archived candidates — Vlad's ask, 2026-07-15,
@@ -370,6 +389,22 @@ export interface ScreeningRecord {
    * single "Transfer to project" via save-one).
    */
   batchId?: string;
+  /**
+   * Set only when status === "transferred" — where this candidate went
+   * (Vlad's ask, 2026-07-29). transferredToScreeningId points at the real,
+   * separately-scored screening row created in the destination project
+   * (transferScreeningToProject(), lib/screenings.ts) — powers the small
+   * "view" link next to the Transferred status pill
+   * (components/StatusStageControl.tsx), which goes straight to
+   * /candidates/[transferredToScreeningId]. transferredToProjectName is
+   * resolved via a separate, isolated enrichment query
+   * (enrichTransferInfo) — see supabase-migration-transfer-to-project.sql
+   * for why these three fields are deliberately NOT in the shared
+   * SCREENING_COLUMNS select.
+   */
+  transferredToProjectId?: number;
+  transferredToProjectName?: string;
+  transferredToScreeningId?: number;
   createdAt: string;
 }
 

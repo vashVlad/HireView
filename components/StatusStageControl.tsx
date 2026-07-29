@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { ARCHIVE_REASONS, CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS, TRACKER_STAGES, type CandidateStatus, type TrackerStage } from "@/lib/types";
 import { STATUS_COLORS } from "./StatusSelect";
 
@@ -60,6 +61,8 @@ export function StatusStageControl({
   onStageChange,
   archiveReason,
   onArchiveReasonChange,
+  transferredToProjectName,
+  transferredToScreeningId,
 }: {
   status: CandidateStatus;
   stage: TrackerStage | null;
@@ -67,12 +70,32 @@ export function StatusStageControl({
   onStageChange: (stage: TrackerStage) => void;
   archiveReason?: string | null;
   onArchiveReasonChange?: (reason: string) => void;
+  /**
+   * Read-only display only — Vlad's ask, 2026-07-29, redesigned same day:
+   * "Transferred" is no longer something you pick from this dropdown (that
+   * turned out to be the wrong shape once he tested it — see
+   * components/TransferControl.tsx for the real flow, now a dedicated
+   * button at the bottom of the card). This pill just needs to render
+   * "Transferred" correctly and link to the destination once one has
+   * already happened elsewhere.
+   */
+  transferredToProjectName?: string;
+  /** Powers the small "view" link straight to the new screening's own full-result page — Vlad's ask: "add a link next to that chip that will transfer the user to the exact result card in that project. make it small tho." */
+  transferredToScreeningId?: number;
 }) {
   const [pendingArchive, setPendingArchive] = useState(false);
   const gateOnReason = onArchiveReasonChange !== undefined;
   const displayStatus = pendingArchive ? "archived" : status;
   const showStage = status === "screening" && !pendingArchive;
   const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
+  const showTransferredLink = status === "transferred" && transferredToScreeningId != null;
+  // "Transferred" is never offered as something to pick FROM another
+  // status — it only ever gets set by TransferControl's own commit flow —
+  // but if a candidate already IS "transferred", it still needs to appear
+  // as the select's current value (and stay pickable back to, e.g., a
+  // recruiter manually reverting it), or the native <select> would show a
+  // blank/mismatched value.
+  const selectableStatuses = CANDIDATE_STATUSES.filter((s) => s !== "transferred" || s === status);
 
   return (
     <div
@@ -92,12 +115,25 @@ export function StatusStageControl({
         }}
         className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
       >
-        {CANDIDATE_STATUSES.map((s) => (
+        {selectableStatuses.map((s) => (
           <option key={s} value={s}>
             {CANDIDATE_STATUS_LABELS[s]}
           </option>
         ))}
       </select>
+      {showTransferredLink && (
+        <>
+          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
+          <Link
+            href={`/candidates/${transferredToScreeningId}`}
+            onClick={(e) => e.stopPropagation()}
+            title={`View the result card in "${transferredToProjectName ?? "that project"}"`}
+            className="max-w-20 truncate py-1 pl-1.5 pr-1 text-[10px] underline decoration-dotted underline-offset-2 opacity-80 hover:opacity-100"
+          >
+            {transferredToProjectName ?? "View"}
+          </Link>
+        </>
+      )}
       {showStage && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />

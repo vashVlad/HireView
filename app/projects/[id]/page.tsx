@@ -16,6 +16,7 @@ import { ScoreBadge } from "@/components/ScoreBadge";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusStageControl } from "@/components/StatusStageControl";
+import { TransferControl } from "@/components/TransferControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
   CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
@@ -1037,6 +1038,34 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
   const [actionsMap, setActionsMap] = useState<Record<number, ScreeningAction[] | "loading">>({});
+  // Transfer destination list, Vlad's ask 2026-07-29: projects this
+  // recruiter/admin can transfer a candidate INTO, passed down to each
+  // card's TransferControl (components/TransferControl.tsx) — a dedicated
+  // bottom-of-card button as of the same-day redesign, not a status-
+  // dropdown option anymore. GET /api/projects already scopes server-side
+  // via teamIdsFilter (recruiter: own team only, admin: everything — see
+  // lib/auth.ts) — the client just filters to active projects and excludes
+  // the current one. Supersedes the old passive "Moved to X" badge
+  // (findBetterFitMatches, removed) now that Transfer is a real action.
+  const [transferProjects, setTransferProjects] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        const list = (data.projects ?? [])
+          .filter((p: { id: number; status: string }) => p.status === "active" && p.id !== projectId)
+          .map((p: { id: number; name: string }) => ({ id: p.id, name: p.name }));
+        setTransferProjects(list);
+      })
+      .catch(() => {
+        // Non-fatal — Transfer just stays ungated (no picker) without this.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   // Lazy-load the attribution timeline the first time a card is expanded.
   useEffect(() => {
@@ -1127,9 +1156,24 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       // main pipeline list only ever contains active candidates and the
       // Archived section (rendered via a divider below, see the render map)
       // reads as a visually separated block further down the page.
-      const aArchived = isSettledArchived(a) ? 1 : 0;
-      const bArchived = isSettledArchived(b) ? 1 : 0;
-      if (aArchived !== bArchived) return aArchived - bArchived;
+      //
+      // 2026-07-29 exception: skipped entirely for "newest" — the whole
+      // point of that sort (Vlad's ask: surface recent screenings) broke
+      // under this rule, since a below-threshold candidate is
+      // auto-archived the moment it's saved (lib/screenings.ts) and would
+      // otherwise never show up near the top of "Newest" no matter how
+      // recently it was screened — exactly the candidates a recruiter
+      // reviewing "what just came in" most needs to see. "Newest" sorts
+      // strictly by createdAt across active AND archived together;
+      // archived cards still read as archived via their own dimmed/
+      // desaturated styling below, just no longer forced to the bottom.
+      // The isFirstArchived divider below is skipped in this mode too,
+      // since it assumes a single contiguous archived block at the end.
+      if (sortOrder !== "newest") {
+        const aArchived = isSettledArchived(a) ? 1 : 0;
+        const bArchived = isSettledArchived(b) ? 1 : 0;
+        if (aArchived !== bArchived) return aArchived - bArchived;
+      }
       // Ring grouping, 2026-07-17 (Vlad's ask, mirrored from the same fix on
       // app/candidates/page.tsx): within the active/archived split above,
       // candidates sharing a fraud-signal Ring are grouped together instead
@@ -1174,6 +1218,31 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveReason }) });
     } catch { /* non-fatal */ }
+  }
+
+  // Transfer status action, Vlad's ask 2026-07-29, redesigned same day into
+  // a dedicated button (components/TransferControl.tsx) after he tested the
+  // original dropdown-driven version and hit a real bug — see that
+  // component's own doc comment for the full flow. TransferControl now owns
+  // every fetch call itself (precheck/preview/commit); this just merges the
+  // final result into local state once it reports success.
+  function handleTransferred(id: number, result: { newScreeningId: number; transferredToProjectId: number; transferredToProjectName: string }) {
+    const now = new Date().toISOString();
+    setScreenings((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              status: "transferred",
+              statusUpdatedAt: now,
+              transferredToProjectId: result.transferredToProjectId,
+              transferredToProjectName: result.transferredToProjectName,
+              transferredToScreeningId: result.newScreeningId,
+            }
+          : s
+      )
+    );
+    onStatusChange?.(id, "transferred");
   }
 
   async function handleToggleFlag(id: number, current: boolean, note?: string) {
@@ -1368,7 +1437,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         // archived, or if statusFilter has already narrowed the list to only
         // archived cards (idx 0 would be archived — divider still renders,
         // which is fine, it just labels the single-group list).
-        const isFirstArchived = isSettledArchived(s) && !isSettledArchived(filteredScreenings[idx - 1]);
+        //
+        // 2026-07-29: skipped for "newest" sort — archived cards are
+        // interleaved by date in that mode (see the .sort() comparator
+        // above), so there's no single contiguous block left to divide;
+        // each archived card's own dimmed styling carries that meaning
+        // instead.
+        const isFirstArchived = sortOrder !== "newest" && isSettledArchived(s) && !isSettledArchived(filteredScreenings[idx - 1]);
         // Card merging (continued from the clusterHasFraudSignal comment
         // above): the existing "Ring grouping" sort tiebreaker (see
         // filteredScreenings's .sort() above) already places every member of
@@ -1468,7 +1543,19 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       Duplicate detected
                     </button>
                   )}
-                  {s.historyAlertType && (
+                  {/* 2026-07-29 (Vlad's ask): "if the candidate shows (moved
+                      to project) then remove (previously seen)" — the
+                      milder "previously_seen" alert is redundant once the
+                      status chip already reads "Transferred to X"; showing
+                      both was just noise pointing at largely the same idea.
+                      Originally gated on the old "Moved to X" badge
+                      (betterFitMatches), now keyed off the real
+                      status === "transferred" now that Transfer is an
+                      explicit action instead of a passive guess.
+                      "known_fraud_pattern" is a distinct, more serious
+                      signal (not just "also seen elsewhere") and stays
+                      regardless. */}
+                  {s.historyAlertType && (s.historyAlertType === "known_fraud_pattern" || s.status !== "transferred") && (
                     <Link
                       href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
                       onClick={(e) => e.stopPropagation()}
@@ -1586,6 +1673,8 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     onStageChange={(stage) => handleStageChange(s.id, stage)}
                     archiveReason={s.archiveReason}
                     onArchiveReasonChange={(reason) => handleArchiveReasonChange(s.id, reason)}
+                    transferredToProjectName={s.transferredToProjectName}
+                    transferredToScreeningId={s.transferredToScreeningId}
                   />
                 </div>
               </div>
@@ -1825,6 +1914,31 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     </button>
                     {rescreenErrorId === s.id && (
                       <span className="text-xs text-rose-600 dark:text-rose-400">Rescreen failed — try again.</span>
+                    )}
+                    {/* Transfer, redesigned 2026-07-29 into its own bottom-
+                        of-card button (components/TransferControl.tsx)
+                        after the original status-dropdown-driven version
+                        was tested and hit a real bug — see that
+                        component's doc comment. Stays rendered even once
+                        already transferred (Vlad's ask: "mention it
+                        somewhere" rather than the control just vanishing
+                        with no trace) — TransferControl itself swaps to a
+                        small read-only "Transferred to X" mention in that
+                        case via the alreadyTransferred prop.  Hidden only
+                        if there's nowhere to transfer INTO yet
+                        (transferProjects still loading, or this is the
+                        only active project this recruiter/admin can see). */}
+                    {transferProjects.length > 0 && (
+                      <TransferControl
+                        screeningId={s.id}
+                        transferProjects={transferProjects}
+                        alreadyTransferred={
+                          s.status === "transferred"
+                            ? { projectName: s.transferredToProjectName, screeningId: s.transferredToScreeningId }
+                            : null
+                        }
+                        onTransferred={(result) => handleTransferred(s.id, result)}
+                      />
                     )}
                   </div>
                   {confirmDeleteId === s.id ? (
