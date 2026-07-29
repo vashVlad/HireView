@@ -6,6 +6,7 @@ import type { CandidateResult } from "@/lib/types";
 
 type Precheck = "idle" | "loading" | { screeningId: number; score: number } | "error";
 type Preview = "idle" | "loading" | CandidateResult | "error";
+type Mode = "copy" | "rescore" | "existing";
 
 /**
  * Dedicated "Transfer" button + popover, at the bottom of a Pipeline card —
@@ -13,34 +14,31 @@ type Preview = "idle" | "loading" | CandidateResult | "error";
  * flow after he tested it and hit a real bug (a destination copy got
  * created but the source never flipped to "transferred" — see
  * transferScreeningToProject()'s two-step status update in
- * lib/screenings.ts for the fix), then refined twice more the same day:
+ * lib/screenings.ts for the fix), then refined further the same day:
  *
- * - The re-score trigger is a button, not a checkbox ("instead of a
- *   checkbox for screening add a button") — clicking it fires the preview
- *   call once; once a result comes back the button is replaced by the
- *   score itself rather than staying clickable, so there's no way to
- *   accidentally re-fire a second Claude call for the same pairing.
+ * - The re-score trigger is a button, not a checkbox.
  * - If the candidate already has a real screening in the destination
- *   project (precheck), that score is shown immediately and the re-screen
- *   button never even renders — no tokens spent re-deriving something
- *   that's already known.
+ *   project (precheck), that score is shown immediately — no Claude call
+ *   spent re-deriving something already known.
  * - If THIS screening has already been transferred somewhere, that's
- *   mentioned right here in this control's own footprint (a small link,
- *   same spot the "Transfer" button would occupy) instead of the whole
- *   control just disappearing with no explanation.
- *
- * Flow, one popover:
- *   1. Pick a destination project → fires /transfer/precheck (cheap, no
- *      Claude call). If the candidate already has a screening there, show
- *      that score directly — nothing left to decide, "Confirm" just links
- *      the original at that existing row (mode: "existing").
- *   2. If nothing existing: show the current score that would carry over
- *      as-is, plus a "Screen for this project" button. Clicking it fires
- *      /transfer/preview (a real scoreCandidate call against the
- *      destination JD, not saved yet) and shows the resulting score.
- *   3. "Confirm" commits via /transfer — mode "copy" (never screened) or
- *      "rescore" (screened via step 2, round-trips the exact preview
- *      result back so scoring never runs twice).
+ *   mentioned right here (a small link, same spot the "Transfer" button
+ *   would occupy) instead of the whole control disappearing.
+ * - No separate "Confirm transfer" step after screening — Vlad's ask:
+ *   "I assume during the screening the candidate is being transferred
+ *   already so there's no need for the confirm transfer button." Each path
+ *   is now exactly one button that does the whole thing:
+ *     - "Screen & transfer" runs /transfer/preview (a real scoreCandidate
+ *       call against the destination JD) and, the moment that result comes
+ *       back, immediately commits via /transfer (mode: "rescore",
+ *       round-tripping that exact result so scoring never runs twice) —
+ *       one click, no second confirmation gate.
+ *     - "Transfer with current score" commits immediately with the
+ *       candidate's own existing result (mode: "copy").
+ *     - When the candidate already has a screening in the destination,
+ *       the single button just links the original at it (mode: "existing").
+ *   If the commit step itself fails after a real re-score already
+ *   succeeded, the computed score is kept so "Retry transfer" doesn't burn
+ *   a second Claude call re-deriving the same number.
  */
 export function TransferControl({
   screeningId,
@@ -59,14 +57,14 @@ export function TransferControl({
   const [projectId, setProjectId] = useState<number | "">("");
   const [precheck, setPrecheck] = useState<Precheck>("idle");
   const [preview, setPreview] = useState<Preview>("idle");
-  const [confirming, setConfirming] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function reset() {
     setProjectId("");
     setPrecheck("idle");
     setPreview("idle");
-    setConfirming(false);
+    setCommitting(false);
     setError(null);
   }
 
@@ -89,38 +87,18 @@ export function TransferControl({
     }
   }
 
-  async function handleScreenNow() {
+  // Single commit path shared by all three modes — the only place that
+  // actually calls /transfer. `payload` is the existing screening id for
+  // "existing", the freshly-scored result for "rescore", or unused for
+  // "copy".
+  async function commitTransfer(mode: Mode, payload?: number | CandidateResult) {
     if (typeof projectId !== "number") return;
-    setPreview("loading");
-    try {
-      const res = await fetch(`/api/history/${screeningId}/transfer/preview`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error ?? "Screening failed");
-      setPreview(data.result);
-    } catch {
-      setPreview("error");
-    }
-  }
-
-  async function handleConfirm() {
-    if (typeof projectId !== "number") return;
-    setConfirming(true);
+    setCommitting(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = { projectId };
-      if (precheck !== "idle" && precheck !== "loading" && precheck !== "error") {
-        body.mode = "existing";
-        body.existingScreeningId = precheck.screeningId;
-      } else if (preview !== "idle" && preview !== "loading" && preview !== "error") {
-        body.mode = "rescore";
-        body.previewResult = preview;
-      } else {
-        body.mode = "copy";
-      }
+      const body: Record<string, unknown> = { projectId, mode };
+      if (mode === "existing") body.existingScreeningId = payload;
+      if (mode === "rescore") body.previewResult = payload;
       const res = await fetch(`/api/history/${screeningId}/transfer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -138,8 +116,37 @@ export function TransferControl({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Transfer failed");
     } finally {
-      setConfirming(false);
+      setCommitting(false);
     }
+  }
+
+  // Screens for the destination project, then immediately transfers with
+  // that exact result — no separate confirm click. If scoring itself
+  // fails, nothing has committed yet, so "Try again" just re-screens. If
+  // scoring succeeds but the commit call fails, `preview` already holds
+  // the computed result, so "Retry transfer" (rendered below) reuses it
+  // instead of re-running scoreCandidate.
+  async function handleScreenAndTransfer() {
+    if (typeof projectId !== "number") return;
+    setError(null);
+    setPreview("loading");
+    let result: CandidateResult;
+    try {
+      const res = await fetch(`/api/history/${screeningId}/transfer/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? "Screening failed");
+      result = data.result;
+      setPreview(result);
+    } catch (err) {
+      setPreview("error");
+      setError(err instanceof Error ? err.message : "Screening failed");
+      return;
+    }
+    await commitTransfer("rescore", result);
   }
 
   // Already transferred — mention it right here instead of hiding this
@@ -164,7 +171,6 @@ export function TransferControl({
 
   const hasExisting = precheck !== "idle" && precheck !== "loading" && precheck !== "error";
   const previewReady = preview !== "idle" && preview !== "loading" && preview !== "error";
-  const canConfirm = typeof projectId === "number" && precheck !== "loading" && preview !== "loading";
 
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -189,11 +195,12 @@ export function TransferControl({
           </p>
           <select
             value={projectId}
+            disabled={committing}
             onChange={(e) => {
               const id = Number(e.target.value);
               if (id) handlePickProject(id);
             }}
-            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700 outline-none focus:border-sky-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+            className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-sm text-zinc-700 outline-none focus:border-sky-300 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
           >
             <option value="" disabled>Choose a project…</option>
             {transferProjects.map((p) => (
@@ -210,25 +217,47 @@ export function TransferControl({
 
           {/* Already has a real screening there — the score is shown
               immediately from the free precheck lookup, no Claude call
-              spent re-deriving something already known. Nothing left to
-              pick: Confirm just points the original at this existing row. */}
+              spent re-deriving something already known. One button, no
+              separate confirm step: it just points the original at this
+              existing row. */}
           {hasExisting && (
-            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-              Already screened there — score <span className="font-semibold text-zinc-700 dark:text-zinc-200">{(precheck as { score: number }).score}</span>.
-              This will just point here at that result, no new copy.
-            </p>
+            <div className="mt-2.5 flex flex-col gap-2">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Already screened there — score <span className="font-semibold text-zinc-700 dark:text-zinc-200">{(precheck as { score: number }).score}</span>. No new copy needed.
+              </p>
+              <button
+                type="button"
+                disabled={committing}
+                onClick={() => commitTransfer("existing", (precheck as { screeningId: number }).screeningId)}
+                className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {committing ? "Transferring…" : "Transfer to that result"}
+              </button>
+              {error && <p className="text-xs text-rose-500">{error}</p>}
+            </div>
           )}
 
           {typeof projectId === "number" && precheck === "idle" && (
             <div className="mt-2.5 flex flex-col gap-2">
-              {!previewReady && preview !== "loading" && (
-                <button
-                  type="button"
-                  onClick={handleScreenNow}
-                  className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                >
-                  Screen for this project
-                </button>
+              {preview === "idle" && (
+                <>
+                  <button
+                    type="button"
+                    disabled={committing}
+                    onClick={handleScreenAndTransfer}
+                    className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Screen &amp; transfer
+                  </button>
+                  <button
+                    type="button"
+                    disabled={committing}
+                    onClick={() => commitTransfer("copy")}
+                    className="text-left text-xs font-medium text-zinc-500 underline decoration-dotted underline-offset-2 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-200"
+                  >
+                    {committing ? "Transferring…" : "Or transfer with the current score as-is"}
+                  </button>
+                </>
               )}
               {preview === "loading" && (
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">Screening…</p>
@@ -236,37 +265,43 @@ export function TransferControl({
               {preview === "error" && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-rose-500">Screening failed.</span>
-                  <button type="button" onClick={handleScreenNow} className="text-xs font-medium text-sky-600 underline dark:text-sky-400">Try again</button>
+                  <button type="button" onClick={handleScreenAndTransfer} className="text-xs font-medium text-sky-600 underline dark:text-sky-400">Try again</button>
                 </div>
               )}
-              {previewReady && (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  New score: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{(preview as CandidateResult).score}</span>
-                </p>
+              {previewReady && committing && (
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">Transferring…</p>
               )}
-              {!previewReady && preview !== "loading" && preview !== "error" && (
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">Or leave unscreened — Confirm will just carry the candidate's current score over as-is.</p>
+              {previewReady && !committing && error && (
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    New score: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{(preview as CandidateResult).score}</span>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-rose-500">{error}</span>
+                    <button
+                      type="button"
+                      onClick={() => commitTransfer("rescore", preview as CandidateResult)}
+                      className="text-xs font-medium text-sky-600 underline dark:text-sky-400"
+                    >
+                      Retry transfer
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}
 
-          {error && <p className="mt-2 text-xs text-rose-500">{error}</p>}
+          {!hasExisting && precheck !== "loading" && !(previewReady && error) && error && (
+            <p className="mt-2 text-xs text-rose-500">{error}</p>
+          )}
 
-          <div className="mt-3 flex items-center justify-end gap-2">
+          <div className="mt-3 flex items-center justify-end">
             <button
               type="button"
               onClick={() => { setOpen(false); reset(); }}
               className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               Cancel
-            </button>
-            <button
-              type="button"
-              disabled={!canConfirm || confirming}
-              onClick={handleConfirm}
-              className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {confirming ? "Transferring…" : "Confirm transfer"}
             </button>
           </div>
         </div>
