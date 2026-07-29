@@ -314,9 +314,19 @@ export async function transferScreeningToProject(params: {
   // because supabase-migration-transfer-to-project.sql hadn't been run yet
   // ("column does not exist"), which surfaced as "Transfer failed" to the
   // recruiter even though a real copy now silently existed in the
-  // destination project. Splitting it means the plain-text `status` flip
-  // (needs no migration) always lands even if the pointer columns can't
-  // yet be written — no more silent partial state.
+  // destination project. Splitting it means the pointer columns failing
+  // (missing migration) can never block the plain `status` flip below.
+  //
+  // CORRECTION, same day: this comment used to also claim the status flip
+  // itself "needs no migration" since it's a plain text column — true of
+  // the column TYPE, but wrong about there being nothing else to migrate.
+  // A separate CHECK constraint (screenings_status_check, predates this
+  // repo's migration-file convention) restricts status to a fixed value
+  // list independently of the column type — a live test hit "violates
+  // check constraint" until supabase-migration-status-transferred-check.sql
+  // added 'transferred' to that list. Both migrations are now required
+  // before this line succeeds; see CandidateStatus's own comment in
+  // lib/types.ts for the full story.
   await updateScreeningStatus(params.screeningId, "transferred", params.actingUserId);
   try {
     const { error: pointerErr } = await supabase

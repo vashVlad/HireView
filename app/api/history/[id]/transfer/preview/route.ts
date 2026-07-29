@@ -5,6 +5,7 @@ import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { canAccessScreening, canAccessProject, getAuthUser } from "@/lib/auth";
+import { errorMessage } from "@/lib/errorMessage";
 
 export const maxDuration = 60;
 
@@ -77,6 +78,9 @@ export async function POST(
     return NextResponse.json({ result });
   } catch (err) {
     console.error("Transfer preview failed:", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Preview failed" }, { status: 500 });
+    // See lib/errorMessage.ts — Supabase throws plain PostgrestError-shaped
+    // objects, not real Error instances, so `err instanceof Error` alone
+    // was silently swallowing the actual failure message here too.
+    return NextResponse.json({ error: errorMessage(err, "Screening failed") }, { status: 500 });
   }
 }

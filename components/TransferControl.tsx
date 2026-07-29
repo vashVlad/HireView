@@ -254,7 +254,12 @@ export function TransferControl({
               )}
               {preview === "error" && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-rose-500">Screening failed.</span>
+                  {/* Real message from the server, not a hardcoded generic
+                      string — a genuine bug found 2026-07-29 alongside the
+                      similar server-side one (see lib/errorMessage.ts):
+                      this branch used to always show "Screening failed."
+                      regardless of what `error` actually held. */}
+                  <span className="text-xs text-rose-500">{error ?? "Screening failed."}</span>
                   <button type="button" onClick={handleScreenAndTransfer} className="text-xs font-medium text-sky-600 underline dark:text-sky-400">Try again</button>
                 </div>
               )}
@@ -281,7 +286,13 @@ export function TransferControl({
             </div>
           )}
 
-          {!hasExisting && precheck !== "loading" && !(previewReady && error) && error && (
+          {/* Only for the "copy" (transfer with current score) commit
+              failing — every other error case (screening itself failing,
+              or the commit failing after a real re-score) already renders
+              its own inline message above, right next to its own retry
+              action, so this must not also fire for those or the same
+              message would show twice. */}
+          {!hasExisting && precheck !== "loading" && preview === "idle" && error && (
             <p className="mt-2 text-xs text-rose-500">{error}</p>
           )}
 

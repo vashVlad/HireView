@@ -7,11 +7,19 @@ export type Recommendation = "proceed" | "decline";
 // supabase-migration-backfill-interview-status.sql — run that BEFORE
 // deploying this change (see decisions-log.md, 2026-07-15).
 // "transferred" added 2026-07-29 (Vlad's ask: "add an option to transfer
-// the candidate to another project from the status dropdown"). Needs no
-// migration for the value itself (screenings.status is plain text, not a
-// Postgres enum) — see supabase-migration-transfer-to-project.sql for the
-// two pointer columns (transferredToProjectId/transferredToScreeningId)
-// this status relies on, which ARE new and do need that migration run.
+// the candidate to another project from the status dropdown").
+// CORRECTION, same day: this comment originally claimed the value itself
+// needed no migration since screenings.status is a plain text column, not
+// a Postgres enum — true of the column TYPE, but wrong about there being
+// nothing else to migrate. A live test hit "violates check constraint
+// screenings_status_check" — a CHECK constraint (predates this repo's
+// migration-file convention, added directly via the Supabase dashboard)
+// restricts status to a fixed value list independently of the column
+// type. Fixed by supabase-migration-status-transferred-check.sql, which
+// MUST run before this status value can actually be written. See
+// supabase-migration-transfer-to-project.sql for the two separate pointer
+// columns (transferredToProjectId/transferredToScreeningId) this status
+// also relies on.
 // Supersedes the earlier, purely-informational "Moved to X" Pipeline badge
 // (findBetterFitMatches, removed same day) — Vlad: once a real Transfer
 // action exists, showing that passive guess alongside it is redundant.

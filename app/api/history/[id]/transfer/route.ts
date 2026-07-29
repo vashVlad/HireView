@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { transferScreeningToProject } from "@/lib/screenings";
 import { canAccessScreening, canAccessProject, getAuthUser } from "@/lib/auth";
+import { errorMessage } from "@/lib/errorMessage";
 import type { CandidateResult } from "@/lib/types";
 
 /**
@@ -94,6 +95,12 @@ export async function POST(
     });
   } catch (err) {
     console.error("Transfer failed:", err);
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Transfer failed" }, { status: 500 });
+    // errorMessage() instead of `err instanceof Error ? err.message : ...` —
+    // real bug found 2026-07-29: Supabase's client throws plain
+    // PostgrestError-shaped objects, not real Error instances, so that
+    // check silently swallowed the actual failure (e.g. a storage upload
+    // or insert error) and always showed the generic fallback with zero
+    // detail. See lib/errorMessage.ts for the full story.
+    return NextResponse.json({ error: errorMessage(err, "Transfer failed") }, { status: 500 });
   }
 }

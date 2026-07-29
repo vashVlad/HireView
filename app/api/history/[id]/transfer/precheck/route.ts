@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getScreeningsByIds, findCandidateInProject } from "@/lib/screenings";
 import { getProject } from "@/lib/projects";
 import { canAccessScreening, canAccessProject, getAuthUser } from "@/lib/auth";
+import { errorMessage } from "@/lib/errorMessage";
 
 /**
  * Step 1 of the redesigned Transfer flow (Vlad's ask, 2026-07-29, after
@@ -51,6 +52,8 @@ export async function POST(
     });
   } catch (err) {
     console.error("Transfer precheck failed:", err);
-    return NextResponse.json({ error: "Precheck failed" }, { status: 500 });
+    // See lib/errorMessage.ts — surfaces the real Supabase/etc. error
+    // message instead of a fixed generic string.
+    return NextResponse.json({ error: errorMessage(err, "Precheck failed") }, { status: 500 });
   }
 }
