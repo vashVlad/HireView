@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { CandidateResult } from "@/lib/types";
 
 type Precheck = "idle" | "loading" | { screeningId: number; score: number } | "error";
@@ -12,42 +13,51 @@ type Preview = "idle" | "loading" | CandidateResult | "error";
  * flow after he tested it and hit a real bug (a destination copy got
  * created but the source never flipped to "transferred" — see
  * transferScreeningToProject()'s two-step status update in
- * lib/screenings.ts for the fix) and asked for a different shape: its own
- * button, and an option to actually re-screen for the destination project
- * instead of always just carrying the old score over.
+ * lib/screenings.ts for the fix), then refined twice more the same day:
  *
- * Three-step flow, one popover:
+ * - The re-score trigger is a button, not a checkbox ("instead of a
+ *   checkbox for screening add a button") — clicking it fires the preview
+ *   call once; once a result comes back the button is replaced by the
+ *   score itself rather than staying clickable, so there's no way to
+ *   accidentally re-fire a second Claude call for the same pairing.
+ * - If the candidate already has a real screening in the destination
+ *   project (precheck), that score is shown immediately and the re-screen
+ *   button never even renders — no tokens spent re-deriving something
+ *   that's already known.
+ * - If THIS screening has already been transferred somewhere, that's
+ *   mentioned right here in this control's own footprint (a small link,
+ *   same spot the "Transfer" button would occupy) instead of the whole
+ *   control just disappearing with no explanation.
+ *
+ * Flow, one popover:
  *   1. Pick a destination project → fires /transfer/precheck (cheap, no
  *      Claude call). If the candidate already has a screening there, show
  *      that score directly — nothing left to decide, "Confirm" just links
  *      the original at that existing row (mode: "existing").
  *   2. If nothing existing: show the current score that would carry over
- *      as-is, plus a "Screen for this project now" toggle. Flipping it on
- *      fires /transfer/preview (a real scoreCandidate call against the
+ *      as-is, plus a "Screen for this project" button. Clicking it fires
+ *      /transfer/preview (a real scoreCandidate call against the
  *      destination JD, not saved yet) and shows the resulting score.
- *   3. "Confirm" commits via /transfer — mode "copy" (toggle off) or
- *      "rescore" (toggle on, round-trips the exact preview result back so
- *      scoring never runs twice).
- *
- * Hidden entirely once a transfer has actually completed (status already
- * "transferred") — the read-only link on StatusStageControl's pill is the
- * place that stays visible after that point; re-transferring isn't a
- * supported flow.
+ *   3. "Confirm" commits via /transfer — mode "copy" (never screened) or
+ *      "rescore" (screened via step 2, round-trips the exact preview
+ *      result back so scoring never runs twice).
  */
 export function TransferControl({
   screeningId,
   transferProjects,
+  alreadyTransferred,
   onTransferred,
 }: {
   screeningId: number;
   /** Projects this recruiter/admin can transfer INTO — already scoped by the caller (recruiter: own team only, admin: everything — GET /api/projects via teamIdsFilter, see lib/auth.ts), current project already excluded. */
   transferProjects: { id: number; name: string }[];
+  /** Set when this exact screening has already been transferred — renders a small mention/link in place of the Transfer button instead of hiding this control entirely. */
+  alreadyTransferred?: { projectName?: string; screeningId?: number } | null;
   onTransferred: (result: { newScreeningId: number; transferredToProjectId: number; transferredToProjectName: string }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [projectId, setProjectId] = useState<number | "">("");
   const [precheck, setPrecheck] = useState<Precheck>("idle");
-  const [rescoreOn, setRescoreOn] = useState(false);
   const [preview, setPreview] = useState<Preview>("idle");
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +65,6 @@ export function TransferControl({
   function reset() {
     setProjectId("");
     setPrecheck("idle");
-    setRescoreOn(false);
     setPreview("idle");
     setConfirming(false);
     setError(null);
@@ -63,7 +72,6 @@ export function TransferControl({
 
   async function handlePickProject(id: number) {
     setProjectId(id);
-    setRescoreOn(false);
     setPreview("idle");
     setError(null);
     setPrecheck("loading");
@@ -81,12 +89,8 @@ export function TransferControl({
     }
   }
 
-  async function handleToggleRescore(on: boolean) {
-    setRescoreOn(on);
-    if (!on || typeof projectId !== "number") {
-      setPreview("idle");
-      return;
-    }
+  async function handleScreenNow() {
+    if (typeof projectId !== "number") return;
     setPreview("loading");
     try {
       const res = await fetch(`/api/history/${screeningId}/transfer/preview`, {
@@ -111,7 +115,7 @@ export function TransferControl({
       if (precheck !== "idle" && precheck !== "loading" && precheck !== "error") {
         body.mode = "existing";
         body.existingScreeningId = precheck.screeningId;
-      } else if (rescoreOn && preview !== "idle" && preview !== "loading" && preview !== "error") {
+      } else if (preview !== "idle" && preview !== "loading" && preview !== "error") {
         body.mode = "rescore";
         body.previewResult = preview;
       } else {
@@ -138,9 +142,29 @@ export function TransferControl({
     }
   }
 
+  // Already transferred — mention it right here instead of hiding this
+  // control with no trace. Not an interactive re-transfer flow (none
+  // exists yet), just a small link matching where the Transfer button
+  // would otherwise sit.
+  if (alreadyTransferred) {
+    return (
+      <Link
+        href={alreadyTransferred.screeningId != null ? `/candidates/${alreadyTransferred.screeningId}` : "#"}
+        onClick={(e) => e.stopPropagation()}
+        title={`Already transferred to "${alreadyTransferred.projectName ?? "another project"}"`}
+        className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sky-50 px-3.5 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-400 dark:hover:bg-sky-500/20"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M17 8l4 4-4 4M3 12h18" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Transferred to {alreadyTransferred.projectName ?? "another project"}
+      </Link>
+    );
+  }
+
   const hasExisting = precheck !== "idle" && precheck !== "loading" && precheck !== "error";
   const previewReady = preview !== "idle" && preview !== "loading" && preview !== "error";
-  const canConfirm = typeof projectId === "number" && precheck !== "loading" && (!rescoreOn || preview !== "loading");
+  const canConfirm = typeof projectId === "number" && precheck !== "loading" && preview !== "loading";
 
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
@@ -184,6 +208,10 @@ export function TransferControl({
             <p className="mt-2 text-xs text-rose-500">Couldn't check that project — try again.</p>
           )}
 
+          {/* Already has a real screening there — the score is shown
+              immediately from the free precheck lookup, no Claude call
+              spent re-deriving something already known. Nothing left to
+              pick: Confirm just points the original at this existing row. */}
           {hasExisting && (
             <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
               Already screened there — score <span className="font-semibold text-zinc-700 dark:text-zinc-200">{(precheck as { score: number }).score}</span>.
@@ -193,28 +221,31 @@ export function TransferControl({
 
           {typeof projectId === "number" && precheck === "idle" && (
             <div className="mt-2.5 flex flex-col gap-2">
-              <label className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                <input
-                  type="checkbox"
-                  checked={rescoreOn}
-                  onChange={(e) => handleToggleRescore(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-zinc-300 text-sky-600 focus:ring-sky-400 dark:border-zinc-600"
-                />
-                Screen for this project now
-              </label>
-              {!rescoreOn && (
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">Off: carries the candidate's current score over as-is.</p>
+              {!previewReady && preview !== "loading" && (
+                <button
+                  type="button"
+                  onClick={handleScreenNow}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                >
+                  Screen for this project
+                </button>
               )}
-              {rescoreOn && preview === "loading" && (
+              {preview === "loading" && (
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">Screening…</p>
               )}
-              {rescoreOn && preview === "error" && (
-                <p className="text-xs text-rose-500">Screening failed — try again.</p>
+              {preview === "error" && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-rose-500">Screening failed.</span>
+                  <button type="button" onClick={handleScreenNow} className="text-xs font-medium text-sky-600 underline dark:text-sky-400">Try again</button>
+                </div>
               )}
-              {rescoreOn && previewReady && (
+              {previewReady && (
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
                   New score: <span className="font-semibold text-zinc-700 dark:text-zinc-200">{(preview as CandidateResult).score}</span>
                 </p>
+              )}
+              {!previewReady && preview !== "loading" && preview !== "error" && (
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">Or leave unscreened — Confirm will just carry the candidate's current score over as-is.</p>
               )}
             </div>
           )}

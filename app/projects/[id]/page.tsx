@@ -1919,16 +1919,24 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                         of-card button (components/TransferControl.tsx)
                         after the original status-dropdown-driven version
                         was tested and hit a real bug — see that
-                        component's doc comment. Hidden once already
-                        transferred; StatusStageControl's pill keeps
-                        showing the read-only destination link from there
-                        on. Also hidden if there's nowhere to transfer INTO
-                        yet (transferProjects still loading, or this is the
+                        component's doc comment. Stays rendered even once
+                        already transferred (Vlad's ask: "mention it
+                        somewhere" rather than the control just vanishing
+                        with no trace) — TransferControl itself swaps to a
+                        small read-only "Transferred to X" mention in that
+                        case via the alreadyTransferred prop.  Hidden only
+                        if there's nowhere to transfer INTO yet
+                        (transferProjects still loading, or this is the
                         only active project this recruiter/admin can see). */}
-                    {s.status !== "transferred" && transferProjects.length > 0 && (
+                    {transferProjects.length > 0 && (
                       <TransferControl
                         screeningId={s.id}
                         transferProjects={transferProjects}
+                        alreadyTransferred={
+                          s.status === "transferred"
+                            ? { projectName: s.transferredToProjectName, screeningId: s.transferredToScreeningId }
+                            : null
+                        }
                         onTransferred={(result) => handleTransferred(s.id, result)}
                       />
                     )}
