@@ -475,9 +475,9 @@ export async function listRejectionHistory(): Promise<RejectionHistoryEntry[]> {
   const screeningIds = rejected.map((r) => r.screening_id);
   const { data: screeningRows, error: screeningErr } = await supabase
     .from("screenings")
-    .select("id, candidate_name, project_id")
+    .select("id, candidate_name, project_id, resume_content_hash")
     .in("id", screeningIds)
-    .returns<{ id: number; candidate_name: string; project_id: number | null }[]>();
+    .returns<{ id: number; candidate_name: string; project_id: number | null; resume_content_hash: string | null }[]>();
   if (screeningErr || !screeningRows) return [];
 
   const projectIds = [...new Set(
@@ -499,6 +499,7 @@ export async function listRejectionHistory(): Promise<RejectionHistoryEntry[]> {
     candidateName: row.candidate_name,
     projectName: row.project_id != null ? (projectNameById.get(row.project_id) ?? null) : null,
     reason: reasonByScreeningId.get(row.id) ?? null,
+    contentHash: row.resume_content_hash ?? null,
   }));
 }
 

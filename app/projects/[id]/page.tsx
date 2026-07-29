@@ -564,6 +564,16 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
         }
       }
 
+      // Each uploaded file's own resume_content_hash, computed for free by
+      // check-existing regardless of duplicate status — used below to
+      // corroborate rejection-history name matches against the actual
+      // document, not just the candidate's name text.
+      const hashByFileName = new Map(
+        classifications
+          .filter((c): c is CheckExistingResult & { resumeContentHash: string } => Boolean(c.resumeContentHash))
+          .map((c) => [c.fileName, c.resumeContentHash])
+      );
+
       const { results: scored, errors, batchId } = newFiles.length > 0
         ? await scoreFiles(newFiles, controller.signal)
         : { results: [], errors: [], batchId: undefined as string | undefined };
@@ -574,7 +584,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       setExistingCandidates(candidates);
       setNameMatches(findNameMatches(scored, candidates));
       setRejectionHistoryBaseline(rejections);
-      setRejectionMatches(findRejectionMatches(scored, rejections));
+      setRejectionMatches(findRejectionMatches(scored, rejections, hashByFileName));
       // Durable "come back to this batch" link — only set when this call
       // actually scored something new (batchId is undefined when every file
       // in the upload was a duplicate skip, matching newFiles.length > 0
@@ -632,12 +642,35 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // of same-project candidates. No batch-sibling registration here (unlike
   // findNameMatches): two people in the SAME upload batch coincidentally
   // sharing a name isn't "this candidate was rejected before."
-  function findRejectionMatches(scored: CandidateResult[], baseline: RejectionHistoryEntry[]): Map<string, RejectionHistoryEntry> {
+  //
+  // Tightened 2026-07-29 (meeting-prep audit flagged this as a real risk):
+  // the name match alone is deliberately loose (normalizeCandidateName is
+  // case/whitespace-only), so two different people sharing a common name
+  // could get flagged as the same rejected candidate. hashByFileName carries
+  // each uploaded file's own resume_content_hash (computed for free by
+  // check-existing, unrelated to whether it was itself a same-project
+  // duplicate) — when it exactly matches the rejected screening's own hash,
+  // this is the same document, not just the same name, so confidence is
+  // upgraded to "name_and_resume". A file-name-based secondary signal was
+  // considered and rejected: that approach was already tried and retired
+  // 2026-07-15 for producing false positives on generic filenames like
+  // "Resume (16).pdf" — see decisions-log.md.
+  function findRejectionMatches(
+    scored: CandidateResult[],
+    baseline: RejectionHistoryEntry[],
+    hashByFileName: Map<string, string> = new Map()
+  ): Map<string, RejectionHistoryEntry> {
     const byNormalizedName = new Map(baseline.map((r) => [normalizeCandidateName(r.candidateName), r]));
     const matches = new Map<string, RejectionHistoryEntry>();
     for (const r of scored) {
       const hit = byNormalizedName.get(normalizeCandidateName(r.candidateName));
-      if (hit) matches.set(r.fileName, hit);
+      if (!hit) continue;
+      const uploadedHash = hashByFileName.get(r.fileName);
+      const confidence: RejectionHistoryEntry["confidence"] =
+        hit.contentHash != null && uploadedHash != null && hit.contentHash === uploadedHash
+          ? "name_and_resume"
+          : "name_only";
+      matches.set(r.fileName, { ...hit, confidence });
     }
     return matches;
   }
@@ -645,13 +678,20 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // A recruiter overriding a "duplicate" card — forces a real score for
   // that one file and folds it into the normal results list.
   async function handleForceRescore(file: File) {
+    // Grab this file's resume_content_hash (already computed by the earlier
+    // check-existing call, before it's dropped from existingMatches below) so
+    // a rejection-history match found after re-scoring can still be
+    // corroborated against the actual document, not just the candidate name.
+    const priorHash = existingMatches.find((m) => m.file === file)?.match.resumeContentHash;
+    const hashByFileName = priorHash ? new Map([[file.name, priorHash]]) : new Map<string, string>();
+
     setExistingMatches((prev) => prev.filter((m) => m.file !== file));
     try {
       const { results: scored, errors } = await scoreFiles([file]);
       const merged = [...results, ...scored].sort((a, b) => b.score - a.score);
       setResults(merged);
       setNameMatches(findNameMatches(merged, existingCandidates));
-      setRejectionMatches(findRejectionMatches(merged, rejectionHistoryBaseline));
+      setRejectionMatches(findRejectionMatches(merged, rejectionHistoryBaseline, hashByFileName));
       if (errors.length > 0) setFileErrors((prev) => [...prev, ...errors]);
       if (scored.length > 0) onScreeningsSaved();
     } catch (err) {

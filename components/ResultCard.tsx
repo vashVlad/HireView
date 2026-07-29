@@ -419,6 +419,18 @@ export function ResultCard({
         <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-center text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
           Previously rejected{rejectionHistory.projectName ? <> for <strong>{rejectionHistory.projectName}</strong></> : null}
           {rejectionHistory.reason ? <> — &#x201C;{rejectionHistory.reason}&#x201D;</> : " — no reason recorded"}.
+          {/* Confidence tier added 2026-07-29 — the underlying match is a
+              loose, case/whitespace-only name comparison (see
+              normalizeCandidateName), which a common name can trigger on two
+              different people. Only say "same resume on file" when the
+              upload's own content hash actually matches the rejected
+              screening's; otherwise say plainly that it's a name match only,
+              so a recruiter doesn't over-trust a coincidence. */}
+          {rejectionHistory.confidence === "name_and_resume" ? (
+            <> <span className="font-medium">Same resume on file — high-confidence match.</span></>
+          ) : (
+            <> <span className="italic">Name match only — could be a different person with the same name.</span></>
+          )}
         </p>
       )}
 
