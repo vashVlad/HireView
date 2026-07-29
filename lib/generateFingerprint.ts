@@ -161,3 +161,22 @@ export function compareFingerprints(a: ResumeFingerprint, b: ResumeFingerprint):
 export function isDuplicateMatch(similarity: number): boolean {
   return similarity >= SIMILARITY_THRESHOLD;
 }
+
+/**
+ * Floor for accepting a plain candidate_name text match (findNameMatchInProject
+ * / findCrossProjectNameMatch, lib/screenings.ts) as worth surfacing at all.
+ *
+ * Real bug found 2026-07-29 (Vlad, live): two candidates with the exact same
+ * name but clearly different work experience were flagged as a possible
+ * match — those name-match lookups used to be pure text comparison with zero
+ * content corroboration, unlike duplicateFlag/historyAlertType above which
+ * both require real fingerprint similarity. This is deliberately a much
+ * lower bar than SIMILARITY_THRESHOLD (0.85): if similarity were that high,
+ * duplicateFlag would already have caught it — findNameMatchInProject exists
+ * specifically for the moderate-similarity case a differently-worded resume
+ * of the SAME real person produces. The floor only needs to be high enough
+ * to rule out two unrelated people who happen to share a name, which shows
+ * up as near-zero similarity (no shared responsibilities, metrics, or career
+ * arc language at all).
+ */
+export const NAME_MATCH_MIN_SIMILARITY = 0.3;
