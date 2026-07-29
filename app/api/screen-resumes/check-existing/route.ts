@@ -149,10 +149,10 @@ export async function POST(request: NextRequest) {
 
         const exactMatch = byHash.get(hash);
         if (exactMatch) {
-          return { fileName: file.name, status: "duplicate", existing: toExisting(exactMatch) };
+          return { fileName: file.name, status: "duplicate", existing: toExisting(exactMatch), resumeContentHash: hash };
         }
 
-        return { fileName: file.name, status: "new" };
+        return { fileName: file.name, status: "new", resumeContentHash: hash };
       } catch {
         // Can't parse it here — let the real scoring route surface the error properly.
         return { fileName: file.name, status: "new" };

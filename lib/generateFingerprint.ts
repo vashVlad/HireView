@@ -129,17 +129,54 @@ function fingerprintText(fp: Pick<ResumeFingerprint, "responsibilityVectors" | "
   return [...fp.responsibilityVectors, ...fp.metricClaims, fp.careerArcSignature].join(" ");
 }
 
+// Real bug found 2026-07-29 (meeting-prep audit, see decisions-log.md): an
+// exact skillsHash match used to floor the score at SIMILARITY_THRESHOLD
+// unconditionally — so two genuinely different candidates who just happen to
+// list an identical normalized skill set (e.g. two generic "React, Node,
+// AWS, SQL" resumes) could get flagged as a duplicate/fraud match even
+// though their responsibilities, metrics, and career arc share nothing in
+// common. An identical skill set is real corroborating evidence, but only
+// once the rest of the profile already shows SOME independent overlap —
+// this requires the raw wording similarity to clear a low bar first before
+// letting the skills match floor it up to the full duplicate threshold.
+const SKILLS_MATCH_MIN_CORROBORATION = 0.3;
+
 /**
  * Returns a similarity score in [0, 1] between two fingerprints.
- * An exact skills-hash match is treated as a strong independent signal and
- * floors the score at the match threshold even if wording similarity is lower.
+ * An exact skills-hash match is treated as a strong corroborating signal and
+ * floors the score at the match threshold — but only when the rest of the
+ * profile (responsibilities, metrics, career arc) already shows some
+ * independent overlap; it's not enough on its own to manufacture a
+ * duplicate match out of two otherwise-unrelated resumes.
  */
 export function compareFingerprints(a: ResumeFingerprint, b: ResumeFingerprint): number {
   const skillsMatch = a.skillsHash.length > 0 && a.skillsHash === b.skillsHash;
   const similarity = jaccard(tokenize(fingerprintText(a)), tokenize(fingerprintText(b)));
-  return skillsMatch ? Math.max(similarity, SIMILARITY_THRESHOLD) : similarity;
+  if (skillsMatch && similarity >= SKILLS_MATCH_MIN_CORROBORATION) {
+    return Math.max(similarity, SIMILARITY_THRESHOLD);
+  }
+  return similarity;
 }
 
 export function isDuplicateMatch(similarity: number): boolean {
   return similarity >= SIMILARITY_THRESHOLD;
 }
+
+/**
+ * Floor for accepting a plain candidate_name text match (findNameMatchInProject
+ * / findCrossProjectNameMatch, lib/screenings.ts) as worth surfacing at all.
+ *
+ * Real bug found 2026-07-29 (Vlad, live): two candidates with the exact same
+ * name but clearly different work experience were flagged as a possible
+ * match — those name-match lookups used to be pure text comparison with zero
+ * content corroboration, unlike duplicateFlag/historyAlertType above which
+ * both require real fingerprint similarity. This is deliberately a much
+ * lower bar than SIMILARITY_THRESHOLD (0.85): if similarity were that high,
+ * duplicateFlag would already have caught it — findNameMatchInProject exists
+ * specifically for the moderate-similarity case a differently-worded resume
+ * of the SAME real person produces. The floor only needs to be high enough
+ * to rule out two unrelated people who happen to share a name, which shows
+ * up as near-zero similarity (no shared responsibilities, metrics, or career
+ * arc language at all).
+ */
+export const NAME_MATCH_MIN_SIMILARITY = 0.3;

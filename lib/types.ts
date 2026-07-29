@@ -255,6 +255,15 @@ export interface ScreenResumesError {
 export interface CheckExistingResult {
   fileName: string;
   status: "new" | "duplicate";
+  /**
+   * The uploaded file's own resume_content_hash — computed here regardless of
+   * "new"/"duplicate" status (it's free, already computed for the same-project
+   * exact-match check above). Threaded through to the client so the post-score
+   * rejection-history name match (findRejectionMatches in
+   * app/projects/[id]/page.tsx) can check for exact-resume corroboration, not
+   * just a name coincidence. Added 2026-07-29, see decisions-log.md.
+   */
+  resumeContentHash?: string;
   existing?: {
     id: number;
     candidateName: string;
@@ -301,6 +310,27 @@ export interface RejectionHistoryEntry {
   candidateName: string;
   projectName: string | null;
   reason: string | null;
+  /**
+   * The rejected screening's resume_content_hash, null if it predates that
+   * column or never computed successfully. Lets a match be corroborated by
+   * more than name text alone — see `confidence` below.
+   */
+  contentHash: string | null;
+  /**
+   * Set only once this entry has actually been matched against a freshly
+   * scored candidate (findRejectionMatches, app/projects/[id]/page.tsx) —
+   * absent on the raw baseline list. "name_and_resume" means the uploaded
+   * file's own content hash matches this rejected screening's hash exactly
+   * (very high confidence, same document); "name_only" means just the
+   * normalized name matched, which a common name can trigger on two
+   * different people. Added 2026-07-29 in response to the meeting-prep
+   * audit's flagged risk — normalizeCandidateName (lib/resumeContentHash.ts)
+   * is deliberately loose, and an earlier filename-based corroboration idea
+   * was already retired 2026-07-15 for producing false positives on generic
+   * filenames, so content-hash is the one reliable secondary signal
+   * available without adding new scope. See decisions-log.md.
+   */
+  confidence?: "name_only" | "name_and_resume";
 }
 
 export interface ScreeningRecord {

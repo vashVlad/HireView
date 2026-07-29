@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { getSupabaseClient, RESUME_BUCKET } from "./supabase";
 import { extractResumeText } from "./parseResume";
-import { generateFingerprint, type ResumeFingerprint } from "./generateFingerprint";
+import { compareFingerprints, generateFingerprint, NAME_MATCH_MIN_SIMILARITY, type ResumeFingerprint } from "./generateFingerprint";
 import { hashResumeText, normalizeCandidateName } from "./resumeContentHash";
 import { extractCandidateNameFromPdf, looksLikeMissingName } from "./extractCandidateNameFallback";
 import {
@@ -11,6 +11,7 @@ import {
   findCrossProjectMatch,
   markHistoryAlertPair,
   getScreeningFraudSignals,
+  getFingerprintForScreening,
 } from "./resumeFingerprints";
 import { logAction } from "./screeningActions";
 import { getProject } from "./projects";
@@ -125,13 +126,25 @@ async function attachRecruiterEmails(records: ScreeningRecord[]): Promise<Screen
 // Neither the content hash nor the fraud-pattern fingerprint catches "two
 // genuinely different resume files that happen to name the same candidate
 // in this project" — a resume screener persona vs. a research-focused one,
-// for example. Pure candidate_name comparison, no Claude call, informational
-// only (never implies fraud the way duplicateFlag/historyAlertType do).
+// for example. No Claude call, informational only (never implies fraud the
+// way duplicateFlag/historyAlertType do).
+//
+// Real bug found 2026-07-29 (Vlad, live): this used to be pure
+// candidate_name text comparison with zero content corroboration — two
+// candidates who happen to share an exact name but have completely
+// different work experience got flagged as a possible match. Now requires a
+// low fingerprint-similarity floor (NAME_MATCH_MIN_SIMILARITY, much lower
+// than the 0.85 duplicate threshold — see its own comment in
+// generateFingerprint.ts for why) before accepting the match at all. Fails
+// open (keeps the old name-only behavior) if either side's fingerprint
+// isn't available — fingerprinting can fail independently of scoring, and a
+// missing fingerprint shouldn't silently kill this signal outright.
 
 async function findNameMatchInProject(params: {
   projectId: number;
   candidateName: string;
   excludeScreeningId: number;
+  fingerprint?: ResumeFingerprint;
 }): Promise<number | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -144,7 +157,17 @@ async function findNameMatchInProject(params: {
 
   const target = normalizeCandidateName(params.candidateName);
   const match = data.find((row) => normalizeCandidateName(row.candidate_name) === target);
-  return match?.id ?? null;
+  if (!match) return null;
+
+  if (params.fingerprint) {
+    const matchedFingerprint = await getFingerprintForScreening(match.id).catch(() => null);
+    if (matchedFingerprint) {
+      const similarity = compareFingerprints(params.fingerprint, matchedFingerprint);
+      if (similarity < NAME_MATCH_MIN_SIMILARITY) return null;
+    }
+  }
+
+  return match.id;
 }
 
 async function markNameMatchPair(idA: number, idB: number): Promise<void> {
@@ -173,11 +196,19 @@ async function markNameMatchPair(idA: number, idB: number): Promise<void> {
 // deliberately NOT persisted to the DB (see decisions-log.md's matching
 // entry for why this is scoped to "during the screening" only, not a
 // standing Pipeline badge, at least for now).
+//
+// Same fingerprint-corroboration fix as findNameMatchInProject above
+// (2026-07-29, Vlad: two different Charlie Wangs flagged as a possible
+// match on name text alone) — this had the identical gap, just across the
+// project boundary. Requires NAME_MATCH_MIN_SIMILARITY before accepting the
+// match, fails open (keeps the old name-only behavior) if either side's
+// fingerprint isn't available.
 async function findCrossProjectNameMatch(params: {
   teamId: number;
   candidateName: string;
   excludeProjectId: number;
   excludeScreeningId: number;
+  fingerprint?: ResumeFingerprint;
 }): Promise<{ screeningId: number; projectId: number | null; score: number } | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -192,7 +223,17 @@ async function findCrossProjectNameMatch(params: {
   const match = data.find(
     (row) => row.project_id !== params.excludeProjectId && normalizeCandidateName(row.candidate_name) === target
   );
-  return match ? { screeningId: match.id, projectId: match.project_id, score: match.score } : null;
+  if (!match) return null;
+
+  if (params.fingerprint) {
+    const matchedFingerprint = await getFingerprintForScreening(match.id).catch(() => null);
+    if (matchedFingerprint) {
+      const similarity = compareFingerprints(params.fingerprint, matchedFingerprint);
+      if (similarity < NAME_MATCH_MIN_SIMILARITY) return null;
+    }
+  }
+
+  return { screeningId: match.id, projectId: match.project_id, score: match.score };
 }
 
 // ── Transfer to another project (real status action) ────────────────────────
@@ -475,9 +516,9 @@ export async function listRejectionHistory(): Promise<RejectionHistoryEntry[]> {
   const screeningIds = rejected.map((r) => r.screening_id);
   const { data: screeningRows, error: screeningErr } = await supabase
     .from("screenings")
-    .select("id, candidate_name, project_id")
+    .select("id, candidate_name, project_id, resume_content_hash")
     .in("id", screeningIds)
-    .returns<{ id: number; candidate_name: string; project_id: number | null }[]>();
+    .returns<{ id: number; candidate_name: string; project_id: number | null; resume_content_hash: string | null }[]>();
   if (screeningErr || !screeningRows) return [];
 
   const projectIds = [...new Set(
@@ -499,6 +540,7 @@ export async function listRejectionHistory(): Promise<RejectionHistoryEntry[]> {
     candidateName: row.candidate_name,
     projectName: row.project_id != null ? (projectNameById.get(row.project_id) ?? null) : null,
     reason: reasonByScreeningId.get(row.id) ?? null,
+    contentHash: row.resume_content_hash ?? null,
   }));
 }
 
@@ -857,7 +899,7 @@ export async function saveScreening(params: {
         })
       : Promise.resolve(null),
     projectId != null
-      ? findNameMatchInProject({ projectId, candidateName: result.candidateName, excludeScreeningId: screeningId }).catch((err) => {
+      ? findNameMatchInProject({ projectId, candidateName: result.candidateName, excludeScreeningId: screeningId, fingerprint: fingerprint ?? undefined }).catch((err) => {
           console.error("Name match lookup failed (screening still saved):", err);
           return null;
         })
@@ -873,7 +915,7 @@ export async function saveScreening(params: {
         })
       : Promise.resolve(null),
     projectId != null && teamId != null
-      ? findCrossProjectNameMatch({ teamId, candidateName: result.candidateName, excludeProjectId: projectId, excludeScreeningId: screeningId }).catch((err) => {
+      ? findCrossProjectNameMatch({ teamId, candidateName: result.candidateName, excludeProjectId: projectId, excludeScreeningId: screeningId, fingerprint: fingerprint ?? undefined }).catch((err) => {
           console.error("Cross-project name match lookup failed (screening still saved):", err);
           return null;
         })

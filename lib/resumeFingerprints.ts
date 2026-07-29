@@ -14,6 +14,34 @@ export interface DuplicateMatch {
   similarity: number;
 }
 
+/**
+ * Fetches a single screening's stored fingerprint, if one exists — used by
+ * findNameMatchInProject/findCrossProjectNameMatch (lib/screenings.ts) to
+ * corroborate a candidate_name text match against real resume content.
+ * Returns null if fingerprinting failed or hasn't run for this screening
+ * (callers fail open in that case rather than hiding the name match).
+ */
+export async function getFingerprintForScreening(screeningId: number): Promise<ResumeFingerprint | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("resume_fingerprints")
+    .select("skills_hash, responsibility_vectors, metric_claims, career_arc_signature")
+    .eq("screening_id", screeningId)
+    .maybeSingle<{
+      skills_hash: string;
+      responsibility_vectors: string[];
+      metric_claims: string[];
+      career_arc_signature: string;
+    }>();
+  if (error || !data) return null;
+  return {
+    skillsHash: data.skills_hash,
+    responsibilityVectors: data.responsibility_vectors,
+    metricClaims: data.metric_claims,
+    careerArcSignature: data.career_arc_signature,
+  };
+}
+
 export async function saveFingerprint(params: {
   screeningId: number;
   projectId?: number;
