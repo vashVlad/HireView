@@ -337,9 +337,12 @@ export function ResultCard({
               mentions that this person was also screened in a different
               project"). Repositioned twice same day per Vlad's follow-ups:
               first out of the crowded badge row next to the name, then here
-              — in the file name's spot — instead of between the name/badges
-              row and the status dropdown. Falls back to the file name when
-              there's no match, so this slot always shows something.
+              — in what used to be the file name's spot — instead of between
+              the name/badges row and the status dropdown. Used to fall back
+              to the file name when there's no match; that fallback was
+              removed 2026-07-29 (Vlad: "remove filenames from the result
+              cards") — this slot now renders nothing at all when there's no
+              name match, rather than showing anything in its place.
               Deliberately separate from historyAlertType above — that one
               is content-fingerprint-based and can miss the same real person
               presenting a very differently-worded resume for a different
@@ -347,29 +350,25 @@ export function ResultCard({
               Skipped when historyAlertType already points at this exact
               same screening (see lib/screenings.ts), so a real match is
               never mentioned twice. */}
-          <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>
-            {result.crossProjectNameMatchScreeningId != null ? (
-              <>
-                Also screened in{" "}
-                {result.crossProjectNameMatchProjectId != null ? (
-                  <Link
-                    href={`/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline`}
-                    className="font-medium text-sky-600 underline decoration-dotted underline-offset-2 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
-                  >
-                    &#x201C;{result.crossProjectNameMatchProjectName ?? "another project"}&#x201D;
-                  </Link>
-                ) : (
-                  <span className="font-medium">&#x201C;another project&#x201D;</span>
-                )}
-                {/* Score, added 2026-07-27 (Vlad's ask) — the matched
-                    screening's own score, not this one's, so a recruiter
-                    knows at a glance how that other pass went. */}
-                {result.crossProjectNameMatchScore != null && <> &#x2014; Scored {result.crossProjectNameMatchScore}</>}
-              </>
-            ) : (
-              result.fileName
-            )}
-          </p>
+          {result.crossProjectNameMatchScreeningId != null && (
+            <p className={`text-zinc-400 dark:text-zinc-500 ${solo ? "text-sm" : "text-xs"}`}>
+              Also screened in{" "}
+              {result.crossProjectNameMatchProjectId != null ? (
+                <Link
+                  href={`/projects/${result.crossProjectNameMatchProjectId}?tab=pipeline`}
+                  className="font-medium text-sky-600 underline decoration-dotted underline-offset-2 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+                >
+                  &#x201C;{result.crossProjectNameMatchProjectName ?? "another project"}&#x201D;
+                </Link>
+              ) : (
+                <span className="font-medium">&#x201C;another project&#x201D;</span>
+              )}
+              {/* Score, added 2026-07-27 (Vlad's ask) — the matched
+                  screening's own score, not this one's, so a recruiter
+                  knows at a glance how that other pass went. */}
+              {result.crossProjectNameMatchScore != null && <> &#x2014; Scored {result.crossProjectNameMatchScore}</>}
+            </p>
+          )}
         </div>
       </div>
       {nameMatch && (

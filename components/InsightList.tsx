@@ -45,6 +45,36 @@ function Icon({ variant }: { variant: keyof typeof ICON_STYLES }) {
   );
 }
 
+/**
+ * Coerces a single insight item to a safe display string. Defensive
+ * hardening added 2026-07-30 after a real crash: 2 live rows out of 244
+ * screenings had `strengths` saved as an array of OBJECTS instead of
+ * strings (e.g. [{"Skill": "..."}], [{"item": "..."}]) — scoreCandidate.ts's
+ * tool schema declares `strengths`/`concerns` as string[], but Claude
+ * didn't honor that for one batch, and nothing in saveScreening() validated
+ * or coerced the shape before the insert (see that fix too, in
+ * lib/screenings.ts). Rendering `{item}` directly on an object throws
+ * "Objects are not valid as a React child" — a hard, uncaught render crash,
+ * and there's no error.tsx/error boundary anywhere in app/, so the whole
+ * page white-screened instead of just this one insight looking a little
+ * off. Recovers the actual intended text where possible — both observed
+ * shapes were a single-key object whose one value held the real string —
+ * instead of dumping raw JSON at the recruiter; falls back to JSON.stringify
+ * only for shapes that don't fit that pattern.
+ */
+function toDisplayString(item: unknown): string {
+  if (typeof item === "string") return item;
+  if (item != null && typeof item === "object" && !Array.isArray(item)) {
+    const values = Object.values(item as Record<string, unknown>);
+    if (values.length === 1 && typeof values[0] === "string") return values[0];
+  }
+  try {
+    return JSON.stringify(item);
+  } catch {
+    return String(item);
+  }
+}
+
 function ConcernItem({ item, screeningId }: { item: string; screeningId?: number }) {
   const [detail, setDetail] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -154,21 +184,25 @@ export function InsightList({
       >
         <div className="overflow-hidden">
           <ul className="flex flex-col gap-2 pt-2">
-            {items.map((item) =>
-              variant === "warning" ? (
-                <ConcernItem key={item} item={item} screeningId={screeningId} />
+            {items.map((item, i) => {
+              // toDisplayString guards against malformed items (see its own
+              // comment) — item is typed `string` but isn't always one at
+              // runtime. Coerced once here rather than trusting the type.
+              const text = toDisplayString(item);
+              return variant === "warning" ? (
+                <ConcernItem key={i} item={text} screeningId={screeningId} />
               ) : (
                 <li
-                  key={item}
+                  key={i}
                   className={`flex items-start gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-700 dark:text-zinc-300 ${ROW_STYLES[variant]}`}
                 >
                   <span className={`mt-0.5 shrink-0 ${ICON_STYLES[variant]}`}>
                     <Icon variant={variant} />
                   </span>
-                  <span>{item}</span>
+                  <span>{text}</span>
                 </li>
-              )
-            )}
+              );
+            })}
           </ul>
         </div>
       </div>

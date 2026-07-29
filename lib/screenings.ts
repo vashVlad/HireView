@@ -297,6 +297,29 @@ function sanitizeStorageFileName(name: string): string {
   return cleaned.length > 0 ? cleaned : "resume";
 }
 
+// Coerces a strengths/concerns array to plain strings before it ever reaches
+// the DB — see the 2026-07-30 hardening comment where this is called, in
+// saveScreening(), for why this exists. A single-key object like
+// {"Skill": "..."} or {"item": "..."} (both observed live shapes) most
+// likely holds the real intended string as its one value; anything else
+// falls back to JSON.stringify so it's still a plain string, never an
+// object that could crash a renderer expecting string[].
+function normalizeInsightArray(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => {
+    if (typeof item === "string") return item;
+    if (item != null && typeof item === "object" && !Array.isArray(item)) {
+      const values = Object.values(item as Record<string, unknown>);
+      if (values.length === 1 && typeof values[0] === "string") return values[0];
+    }
+    try {
+      return JSON.stringify(item);
+    } catch {
+      return String(item);
+    }
+  });
+}
+
 // ── Save ───────────────────────────────────────────────────────────────────
 
 export async function saveScreening(params: {
@@ -364,6 +387,29 @@ export async function saveScreening(params: {
    * /projects/[id]/batches/[batchId] page — Vlad's ask, 2026-07-28.
    */
   batchId?: string;
+  /**
+   * Pre-resolved acting-user id, when the caller already has it (2026-07-29
+   * perf pass — see decisions-log.md). Every field below this comment used
+   * to trigger its own fresh getAuthUser()/getProject() round trip PER
+   * RESUME being saved — wasteful when app/api/screen-resumes/route.ts
+   * calls saveScreening() up to CONCURRENCY times per batch with the exact
+   * same acting user and project every time. Optional and falls back to
+   * resolving internally (same as before), so this stays backward-
+   * compatible with any caller that doesn't have it on hand (e.g.
+   * save-one/route.ts, a single-resume path where the redundancy doesn't
+   * compound). See the comment where this used to live (just below) for
+   * *why* the true session user has to be re-resolved rather than trusting
+   * the `userId` param — that reasoning is unchanged, only WHERE the
+   * resolution happens (once in the route, not once per resume) changed.
+   */
+  actingUserId?: string;
+  /**
+   * Pre-resolved team id, when the caller already has it (same 2026-07-29
+   * perf pass). `null` is a valid, meaningful value (explicitly "no team"),
+   * distinct from omitting the field entirely (falls back to the internal
+   * getProject()/getPrimaryTeamId() lookup below, same as before).
+   */
+  teamId?: number | null;
 }): Promise<{ id: number }> {
   const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId } = params;
   const supabase = getSupabaseClient();
@@ -383,7 +429,15 @@ export async function saveScreening(params: {
   // re-resolving the true session user instead of trusting the `userId`
   // param — this reuses that same resolution for the `user_id` column
   // itself, so both places agree on who actually did the screening.
-  const actingUser = await getAuthUser().catch(() => null);
+  //
+  // 2026-07-29: this used to be an unconditional getAuthUser() call, run
+  // fresh for every resume in a batch even though it resolves to the exact
+  // same user every time within one request. app/api/screen-resumes/route.ts
+  // already calls getAuthUser() once at the top of the request (has to, to
+  // authorize the request at all) — it now passes that resolved id through
+  // as actingUserId, so a 3-resume batch does this lookup once instead of
+  // three times. Falls back to the original fresh lookup when not provided.
+  const resolvedActingUserId = params.actingUserId ?? (await getAuthUser().catch(() => null))?.id;
 
   // Recover a missing candidate name before it ever reaches the DB (Teti's
   // bug report, 2026-07-13 — "Unknown (resume name not provided)" cards).
@@ -407,16 +461,46 @@ export async function saveScreening(params: {
   // can filter with a plain .eq/.in instead of a join. Falls back to the
   // saving user's own primary team for the rare screening with no project.
   // Best-effort: a lookup failure must never block the save itself.
-  let teamId: number | null = null;
-  try {
-    if (projectId != null) {
-      const project = await getProject(projectId);
-      teamId = project?.teamId ?? null;
-    } else if (userId) {
-      teamId = await getPrimaryTeamId(userId);
+  // 2026-07-29 perf pass: skip the lookup entirely when the caller already
+  // resolved it (see params.teamId's comment) — app/api/screen-resumes/
+  // route.ts already fetches this project once per batch (for
+  // linkedInContext/scoreThreshold) and now threads project.teamId straight
+  // through, instead of every resume in the batch re-fetching the same
+  // project row just for this one field.
+  let teamId: number | null;
+  if (params.teamId !== undefined) {
+    teamId = params.teamId;
+  } else {
+    teamId = null;
+    try {
+      if (projectId != null) {
+        const project = await getProject(projectId);
+        teamId = project?.teamId ?? null;
+      } else if (userId) {
+        teamId = await getPrimaryTeamId(userId);
+      }
+    } catch (err) {
+      console.error("Team lookup failed for screening (saved without team_id):", err);
     }
+  }
+
+  // 2026-07-29 perf pass (see decisions-log.md): resume_content_hash used to
+  // be written via a SEPARATE update() call issued well after the insert
+  // below — a whole extra DB round trip per resume, for a value we can
+  // resolve before the insert even happens (resumeText is already known
+  // upfront in the common case — see params.resumeText's own comment).
+  // Folded into the same insert now. The safety property the original fix
+  // (2026-07-17) exists for is unchanged: a hashing failure here still can
+  // never block the screening itself from saving, it just means this one
+  // row saves with a null hash — same end state as before, just resolved
+  // earlier and without a second write.
+  let resumeText: string | null = params.resumeText ?? null;
+  let resumeContentHash: string | null = null;
+  try {
+    if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
+    resumeContentHash = hashResumeText(resumeText);
   } catch (err) {
-    console.error("Team lookup failed for screening (saved without team_id):", err);
+    console.error("resume_content_hash computation failed (screening still saved):", err);
   }
 
   const resumePath = `${randomUUID()}/${sanitizeStorageFileName(result.fileName)}`;
@@ -433,6 +517,22 @@ export async function saveScreening(params: {
   const initialStatus: CandidateStatus =
     scoreThreshold !== undefined && result.score < scoreThreshold ? "archived" : "new_applicant";
   const initialArchiveReason = initialStatus === "archived" ? DEFAULT_AUTO_ARCHIVE_REASON : null;
+
+  // 2026-07-30 hardening: scoreCandidate.ts's tool schema (do-not-touch)
+  // declares strengths/concerns as string[], but a live Claude response can
+  // still occasionally deviate from its own schema — confirmed via 2 real
+  // screenings (out of 244) where strengths saved as an array of single-key
+  // OBJECTS instead of strings (e.g. [{"Skill": "..."}]). Nothing validated
+  // this shape before it reached the DB, and rendering an object directly
+  // crashed the page with no error boundary to catch it (see
+  // components/InsightList.tsx's matching render-side hardening — kept
+  // even after this fix, since it's the last line of defense for whatever
+  // shape deviation shows up next). Coercing here means a future deviation
+  // never reaches the DB at all. Mutates result in place (same pattern as
+  // every other result.* mutation in this function) so the immediate API
+  // response is clean too, not just the saved row.
+  result.strengths = normalizeInsightArray(result.strengths);
+  result.concerns = normalizeInsightArray(result.concerns);
 
   const insert = await supabase
     .from("screenings")
@@ -452,11 +552,12 @@ export async function saveScreening(params: {
       job_description: jobDescription,
       resume_path: resumePath,
       resume_mime_type: resumeMimeType,
+      resume_content_hash: resumeContentHash,
       linkedin_mode: linkedInMode ?? false,
       agency_name: agencyName ?? null,
       batch_id: batchId ?? null,
       project_id: projectId ?? null,
-      user_id: actingUser?.id ?? userId ?? null,
+      user_id: resolvedActingUserId ?? userId ?? null,
       team_id: teamId,
     })
     .select("id")
@@ -484,182 +585,163 @@ export async function saveScreening(params: {
   if (agencyName) result.agencyName = agencyName;
 
   // Best-effort, non-throwing (logAction swallows its own errors). Reuses
-  // the same `actingUser` resolved at the top of this function (now also
+  // the same acting-user id resolved at the top of this function (now also
   // used for the `user_id` column itself — see the comment up there).
-  await logAction({ screeningId, userId: actingUser?.id ?? userId, actionType: "created" });
+  await logAction({ screeningId, userId: resolvedActingUserId ?? userId, actionType: "created" });
 
   // Best-effort: fingerprinting/duplicate-detection failures must never block
   // a screening from being saved. Runs after the insert so a failure here
   // can't lose the screening itself.
   let becameDuplicate = false;
-  // Real bug found 2026-07-17 (Vlad: "why existing resumes get screened
-  // again? Where's the warning?"): resumeText extraction + the
-  // resume_content_hash write used to live INSIDE the same try block as
-  // generateFingerprint() below, which makes a real Claude tool-use call —
-  // rate limits, timeouts, or a malformed tool response there would throw
-  // and silently skip the hash write too, even though the hash itself is
-  // free/deterministic and has nothing to do with the fingerprinting call.
-  // Once a screening's resume_content_hash never got written, it can NEVER
-  // be caught by the free exact-match pre-check
-  // (app/api/screen-resumes/check-existing) again — a later re-upload of the
-  // identical file sails through as "new," gets fully re-scored, and the
-  // only thing that might still catch it is the separate, weaker
-  // fingerprint-similarity match below (which explains the "Previously
-  // seen" cross-project banner appearing instead of the pre-score
-  // AlreadyScreenedCard warning that should have skipped scoring entirely).
-  // Fix: hash extraction/write gets its own try/catch, decoupled from the
-  // fingerprinting pipeline, so a fingerprinting hiccup can never also cost
-  // the free, always-should-work duplicate-hash signal.
-  let resumeText: string | null = params.resumeText ?? null;
-  try {
-    if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
-    // Cheap exact-match dedupe signal for the pre-screen duplicate check
-    // (app/api/screen-resumes/check-existing) — independent of the
-    // fingerprint below, stored even if fingerprint matching fails
-    // downstream.
-    await supabase
-      .from("screenings")
-      .update({ resume_content_hash: hashResumeText(resumeText) })
-      .eq("id", screeningId);
-  } catch (err) {
-    console.error("resume_content_hash write failed (screening still saved):", err);
-  }
-  try {
-    if (params.fingerprint === null) {
-      // Caller already attempted fingerprinting in parallel with scoring and
-      // it failed — don't retry (it would likely just fail again and cost
-      // more time), skip duplicate/history matching for this save. Matches
-      // the pre-existing best-effort guarantee: fingerprinting failures must
-      // never block the screening from being saved.
-      throw new Error("UPSTREAM_FINGERPRINT_SKIP");
-    }
-    if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
 
-    const fingerprint = params.fingerprint ?? await generateFingerprint(resumeText);
-    await saveFingerprint({ screeningId, projectId, teamId, fingerprint });
-    const match = await findDuplicateMatch({
-      projectId,
-      excludeScreeningId: screeningId,
-      fingerprint,
+  // Resolve (not yet check) the fingerprint. In the common path this is
+  // already provided by the caller (computed in parallel with scoring — see
+  // params.fingerprint's comment) so this resolves instantly with no extra
+  // await at all.
+  let fingerprint: ResumeFingerprint | null = null;
+  if (params.fingerprint === null) {
+    // Caller already attempted fingerprinting in parallel with scoring and
+    // it failed — don't retry (it would likely just fail again and cost
+    // more time), skip duplicate/history matching for this save. Matches
+    // the pre-existing best-effort guarantee: fingerprinting failures must
+    // never block the screening from being saved.
+    console.log("Fingerprint generation failed upstream (parallel with scoring) — duplicate/history matching skipped for this save, screening still saved fine.");
+  } else if (params.fingerprint) {
+    fingerprint = params.fingerprint;
+  } else {
+    try {
+      if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
+      fingerprint = await generateFingerprint(resumeText);
+    } catch (err) {
+      console.error("Fingerprint generation failed (screening still saved, duplicate/history matching skipped):", err);
+    }
+  }
+  if (fingerprint) {
+    await saveFingerprint({ screeningId, projectId, teamId, fingerprint }).catch((err) => {
+      console.error("saveFingerprint failed (screening still saved):", err);
     });
-    if (match) {
-      await markDuplicatePair(screeningId, match.screeningId);
-      becameDuplicate = true;
+  }
+
+  // 2026-07-29 perf pass (see decisions-log.md): these four lookups are
+  // independent reads — none needs another's result as input. The ACTIONS
+  // taken afterward do depend on each other (e.g. "don't bother marking a
+  // name-match pair if this already became a content duplicate" below), but
+  // those actions are cheap/conditional and applied once all four results
+  // are in, not gated ahead of time — so nothing about the final flags/
+  // badges a recruiter sees changes, this just stops waiting for each
+  // lookup one at a time (previously up to 4 sequential round trips; a
+  // fingerprinting hiccup could even delay findNameMatchInProject, even
+  // though it has nothing to do with fingerprints at all). Each is caught
+  // independently so one lookup failing can never take out the others.
+  const [duplicateMatch, nameMatchId, crossMatch, crossNameMatch] = await Promise.all([
+    fingerprint
+      ? findDuplicateMatch({ projectId, excludeScreeningId: screeningId, fingerprint }).catch((err) => {
+          console.error("Duplicate match lookup failed (screening still saved):", err);
+          return null;
+        })
+      : Promise.resolve(null),
+    projectId != null
+      ? findNameMatchInProject({ projectId, candidateName: result.candidateName, excludeScreeningId: screeningId }).catch((err) => {
+          console.error("Name match lookup failed (screening still saved):", err);
+          return null;
+        })
+      : Promise.resolve(null),
+    // Phase 1.4 — Candidate History Alert. Same fingerprint, different
+    // project, same team: a resubmission signal distinct from same-project
+    // duplication above. Only meaningful with both a project and a team to
+    // scope "cross project" against — skip silently otherwise.
+    fingerprint && projectId != null && teamId != null
+      ? findCrossProjectMatch({ teamId, excludeProjectId: projectId, excludeScreeningId: screeningId, fingerprint }).catch((err) => {
+          console.error("Cross-project fingerprint match lookup failed (screening still saved):", err);
+          return null;
+        })
+      : Promise.resolve(null),
+    projectId != null && teamId != null
+      ? findCrossProjectNameMatch({ teamId, candidateName: result.candidateName, excludeProjectId: projectId, excludeScreeningId: screeningId }).catch((err) => {
+          console.error("Cross-project name match lookup failed (screening still saved):", err);
+          return null;
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (duplicateMatch) {
+    becameDuplicate = true;
+    try {
+      await markDuplicatePair(screeningId, duplicateMatch.screeningId);
       result.duplicateFlag = true;
-      result.duplicateMatchId = match.screeningId;
+      result.duplicateMatchId = duplicateMatch.screeningId;
       // Best-effort name lookup so the badge can show who it matched without
       // a second round trip from the client — failure here just means the
       // badge renders without a name, never blocks the save.
-      try {
-        const { data: matchedRow } = await supabase
-          .from("screenings")
-          .select("candidate_name")
-          .eq("id", match.screeningId)
-          .single<{ candidate_name: string }>();
-        if (matchedRow) result.duplicateMatchCandidateName = matchedRow.candidate_name;
-      } catch {
-        // non-fatal
-      }
-    }
-
-    // Free candidate-name check — skipped when this save already became a
-    // content duplicate (that pairing already implies a name match too;
-    // showing both badges pointing at the same candidate is just noise).
-    if (projectId != null && !becameDuplicate) {
-      const nameMatchId = await findNameMatchInProject({
-        projectId,
-        candidateName: result.candidateName,
-        excludeScreeningId: screeningId,
-      });
-      if (nameMatchId != null) {
-        await markNameMatchPair(screeningId, nameMatchId);
-      }
-    }
-
-    // Phase 1.4 — Candidate History Alert. Same fingerprint, different project,
-    // same team: a resubmission signal distinct from same-project duplication
-    // above. Only meaningful with both a project and a team to scope "cross
-    // project" against — skip silently otherwise (e.g. no project assigned).
-    if (projectId != null && teamId != null) {
-      const crossMatch = await findCrossProjectMatch({
-        teamId,
-        excludeProjectId: projectId,
-        excludeScreeningId: screeningId,
-        fingerprint,
-      });
-      if (crossMatch) {
-        const matchedSignals = await getScreeningFraudSignals(crossMatch.screeningId);
-        const alertType =
-          becameDuplicate || matchedSignals.duplicateFlag || matchedSignals.historyAlertType === "known_fraud_pattern"
-            ? "known_fraud_pattern"
-            : "previously_seen";
-        await markHistoryAlertPair(screeningId, crossMatch.screeningId, alertType);
-        result.historyAlertType = alertType;
-        result.historyAlertMatchId = crossMatch.screeningId;
-        // Best-effort lookup of the matched candidate's name + project so the
-        // banner can render immediately post-screening without a second
-        // round trip — same non-fatal pattern as the duplicate lookup above.
-        try {
-          const { data: matchedRow } = await supabase
-            .from("screenings")
-            .select("candidate_name, project_id")
-            .eq("id", crossMatch.screeningId)
-            .single<{ candidate_name: string; project_id: number | null }>();
-          if (matchedRow) {
-            result.historyAlertMatchCandidateName = matchedRow.candidate_name;
-            if (matchedRow.project_id != null) {
-              result.historyAlertMatchProjectId = matchedRow.project_id;
-              const matchedProject = await getProject(matchedRow.project_id).catch(() => null);
-              if (matchedProject) result.historyAlertMatchProjectName = matchedProject.name;
-            }
-          }
-        } catch {
-          // non-fatal
-        }
-      }
-    }
-  } catch (err) {
-    // Flagged by Claude Code during the 2026-07-20 handoff review: distinguish
-    // the deliberate "caller already tried fingerprinting in parallel and it
-    // failed, skip cleanly" signal from a genuine, unexpected failure in THIS
-    // function's own fingerprinting/matching steps — the old single message
-    // read as an error even when everything behaved exactly as designed.
-    if (err instanceof Error && err.message === "UPSTREAM_FINGERPRINT_SKIP") {
-      console.log("Fingerprint generation failed upstream (parallel with scoring) — duplicate/history matching skipped for this save, screening still saved fine.");
-    } else {
-      console.error("Duplicate fingerprinting failed (screening still saved):", err);
+      const { data: matchedRow } = await supabase
+        .from("screenings")
+        .select("candidate_name")
+        .eq("id", duplicateMatch.screeningId)
+        .single<{ candidate_name: string }>();
+      if (matchedRow) result.duplicateMatchCandidateName = matchedRow.candidate_name;
+    } catch (err) {
+      console.error("Marking duplicate pair failed (screening still saved):", err);
     }
   }
 
-  // Deliberately its OWN try/catch, decoupled from the fingerprinting block
-  // above — this check needs nothing from fingerprinting (no Claude call,
-  // just a name comparison), so a fingerprinting failure/skip must never
-  // also take out this unrelated, cheap signal. Same lesson already applied
-  // to resume_content_hash above (see its 2026-07-17 comment).
-  try {
-    if (projectId != null && teamId != null) {
-      const crossNameMatch = await findCrossProjectNameMatch({
-        teamId,
-        candidateName: result.candidateName,
-        excludeProjectId: projectId,
-        excludeScreeningId: screeningId,
-      });
-      // Skip if this is the exact same screening historyAlertType (above)
-      // already matched — showing two banners pointing at the identical
-      // candidate/project would just be noise. Different matched screening
-      // (e.g. a third project) still shows both.
-      if (crossNameMatch && crossNameMatch.screeningId !== result.historyAlertMatchId) {
-        result.crossProjectNameMatchScreeningId = crossNameMatch.screeningId;
-        result.crossProjectNameMatchScore = crossNameMatch.score;
-        if (crossNameMatch.projectId != null) {
-          result.crossProjectNameMatchProjectId = crossNameMatch.projectId;
-          const matchedProject = await getProject(crossNameMatch.projectId).catch(() => null);
-          if (matchedProject) result.crossProjectNameMatchProjectName = matchedProject.name;
+  // Free candidate-name check — skipped when this save already became a
+  // content duplicate (that pairing already implies a name match too;
+  // showing both badges pointing at the same candidate is just noise).
+  if (nameMatchId != null && !becameDuplicate) {
+    try {
+      await markNameMatchPair(screeningId, nameMatchId);
+    } catch (err) {
+      console.error("Marking name-match pair failed (screening still saved):", err);
+    }
+  }
+
+  if (crossMatch) {
+    try {
+      const matchedSignals = await getScreeningFraudSignals(crossMatch.screeningId);
+      const alertType =
+        becameDuplicate || matchedSignals.duplicateFlag || matchedSignals.historyAlertType === "known_fraud_pattern"
+          ? "known_fraud_pattern"
+          : "previously_seen";
+      await markHistoryAlertPair(screeningId, crossMatch.screeningId, alertType);
+      result.historyAlertType = alertType;
+      result.historyAlertMatchId = crossMatch.screeningId;
+      // Best-effort lookup of the matched candidate's name + project so the
+      // banner can render immediately post-screening without a second
+      // round trip — same non-fatal pattern as the duplicate lookup above.
+      const { data: matchedRow } = await supabase
+        .from("screenings")
+        .select("candidate_name, project_id")
+        .eq("id", crossMatch.screeningId)
+        .single<{ candidate_name: string; project_id: number | null }>();
+      if (matchedRow) {
+        result.historyAlertMatchCandidateName = matchedRow.candidate_name;
+        if (matchedRow.project_id != null) {
+          result.historyAlertMatchProjectId = matchedRow.project_id;
+          const matchedProject = await getProject(matchedRow.project_id).catch(() => null);
+          if (matchedProject) result.historyAlertMatchProjectName = matchedProject.name;
         }
       }
+    } catch (err) {
+      console.error("Cross-project history alert failed (screening still saved):", err);
     }
-  } catch (err) {
-    console.error("Cross-project name match failed (screening still saved):", err);
+  }
+
+  // Skip if this is the exact same screening historyAlertType (above)
+  // already matched — showing two banners pointing at the identical
+  // candidate/project would just be noise. Different matched screening
+  // (e.g. a third project) still shows both.
+  if (crossNameMatch && crossNameMatch.screeningId !== result.historyAlertMatchId) {
+    try {
+      result.crossProjectNameMatchScreeningId = crossNameMatch.screeningId;
+      result.crossProjectNameMatchScore = crossNameMatch.score;
+      if (crossNameMatch.projectId != null) {
+        result.crossProjectNameMatchProjectId = crossNameMatch.projectId;
+        const matchedProject = await getProject(crossNameMatch.projectId).catch(() => null);
+        if (matchedProject) result.crossProjectNameMatchProjectName = matchedProject.name;
+      }
+    } catch (err) {
+      console.error("Cross-project name match enrichment failed (screening still saved):", err);
+    }
   }
 
   return { id: screeningId };

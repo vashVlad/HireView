@@ -10,7 +10,30 @@ import { getProject } from "@/lib/projects";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
-export const maxDuration = 60;
+// DO-NOT-TOUCH EXCEPTION (2026-07-29, Vlad's explicit ask — see
+// decisions-log.md): raised from 60 to Vercel's Pro-plan ceiling (300s) —
+// Vlad reported a screening error on exactly 3 resumes (one full
+// CONCURRENCY batch) where the resumes had actually saved successfully
+// server-side despite the client seeing an error, matching this project's
+// own documented 2026-07-20 timeout pattern almost exactly (see
+// components/ResumeUploader.tsx's MAX_FILES comment) — except that fix
+// capped uploads at one batch specifically to stay under the 60s ceiling,
+// and enough extra per-resume work (fingerprinting, cross-project
+// matching, history alerts, batch_id) has been added since that even one
+// batch can apparently brush up against it now. Raising the ceiling is one
+// half of the fix, alongside the lib/screenings.ts efficiency pass below
+// this file (parallelized independent lookups, one fewer DB round trip per
+// resume).
+//
+// IMPORTANT — this is NOT a safe-by-default change on every plan: on
+// Vercel's Hobby plan WITHOUT Fluid Compute enabled, setting maxDuration
+// above 60 fails the DEPLOYMENT outright (a build-time error), it does not
+// just get silently clamped. This only deploys cleanly on a Pro/Enterprise
+// plan, or on Hobby with Fluid Compute turned on (which raises Hobby's own
+// ceiling to 300s too). Confirm one of those is true before merging this —
+// if neither is, drop this back to 60 and rely on the efficiency pass alone
+// (still a real improvement, just not as much margin).
+export const maxDuration = 300;
 
 const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
   pdf: "application/pdf",
@@ -27,6 +50,12 @@ export async function POST(request: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const userId = userIdFilter(user);
+  // Narrowed into its own const, 2026-07-29 perf pass: `user.id` inside the
+  // `score()` closure below loses TS's null-check narrowing (closures over a
+  // captured variable can't prove it wasn't reassigned by the time they
+  // run), even though `user` is a plain const already checked non-null
+  // above. Same real value either way.
+  const actingUserId = user.id;
 
   // DO-NOT-TOUCH EXCEPTION (2026-07-28, Vlad's explicit ask — see
   // decisions-log.md): groups every screening saved by this one call under a
@@ -107,10 +136,18 @@ export async function POST(request: NextRequest) {
   // Pull project config (LinkedIn context + per-role score threshold)
   let linkedInContext: string | undefined;
   let scoreThreshold = 45;
+  // DO-NOT-TOUCH EXCEPTION (2026-07-29 perf pass — see decisions-log.md):
+  // this project fetch already happened here for linkedInContext/
+  // scoreThreshold above — teamId just reads an already-fetched field off
+  // the same object instead of every resume's saveScreening() call
+  // re-fetching this same project row itself (see lib/screenings.ts's
+  // params.teamId comment). Purely additive, no existing field changed.
+  let teamId: number | null = null;
   if (projectId) {
     const project = await getProject(projectId).catch(() => null);
     linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
     scoreThreshold = project?.scoreThreshold ?? 45;
+    teamId = project?.teamId ?? null;
   }
 
   if (files.length === 0) {
@@ -224,6 +261,16 @@ export async function POST(request: NextRequest) {
           scoreThreshold,
           // DO-NOT-TOUCH EXCEPTION, same batchId — see the comment at the top of this route.
           batchId,
+          // DO-NOT-TOUCH EXCEPTION (2026-07-29 perf pass — see
+          // decisions-log.md): both already resolved once above (user at
+          // the very top of this function, teamId alongside
+          // linkedInContext/scoreThreshold) — passing them through lets
+          // saveScreening skip its own internal getAuthUser()/getProject()
+          // lookups, which used to run fresh for every resume in this
+          // batch despite always resolving to the same values. See
+          // lib/screenings.ts's params.actingUserId/params.teamId comments.
+          actingUserId,
+          teamId,
         });
         result.id = id;
       } catch (err) {

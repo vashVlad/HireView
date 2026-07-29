@@ -983,7 +983,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   // Flagged filter, 2026-07-20 (Vlad's ask). Orthogonal to status, so a
   // standalone toggle pill rather than an entry in STATUS_PILLS.
   const [flaggedFilter, setFlaggedFilter] = useState(false);
-  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc">("default");
+  // "newest" added 2026-07-29 (Vlad's ask: "add a recent filter to the
+  // pipeline which will show the newest screenings") — sorts by
+  // ScreeningRecord.createdAt descending, independent of score. Same
+  // archived-sinks-to-bottom / Ring-grouping precedence as the score sorts
+  // below it (see filteredScreenings' comparator).
+  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc" | "newest">("default");
   const [expandedId, setExpandedIdState] = useState<number | null>(externalExpandedId ?? null);
   function setExpandedId(id: number | null) {
     setExpandedIdState(id);
@@ -1136,6 +1141,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       if (clusterA !== clusterB) return clusterA - clusterB;
       if (sortOrder === "desc") return b.score - a.score;
       if (sortOrder === "asc") return a.score - b.score;
+      if (sortOrder === "newest") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       return 0;
     });
   const archivedCount = filteredScreenings.filter(isSettledArchived).length;
@@ -1337,10 +1343,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               </svg>
               <select
                 value={sortOrder}
-                onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc")}
+                onChange={(e) => setSortOrder(e.target.value as "default" | "desc" | "asc" | "newest")}
                 className="bg-transparent text-xs font-medium text-zinc-500 outline-none dark:text-zinc-400"
               >
                 <option value="default">Default</option>
+                <option value="newest">Newest</option>
                 <option value="desc">Score ↓</option>
                 <option value="asc">Score ↑</option>
               </select>
