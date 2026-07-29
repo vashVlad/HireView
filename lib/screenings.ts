@@ -195,6 +195,88 @@ async function findCrossProjectNameMatch(params: {
   return match ? { screeningId: match.id, projectId: match.project_id, score: match.score } : null;
 }
 
+// ── Cross-project "better fit" matches (standing Pipeline badge) ────────────
+//
+// Vlad's ask, 2026-07-29: "add one thing to the not opened result card on
+// the pipeline, saying that this candidate was moved to a different
+// project and mentioning that project. Only if the candidate scored better
+// on the other project." findCrossProjectNameMatch() above already finds
+// this exact signal (same team, different project, name match) but is
+// deliberately ephemeral — screening-moment only, never persisted (see its
+// own comment) — so it never shows up again once a recruiter leaves the
+// Screen tab or reloads Pipeline. Making it a real standing badge the way
+// it's asked for here needs it re-derivable on every Pipeline load, not
+// just mutated onto an in-memory result once at save time.
+//
+// Deliberately NOT done via a new column + backfill (the other option,
+// flagged as "a bigger change" in that same comment): a persisted
+// "better_fit_project_id" would only ever get set on the LATER of two
+// screenings (computed once, at ITS save time) — the EARLIER project's row
+// would never retroactively learn about a better score that shows up
+// afterward, so it wouldn't show the badge at all until it happened to be
+// re-saved. Recomputing this live, every time Pipeline loads, is
+// symmetric and always correct in both directions with no migration, no
+// backfill, and no [[feedback_migration_sequencing]] risk — the tradeoff
+// is one extra team-wide query per Pipeline load instead of a free column
+// read, acceptable at this project's current scale (same tradeoff already
+// accepted for listScreenings() having no real pagination yet).
+export async function findBetterFitMatches(
+  projectId: number,
+  teamId: number
+): Promise<Map<number, { projectId: number; projectName: string; score: number }>> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("id, candidate_name, project_id, score")
+    .eq("team_id", teamId)
+    .returns<{ id: number; candidate_name: string; project_id: number | null; score: number }[]>();
+  if (error || !data) return new Map();
+
+  const thisProject = data.filter((row) => row.project_id === projectId);
+  const others = data.filter((row) => row.project_id !== projectId && row.project_id != null);
+
+  // Best (highest-scoring) other-project match per normalized candidate
+  // name — if the same person shows up in three other projects, only the
+  // single best-scoring one is worth mentioning.
+  const bestByName = new Map<string, { projectId: number; score: number }>();
+  for (const row of others) {
+    const key = normalizeCandidateName(row.candidate_name);
+    const existing = bestByName.get(key);
+    if (!existing || row.score > existing.score) {
+      bestByName.set(key, { projectId: row.project_id as number, score: row.score });
+    }
+  }
+
+  const matches = new Map<number, { projectId: number; projectName: string; score: number }>();
+  const projectIdsNeeded = new Set<number>();
+  for (const row of thisProject) {
+    const best = bestByName.get(normalizeCandidateName(row.candidate_name));
+    // Strictly better only — "also screened elsewhere" alone (equal or
+    // lower score) isn't what was asked for; that's already covered by the
+    // ephemeral crossProjectNameMatch mention at screening time.
+    if (best && best.score > row.score) {
+      matches.set(row.id, { projectId: best.projectId, projectName: "", score: best.score });
+      projectIdsNeeded.add(best.projectId);
+    }
+  }
+  if (matches.size === 0) return matches;
+
+  // Resolve project names once per unique project, not once per matched
+  // candidate.
+  const nameEntries = await Promise.all(
+    [...projectIdsNeeded].map(async (pid) => {
+      const project = await getProject(pid).catch(() => null);
+      return [pid, project?.name ?? "another project"] as const;
+    })
+  );
+  const nameById = new Map(nameEntries);
+  for (const match of matches.values()) {
+    match.projectName = nameById.get(match.projectId) ?? "another project";
+  }
+
+  return matches;
+}
+
 // ── Cross-project candidate lookup (Fit Suggestion pre-check) ───────────────
 //
 // Vlad's ask, 2026-07-28: before spending a Claude call re-scoring a
