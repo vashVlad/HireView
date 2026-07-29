@@ -1037,24 +1037,27 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
   const [actionsMap, setActionsMap] = useState<Record<number, ScreeningAction[] | "loading">>({});
-  // "Moved to X" badge, Vlad's ask 2026-07-29: keyed by screeningId, present
-  // only when the same candidate name has a screening in a DIFFERENT
-  // project (same team) with a STRICTLY HIGHER score — see
-  // findBetterFitMatches()'s comment in lib/screenings.ts for why this is
-  // fetched fresh on every Pipeline load instead of read off a persisted
-  // column. Fetched once per project load, not per card — one bulk request
-  // covers every candidate in this project's Pipeline at once.
-  const [betterFitMatches, setBetterFitMatches] = useState<Record<number, { projectId: number; projectName: string; score: number }>>({});
+  // Transfer destination list, Vlad's ask 2026-07-29: projects this
+  // recruiter/admin can transfer a candidate INTO, for StatusStageControl's
+  // gated Transfer picker. GET /api/projects already scopes server-side via
+  // teamIdsFilter (recruiter: own team only, admin: everything — see
+  // lib/auth.ts) — the client just filters to active projects and excludes
+  // the current one. Supersedes the old passive "Moved to X" badge
+  // (findBetterFitMatches, removed) now that Transfer is a real action.
+  const [transferProjects, setTransferProjects] = useState<{ id: number; name: string }[]>([]);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/projects/${projectId}/better-fit-matches`)
+    fetch(`/api/projects`)
       .then((res) => res.json())
       .then((data) => {
-        if (!cancelled) setBetterFitMatches(data.matches ?? {});
+        if (cancelled) return;
+        const list = (data.projects ?? [])
+          .filter((p: { id: number; status: string }) => p.status === "active" && p.id !== projectId)
+          .map((p: { id: number; name: string }) => ({ id: p.id, name: p.name }));
+        setTransferProjects(list);
       })
       .catch(() => {
-        // Non-fatal — Pipeline still works fine without this badge, same as
-        // any other best-effort enrichment in this app.
+        // Non-fatal — Transfer just stays ungated (no picker) without this.
       });
     return () => {
       cancelled = true;
@@ -1212,6 +1215,38 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveReason }) });
     } catch { /* non-fatal */ }
+  }
+
+  // Transfer status action, Vlad's ask 2026-07-29. Real async work happens
+  // server-side (a new, separately-scored screening gets created in the
+  // destination project) before the status here actually flips to
+  // "transferred" — so this throws on failure, letting
+  // StatusStageControl's commitTransfer surface the error inline instead of
+  // optimistically flipping status the way handleStatusChange above does.
+  async function handleTransfer(id: number, projectId: number) {
+    const res = await fetch(`/api/history/${id}/transfer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error ?? "Transfer failed");
+    const now = new Date().toISOString();
+    setScreenings((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              status: "transferred",
+              statusUpdatedAt: now,
+              transferredToProjectId: data.transferredToProjectId,
+              transferredToProjectName: data.transferredToProjectName,
+              transferredToScreeningId: data.newScreeningId,
+            }
+          : s
+      )
+    );
+    onStatusChange?.(id, "transferred");
   }
 
   async function handleToggleFlag(id: number, current: boolean, note?: string) {
@@ -1514,14 +1549,17 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   )}
                   {/* 2026-07-29 (Vlad's ask): "if the candidate shows (moved
                       to project) then remove (previously seen)" — the
-                      milder "previously_seen" alert is redundant once
-                      "Moved to X" is already telling the recruiter about a
-                      different project with a stronger match; showing both
-                      was just noise pointing at largely the same idea.
+                      milder "previously_seen" alert is redundant once the
+                      status chip already reads "Transferred to X"; showing
+                      both was just noise pointing at largely the same idea.
+                      Originally gated on the old "Moved to X" badge
+                      (betterFitMatches), now keyed off the real
+                      status === "transferred" now that Transfer is an
+                      explicit action instead of a passive guess.
                       "known_fraud_pattern" is a distinct, more serious
                       signal (not just "also seen elsewhere") and stays
                       regardless. */}
-                  {s.historyAlertType && (s.historyAlertType === "known_fraud_pattern" || !betterFitMatches[s.id]) && (
+                  {s.historyAlertType && (s.historyAlertType === "known_fraud_pattern" || s.status !== "transferred") && (
                     <Link
                       href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
                       onClick={(e) => e.stopPropagation()}
@@ -1550,19 +1588,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     >
                       Name match
                     </button>
-                  )}
-                  {/* "Moved to X" — Vlad's ask, 2026-07-29. See
-                      betterFitMatches' own comment above for the gate
-                      (strictly higher score elsewhere, same team). */}
-                  {betterFitMatches[s.id] && (
-                    <Link
-                      href={`/projects/${betterFitMatches[s.id].projectId}?tab=pipeline`}
-                      onClick={(e) => e.stopPropagation()}
-                      title={`Scored ${betterFitMatches[s.id].score} in "${betterFitMatches[s.id].projectName}" — higher than the ${s.score} here`}
-                      className="shrink-0 truncate rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-sky-700 transition-colors hover:bg-sky-200 dark:bg-sky-500/15 dark:text-sky-400 dark:hover:bg-sky-500/25"
-                    >
-                      Moved to {betterFitMatches[s.id].projectName}
-                    </Link>
                   )}
                   <button type="button"
                     onClick={(e) => {
@@ -1652,6 +1677,10 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     onStageChange={(stage) => handleStageChange(s.id, stage)}
                     archiveReason={s.archiveReason}
                     onArchiveReasonChange={(reason) => handleArchiveReasonChange(s.id, reason)}
+                    transferProjects={transferProjects}
+                    onTransfer={(destProjectId) => handleTransfer(s.id, destProjectId)}
+                    transferredToProjectName={s.transferredToProjectName}
+                    transferredToScreeningId={s.transferredToScreeningId}
                   />
                 </div>
               </div>

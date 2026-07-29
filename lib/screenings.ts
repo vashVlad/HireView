@@ -195,86 +195,144 @@ async function findCrossProjectNameMatch(params: {
   return match ? { screeningId: match.id, projectId: match.project_id, score: match.score } : null;
 }
 
-// ── Cross-project "better fit" matches (standing Pipeline badge) ────────────
+// ── Transfer to another project (real status action) ────────────────────────
 //
-// Vlad's ask, 2026-07-29: "add one thing to the not opened result card on
-// the pipeline, saying that this candidate was moved to a different
-// project and mentioning that project. Only if the candidate scored better
-// on the other project." findCrossProjectNameMatch() above already finds
-// this exact signal (same team, different project, name match) but is
-// deliberately ephemeral — screening-moment only, never persisted (see its
-// own comment) — so it never shows up again once a recruiter leaves the
-// Screen tab or reloads Pipeline. Making it a real standing badge the way
-// it's asked for here needs it re-derivable on every Pipeline load, not
-// just mutated onto an in-memory result once at save time.
+// Vlad's ask, 2026-07-29: "add an option to transfer the candidate to
+// another project from the status dropdown ... you won't have to show that
+// 'moved to project' chip since it will be shown in the status chip which
+// will make more sense." Supersedes findBetterFitMatches (the passive,
+// live-computed "Moved to X" badge from earlier the same day, removed
+// here) — an explicit, recruiter-driven action makes that guesswork
+// redundant.
 //
-// Deliberately NOT done via a new column + backfill (the other option,
-// flagged as "a bigger change" in that same comment): a persisted
-// "better_fit_project_id" would only ever get set on the LATER of two
-// screenings (computed once, at ITS save time) — the EARLIER project's row
-// would never retroactively learn about a better score that shows up
-// afterward, so it wouldn't show the badge at all until it happened to be
-// re-saved. Recomputing this live, every time Pipeline loads, is
-// symmetric and always correct in both directions with no migration, no
-// backfill, and no [[feedback_migration_sequencing]] risk — the tradeoff
-// is one extra team-wide query per Pipeline load instead of a free column
-// read, acceptable at this project's current scale (same tradeoff already
-// accepted for listScreenings() having no real pagination yet).
-export async function findBetterFitMatches(
-  projectId: number,
-  teamId: number
-): Promise<Map<number, { projectId: number; projectName: string; score: number }>> {
+// Design, per Vlad's own confirmed answers: the ORIGINAL screening stays
+// visible in this project (status becomes "transferred", not deleted —
+// same "toned out, not removed" treatment as Archived), AND a real new
+// screening is created in the destination project using the candidate's
+// EXISTING scored result (not a fresh re-score against the destination's
+// JD — this is "send them over," not "re-screen them there"). Reuses
+// getScreeningResume() to re-read the original resume file from storage,
+// since this is triggered from an already-saved Pipeline card with no
+// File object in memory client-side (unlike the existing Fit Suggestion
+// "Transfer to X" button, which runs during a live Screen tab session and
+// still has the original upload on hand) — this is why this couldn't just
+// reuse app/api/screenings/save-one/route.ts's existing transfer flow.
+export async function transferScreeningToProject(params: {
+  screeningId: number;
+  destinationProjectId: number;
+  actingUserId?: string;
+}): Promise<{ newScreeningId: number; destinationProjectName: string }> {
+  const supabase = getSupabaseClient();
+
+  const { data: row, error } = await supabase
+    .from("screenings")
+    .select(
+      "candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, resume_path, resume_mime_type, linkedin_mode, agency_name"
+    )
+    .eq("id", params.screeningId)
+    .single<{
+      candidate_name: string;
+      file_name: string;
+      score: number;
+      must_have_score: number | null;
+      nice_to_have_score: number | null;
+      summary: string;
+      strengths: string[];
+      concerns: string[];
+      career_trajectory: string | null;
+      recommendation: Recommendation | null;
+      resume_path: string;
+      resume_mime_type: string;
+      linkedin_mode: boolean;
+      agency_name: string | null;
+    }>();
+  if (error || !row) throw error ?? new Error("Screening not found");
+
+  const download = await supabase.storage.from(RESUME_BUCKET).download(row.resume_path);
+  if (download.error) throw download.error;
+  const resumeBuffer = Buffer.from(await download.data.arrayBuffer());
+
+  const destinationProject = await getProject(params.destinationProjectId);
+  if (!destinationProject) throw new Error("Destination project not found");
+
+  const result: CandidateResult = {
+    fileName: row.file_name,
+    candidateName: row.candidate_name,
+    score: row.score,
+    mustHaveScore: row.must_have_score ?? undefined,
+    niceToHaveScore: row.nice_to_have_score ?? undefined,
+    summary: row.summary,
+    strengths: row.strengths,
+    concerns: row.concerns,
+    careerTrajectory: row.career_trajectory ?? undefined,
+    recommendation: row.recommendation ?? "decline",
+  };
+
+  const { id: newScreeningId } = await saveScreening({
+    result,
+    jobDescription: destinationProject.jobDescription,
+    resumeFile: resumeBuffer,
+    resumeMimeType: row.resume_mime_type,
+    linkedInMode: row.linkedin_mode,
+    agencyName: row.agency_name ?? undefined,
+    projectId: params.destinationProjectId,
+    userId: params.actingUserId,
+    scoreThreshold: destinationProject.scoreThreshold,
+    actingUserId: params.actingUserId,
+    teamId: destinationProject.teamId ?? null,
+  });
+
+  const { error: updateErr } = await supabase
+    .from("screenings")
+    .update({
+      status: "transferred",
+      transferred_to_project_id: params.destinationProjectId,
+      transferred_to_screening_id: newScreeningId,
+    })
+    .eq("id", params.screeningId);
+  if (updateErr) throw updateErr;
+
+  return { newScreeningId, destinationProjectName: destinationProject.name };
+}
+
+// Isolated, best-effort enrichment for the three transfer fields above —
+// see supabase-migration-transfer-to-project.sql for why these are kept OUT
+// of the shared SCREENING_COLUMNS select. Mirrors enrichHistoryAlerts()
+// below exactly: a failure here (e.g. the migration hasn't run yet) just
+// means transferred candidates show their bare "Transferred" pill with no
+// destination name/link yet — the read never fails, never affects any
+// other candidate.
+async function enrichTransferInfo(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  const ids = records.filter((r) => r.status === "transferred").map((r) => r.id);
+  if (ids.length === 0) return records;
+
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("screenings")
-    .select("id, candidate_name, project_id, score")
-    .eq("team_id", teamId)
-    .returns<{ id: number; candidate_name: string; project_id: number | null; score: number }[]>();
-  if (error || !data) return new Map();
+    .select("id, transferred_to_project_id, transferred_to_screening_id")
+    .in("id", ids)
+    .returns<{ id: number; transferred_to_project_id: number | null; transferred_to_screening_id: number | null }[]>();
+  if (error || !data) return records; // best-effort — see comment above
 
-  const thisProject = data.filter((row) => row.project_id === projectId);
-  const others = data.filter((row) => row.project_id !== projectId && row.project_id != null);
-
-  // Best (highest-scoring) other-project match per normalized candidate
-  // name — if the same person shows up in three other projects, only the
-  // single best-scoring one is worth mentioning.
-  const bestByName = new Map<string, { projectId: number; score: number }>();
-  for (const row of others) {
-    const key = normalizeCandidateName(row.candidate_name);
-    const existing = bestByName.get(key);
-    if (!existing || row.score > existing.score) {
-      bestByName.set(key, { projectId: row.project_id as number, score: row.score });
-    }
-  }
-
-  const matches = new Map<number, { projectId: number; projectName: string; score: number }>();
-  const projectIdsNeeded = new Set<number>();
-  for (const row of thisProject) {
-    const best = bestByName.get(normalizeCandidateName(row.candidate_name));
-    // Strictly better only — "also screened elsewhere" alone (equal or
-    // lower score) isn't what was asked for; that's already covered by the
-    // ephemeral crossProjectNameMatch mention at screening time.
-    if (best && best.score > row.score) {
-      matches.set(row.id, { projectId: best.projectId, projectName: "", score: best.score });
-      projectIdsNeeded.add(best.projectId);
-    }
-  }
-  if (matches.size === 0) return matches;
-
-  // Resolve project names once per unique project, not once per matched
-  // candidate.
-  const nameEntries = await Promise.all(
-    [...projectIdsNeeded].map(async (pid) => {
-      const project = await getProject(pid).catch(() => null);
-      return [pid, project?.name ?? "another project"] as const;
-    })
+  const byId = new Map(data.map((r) => [r.id, r]));
+  const projectIds = [...new Set(data.map((r) => r.transferred_to_project_id).filter((id): id is number => id != null))];
+  const names = await Promise.all(
+    projectIds.map(async (pid) => [pid, (await getProject(pid).catch(() => null))?.name] as const)
   );
-  const nameById = new Map(nameEntries);
-  for (const match of matches.values()) {
-    match.projectName = nameById.get(match.projectId) ?? "another project";
-  }
+  const nameById = new Map(names);
 
-  return matches;
+  return records.map((r) => {
+    const t = byId.get(r.id);
+    if (!t) return r;
+    return {
+      ...r,
+      ...(t.transferred_to_project_id != null ? { transferredToProjectId: t.transferred_to_project_id } : {}),
+      ...(t.transferred_to_project_id != null && nameById.get(t.transferred_to_project_id)
+        ? { transferredToProjectName: nameById.get(t.transferred_to_project_id) }
+        : {}),
+      ...(t.transferred_to_screening_id != null ? { transferredToScreeningId: t.transferred_to_screening_id } : {}),
+    };
+  });
 }
 
 // ── Cross-project candidate lookup (Fit Suggestion pre-check) ───────────────
@@ -926,7 +984,7 @@ export async function listScreenings(
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
 
-  return attachRecruiterEmails(await enrichHistoryAlerts((data ?? []).map(rowToRecord)));
+  return attachRecruiterEmails(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))));
 }
 
 export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord[]> {
@@ -937,7 +995,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
     .in("id", ids)
     .returns<ScreeningRow[]>();
   if (error) throw error;
-  return attachRecruiterEmails(await enrichHistoryAlerts((data ?? []).map(rowToRecord)));
+  return attachRecruiterEmails(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))));
 }
 
 /**
@@ -964,7 +1022,7 @@ export async function listScreeningsByBatch(projectId: number, batchId: string):
     .order("score", { ascending: false })
     .returns<ScreeningRow[]>();
   if (error) throw error;
-  return attachRecruiterEmails(await enrichHistoryAlerts((data ?? []).map(rowToRecord)));
+  return attachRecruiterEmails(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))));
 }
 
 // ── Get resume ─────────────────────────────────────────────────────────────

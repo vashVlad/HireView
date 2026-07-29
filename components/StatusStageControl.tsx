@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { ARCHIVE_REASONS, CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS, TRACKER_STAGES, type CandidateStatus, type TrackerStage } from "@/lib/types";
 import { STATUS_COLORS } from "./StatusSelect";
 
@@ -60,6 +61,10 @@ export function StatusStageControl({
   onStageChange,
   archiveReason,
   onArchiveReasonChange,
+  transferProjects,
+  onTransfer,
+  transferredToProjectName,
+  transferredToScreeningId,
 }: {
   status: CandidateStatus;
   stage: TrackerStage | null;
@@ -67,12 +72,61 @@ export function StatusStageControl({
   onStageChange: (stage: TrackerStage) => void;
   archiveReason?: string | null;
   onArchiveReasonChange?: (reason: string) => void;
+  /**
+   * Projects this recruiter/admin can transfer INTO — already scoped by the
+   * caller (recruiter: own team only, admin: everything — GET /api/projects
+   * via teamIdsFilter, see lib/auth.ts), current project already excluded.
+   * Omit (or pass an empty array) to keep "Transferred" from ever
+   * committing — same "no picker wired up, nothing happens" convention as
+   * archiveReason/onArchiveReasonChange above.
+   */
+  transferProjects?: { id: number; name: string }[];
+  /**
+   * Vlad's ask, 2026-07-29: "add an option to transfer the candidate to
+   * another project from the status dropdown." Picking "Transferred" from
+   * the status select doesn't commit anything by itself (same gated
+   * pattern as Archived's reason picker below) — it reveals a project
+   * picker, and only once a destination is actually chosen does this fire.
+   * Real async work happens server-side (a new, separately-scored screening
+   * gets created in the destination project) before the status here
+   * actually flips — so this is awaited, with its own loading/error state,
+   * same convention as ResultCard.tsx's existing handleTransfer for the
+   * Fit Suggestion's "Transfer to X" button.
+   */
+  onTransfer?: (projectId: number) => Promise<void>;
+  /** Only meaningful when status === "transferred". Rendered as a small, non-editable link once a transfer has actually completed — not a re-pickable dropdown, since re-transferring isn't a supported flow yet. */
+  transferredToProjectName?: string;
+  /** Powers the small "view" link straight to the new screening's own full-result page — Vlad's ask: "add a link next to that chip that will transfer the user to the exact result card in that project. make it small tho." */
+  transferredToScreeningId?: number;
 }) {
   const [pendingArchive, setPendingArchive] = useState(false);
+  const [pendingTransfer, setPendingTransfer] = useState(false);
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
   const gateOnReason = onArchiveReasonChange !== undefined;
-  const displayStatus = pendingArchive ? "archived" : status;
-  const showStage = status === "screening" && !pendingArchive;
+  const gateOnTransfer = onTransfer !== undefined && !!transferProjects?.length;
+  const displayStatus = pendingArchive ? "archived" : pendingTransfer ? "transferred" : status;
+  const showStage = status === "screening" && !pendingArchive && !pendingTransfer;
   const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
+  // Only while genuinely pending a destination pick — once status is
+  // already "transferred" server-side, the small link view below replaces
+  // this segment instead of a re-editable select.
+  const showTransferPicker = pendingTransfer && gateOnTransfer;
+  const showTransferredLink = status === "transferred" && !pendingTransfer && transferredToScreeningId != null;
+
+  async function commitTransfer(projectId: number) {
+    if (!onTransfer || transferring) return;
+    setTransferring(true);
+    setTransferError(null);
+    try {
+      await onTransfer(projectId);
+      setPendingTransfer(false);
+    } catch (err) {
+      setTransferError(err instanceof Error ? err.message : "Transfer failed");
+    } finally {
+      setTransferring(false);
+    }
+  }
 
   return (
     <div
@@ -84,10 +138,18 @@ export function StatusStageControl({
         onChange={(e) => {
           const next = e.target.value as CandidateStatus;
           if (next === "archived" && gateOnReason) {
+            setPendingTransfer(false);
             setPendingArchive(true);
             return;
           }
+          if (next === "transferred" && gateOnTransfer) {
+            setPendingArchive(false);
+            setPendingTransfer(true);
+            setTransferError(null);
+            return;
+          }
           setPendingArchive(false);
+          setPendingTransfer(false);
           onStatusChange(next);
         }}
         className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
@@ -98,6 +160,43 @@ export function StatusStageControl({
           </option>
         ))}
       </select>
+      {showTransferPicker && (
+        <>
+          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
+          {transferError && (
+            <span className="truncate px-1 text-[10px] text-rose-500" title={transferError}>
+              {transferError}
+            </span>
+          )}
+          <select
+            value=""
+            disabled={transferring}
+            onChange={(e) => {
+              const projectId = Number(e.target.value);
+              if (projectId) commitTransfer(projectId);
+            }}
+            className="w-20 max-w-20 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 opacity-60 outline-none disabled:cursor-wait"
+          >
+            <option value="" disabled>{transferring ? "Transferring…" : "To project…"}</option>
+            {transferProjects!.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </>
+      )}
+      {showTransferredLink && (
+        <>
+          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
+          <Link
+            href={`/candidates/${transferredToScreeningId}`}
+            onClick={(e) => e.stopPropagation()}
+            title={`View the result card in "${transferredToProjectName ?? "that project"}"`}
+            className="max-w-20 truncate py-1 pl-1.5 pr-1 text-[10px] underline decoration-dotted underline-offset-2 opacity-80 hover:opacity-100"
+          >
+            {transferredToProjectName ?? "View"}
+          </Link>
+        </>
+      )}
       {showStage && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />

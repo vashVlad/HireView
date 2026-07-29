@@ -20,6 +20,11 @@ export const STATUS_COLORS: Record<CandidateStatus, string> = {
     "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-400",
   archived:
     "border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500",
+  // Added 2026-07-29 — same sky-blue this project already used for the
+  // (now superseded) "Moved to X" Pipeline badge, so the visual language
+  // carries over to its replacement.
+  transferred:
+    "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-400",
 };
 
 export function StatusSelect({

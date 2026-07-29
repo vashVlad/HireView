@@ -6,7 +6,16 @@ export type Recommendation = "proceed" | "decline";
 // Existing DB rows are backfilled from "interview" to "screening" by
 // supabase-migration-backfill-interview-status.sql — run that BEFORE
 // deploying this change (see decisions-log.md, 2026-07-15).
-export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived";
+// "transferred" added 2026-07-29 (Vlad's ask: "add an option to transfer
+// the candidate to another project from the status dropdown"). Needs no
+// migration for the value itself (screenings.status is plain text, not a
+// Postgres enum) — see supabase-migration-transfer-to-project.sql for the
+// two pointer columns (transferredToProjectId/transferredToScreeningId)
+// this status relies on, which ARE new and do need that migration run.
+// Supersedes the earlier, purely-informational "Moved to X" Pipeline badge
+// (findBetterFitMatches, removed same day) — Vlad: once a real Transfer
+// action exists, showing that passive guess alongside it is redundant.
+export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived" | "transferred";
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
   "new_applicant",
@@ -14,6 +23,7 @@ export const CANDIDATE_STATUSES: CandidateStatus[] = [
   "contacted",
   "screening",
   "archived",
+  "transferred",
 ];
 
 export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
@@ -22,6 +32,7 @@ export const CANDIDATE_STATUS_LABELS: Record<CandidateStatus, string> = {
   contacted: "Contacted",
   screening: "Screening",
   archived: "Archived",
+  transferred: "Transferred",
 };
 
 // Fixed reason list for archived candidates — Vlad's ask, 2026-07-15,
@@ -370,6 +381,22 @@ export interface ScreeningRecord {
    * single "Transfer to project" via save-one).
    */
   batchId?: string;
+  /**
+   * Set only when status === "transferred" — where this candidate went
+   * (Vlad's ask, 2026-07-29). transferredToScreeningId points at the real,
+   * separately-scored screening row created in the destination project
+   * (transferScreeningToProject(), lib/screenings.ts) — powers the small
+   * "view" link next to the Transferred status pill
+   * (components/StatusStageControl.tsx), which goes straight to
+   * /candidates/[transferredToScreeningId]. transferredToProjectName is
+   * resolved via a separate, isolated enrichment query
+   * (enrichTransferInfo) — see supabase-migration-transfer-to-project.sql
+   * for why these three fields are deliberately NOT in the shared
+   * SCREENING_COLUMNS select.
+   */
+  transferredToProjectId?: number;
+  transferredToProjectName?: string;
+  transferredToScreeningId?: number;
   createdAt: string;
 }
 
