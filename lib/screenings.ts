@@ -297,6 +297,29 @@ function sanitizeStorageFileName(name: string): string {
   return cleaned.length > 0 ? cleaned : "resume";
 }
 
+// Coerces a strengths/concerns array to plain strings before it ever reaches
+// the DB — see the 2026-07-30 hardening comment where this is called, in
+// saveScreening(), for why this exists. A single-key object like
+// {"Skill": "..."} or {"item": "..."} (both observed live shapes) most
+// likely holds the real intended string as its one value; anything else
+// falls back to JSON.stringify so it's still a plain string, never an
+// object that could crash a renderer expecting string[].
+function normalizeInsightArray(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+  return items.map((item) => {
+    if (typeof item === "string") return item;
+    if (item != null && typeof item === "object" && !Array.isArray(item)) {
+      const values = Object.values(item as Record<string, unknown>);
+      if (values.length === 1 && typeof values[0] === "string") return values[0];
+    }
+    try {
+      return JSON.stringify(item);
+    } catch {
+      return String(item);
+    }
+  });
+}
+
 // ── Save ───────────────────────────────────────────────────────────────────
 
 export async function saveScreening(params: {
@@ -494,6 +517,22 @@ export async function saveScreening(params: {
   const initialStatus: CandidateStatus =
     scoreThreshold !== undefined && result.score < scoreThreshold ? "archived" : "new_applicant";
   const initialArchiveReason = initialStatus === "archived" ? DEFAULT_AUTO_ARCHIVE_REASON : null;
+
+  // 2026-07-30 hardening: scoreCandidate.ts's tool schema (do-not-touch)
+  // declares strengths/concerns as string[], but a live Claude response can
+  // still occasionally deviate from its own schema — confirmed via 2 real
+  // screenings (out of 244) where strengths saved as an array of single-key
+  // OBJECTS instead of strings (e.g. [{"Skill": "..."}]). Nothing validated
+  // this shape before it reached the DB, and rendering an object directly
+  // crashed the page with no error boundary to catch it (see
+  // components/InsightList.tsx's matching render-side hardening — kept
+  // even after this fix, since it's the last line of defense for whatever
+  // shape deviation shows up next). Coercing here means a future deviation
+  // never reaches the DB at all. Mutates result in place (same pattern as
+  // every other result.* mutation in this function) so the immediate API
+  // response is clean too, not just the saved row.
+  result.strengths = normalizeInsightArray(result.strengths);
+  result.concerns = normalizeInsightArray(result.concerns);
 
   const insert = await supabase
     .from("screenings")
