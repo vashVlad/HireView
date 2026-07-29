@@ -101,6 +101,22 @@ export function ResumeUploader({ files, onFilesChange }: ResumeUploaderProps) {
         </p>
       )}
 
+      {/* Added 2026-07-29 (Vlad: "the limit... is not mentioned anywhere,
+          make sure that after three uploaded resumes the recruiter gets a
+          warning with the limit") — the cap itself and the drop-zone
+          caption above already existed (2026-07-20, see MAX_FILES's
+          comment), and the amber overflow message above already covers
+          trying to add a 4th+ file. The gap: landing on exactly MAX_FILES
+          with no overflow attempt gave zero explicit feedback — just the
+          small gray caption, easy to miss. This fires the moment the cap is
+          reached, distinct from (and not shown alongside) the overflow
+          message above. */}
+      {overflowCount === 0 && files.length === MAX_FILES && (
+        <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+          You've reached the limit of {MAX_FILES} resumes per screening batch. Screen these, then add more.
+        </p>
+      )}
+
       {files.length > 0 && (
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
