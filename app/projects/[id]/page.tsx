@@ -16,6 +16,7 @@ import { ScoreBadge } from "@/components/ScoreBadge";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { SiteHeader } from "@/components/SiteHeader";
 import { StatusStageControl } from "@/components/StatusStageControl";
+import { TransferControl } from "@/components/TransferControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
   CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
@@ -1038,9 +1039,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
   const [actionsMap, setActionsMap] = useState<Record<number, ScreeningAction[] | "loading">>({});
   // Transfer destination list, Vlad's ask 2026-07-29: projects this
-  // recruiter/admin can transfer a candidate INTO, for StatusStageControl's
-  // gated Transfer picker. GET /api/projects already scopes server-side via
-  // teamIdsFilter (recruiter: own team only, admin: everything — see
+  // recruiter/admin can transfer a candidate INTO, passed down to each
+  // card's TransferControl (components/TransferControl.tsx) — a dedicated
+  // bottom-of-card button as of the same-day redesign, not a status-
+  // dropdown option anymore. GET /api/projects already scopes server-side
+  // via teamIdsFilter (recruiter: own team only, admin: everything — see
   // lib/auth.ts) — the client just filters to active projects and excludes
   // the current one. Supersedes the old passive "Moved to X" badge
   // (findBetterFitMatches, removed) now that Transfer is a real action.
@@ -1217,20 +1220,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     } catch { /* non-fatal */ }
   }
 
-  // Transfer status action, Vlad's ask 2026-07-29. Real async work happens
-  // server-side (a new, separately-scored screening gets created in the
-  // destination project) before the status here actually flips to
-  // "transferred" — so this throws on failure, letting
-  // StatusStageControl's commitTransfer surface the error inline instead of
-  // optimistically flipping status the way handleStatusChange above does.
-  async function handleTransfer(id: number, projectId: number) {
-    const res = await fetch(`/api/history/${id}/transfer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data?.error ?? "Transfer failed");
+  // Transfer status action, Vlad's ask 2026-07-29, redesigned same day into
+  // a dedicated button (components/TransferControl.tsx) after he tested the
+  // original dropdown-driven version and hit a real bug — see that
+  // component's own doc comment for the full flow. TransferControl now owns
+  // every fetch call itself (precheck/preview/commit); this just merges the
+  // final result into local state once it reports success.
+  function handleTransferred(id: number, result: { newScreeningId: number; transferredToProjectId: number; transferredToProjectName: string }) {
     const now = new Date().toISOString();
     setScreenings((prev) =>
       prev.map((s) =>
@@ -1239,9 +1235,9 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               ...s,
               status: "transferred",
               statusUpdatedAt: now,
-              transferredToProjectId: data.transferredToProjectId,
-              transferredToProjectName: data.transferredToProjectName,
-              transferredToScreeningId: data.newScreeningId,
+              transferredToProjectId: result.transferredToProjectId,
+              transferredToProjectName: result.transferredToProjectName,
+              transferredToScreeningId: result.newScreeningId,
             }
           : s
       )
@@ -1677,8 +1673,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     onStageChange={(stage) => handleStageChange(s.id, stage)}
                     archiveReason={s.archiveReason}
                     onArchiveReasonChange={(reason) => handleArchiveReasonChange(s.id, reason)}
-                    transferProjects={transferProjects}
-                    onTransfer={(destProjectId) => handleTransfer(s.id, destProjectId)}
                     transferredToProjectName={s.transferredToProjectName}
                     transferredToScreeningId={s.transferredToScreeningId}
                   />
@@ -1920,6 +1914,23 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     </button>
                     {rescreenErrorId === s.id && (
                       <span className="text-xs text-rose-600 dark:text-rose-400">Rescreen failed — try again.</span>
+                    )}
+                    {/* Transfer, redesigned 2026-07-29 into its own bottom-
+                        of-card button (components/TransferControl.tsx)
+                        after the original status-dropdown-driven version
+                        was tested and hit a real bug — see that
+                        component's doc comment. Hidden once already
+                        transferred; StatusStageControl's pill keeps
+                        showing the read-only destination link from there
+                        on. Also hidden if there's nowhere to transfer INTO
+                        yet (transferProjects still loading, or this is the
+                        only active project this recruiter/admin can see). */}
+                    {s.status !== "transferred" && transferProjects.length > 0 && (
+                      <TransferControl
+                        screeningId={s.id}
+                        transferProjects={transferProjects}
+                        onTransferred={(result) => handleTransferred(s.id, result)}
+                      />
                     )}
                   </div>
                   {confirmDeleteId === s.id ? (

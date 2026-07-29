@@ -1,17 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { transferScreeningToProject } from "@/lib/screenings";
 import { canAccessScreening, canAccessProject, getAuthUser } from "@/lib/auth";
+import type { CandidateResult } from "@/lib/types";
 
 /**
- * Transfer status action — Vlad's ask, 2026-07-29: "add an option to
- * transfer the candidate to another project from the status dropdown."
+ * Transfer status action — Vlad's ask, 2026-07-29, redesigned same day into
+ * a dedicated "Transfer" button (see components/TransferControl.tsx)
+ * instead of a status-dropdown option, after live-testing surfaced two
+ * things: a real partial-failure bug (fixed in transferScreeningToProject's
+ * two-step status update, see its own comment) and a request to optionally
+ * re-score against the destination project instead of always copying the
+ * old score. This route is now step 3 (the actual commit) after
+ * /transfer/precheck and, optionally, /transfer/preview.
+ *
+ * `mode` picks which of the three transferScreeningToProject paths runs:
+ *   - "existing": candidate already has a screening in the destination
+ *     (found by precheck) — requires `existingScreeningId`.
+ *   - "copy": no existing screening, recruiter left the re-score toggle
+ *     off — carries the source's own result over as-is.
+ *   - "rescore": recruiter re-screened via /transfer/preview first —
+ *     requires `previewResult` (that exact response, round-tripped back
+ *     here so this never re-runs scoring a second time).
+ *
  * Deliberately a dedicated route, not folded into the generic PATCH
  * /api/history/[id] (which only ever flips a plain field) — a transfer
- * does real work: re-reads the original resume from storage, creates a
- * genuinely new, separately-scored screening in the destination project,
- * and only then marks the original as "transferred" pointing at it. See
- * transferScreeningToProject() in lib/screenings.ts for the full design
- * rationale.
+ * does real work beyond a field update. See transferScreeningToProject() in
+ * lib/screenings.ts for the full design rationale.
  *
  * Two access checks, matching Vlad's confirmed scoping: canAccessScreening
  * for the SOURCE (same as every other by-id history route) and
@@ -37,6 +51,17 @@ export async function POST(
   if (isNaN(destinationProjectId)) {
     return NextResponse.json({ error: "projectId is required" }, { status: 400 });
   }
+  const mode: "copy" | "rescore" | "existing" =
+    body?.mode === "rescore" || body?.mode === "existing" ? body.mode : "copy";
+  const existingScreeningId = typeof body?.existingScreeningId === "number" ? body.existingScreeningId : undefined;
+  const previewResult: CandidateResult | undefined =
+    mode === "rescore" && body?.previewResult ? body.previewResult : undefined;
+  if (mode === "existing" && existingScreeningId == null) {
+    return NextResponse.json({ error: "existingScreeningId is required for mode \"existing\"" }, { status: 400 });
+  }
+  if (mode === "rescore" && !previewResult) {
+    return NextResponse.json({ error: "previewResult is required for mode \"rescore\"" }, { status: 400 });
+  }
 
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -46,12 +71,21 @@ export async function POST(
   if (!(await canAccessProject(user, destinationProjectId))) {
     return NextResponse.json({ error: "Forbidden — you don't have access to that project" }, { status: 403 });
   }
+  // "existing" mode points at an already-saved screening the recruiter
+  // never explicitly chose to reveal — make sure it's actually one this
+  // user can see, not just any id the client happened to send.
+  if (mode === "existing" && existingScreeningId != null && !(await canAccessScreening(user, existingScreeningId))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   try {
     const { newScreeningId, destinationProjectName } = await transferScreeningToProject({
       screeningId,
       destinationProjectId,
       actingUserId: user.id,
+      mode,
+      existingScreeningId,
+      rescoredResult: previewResult,
     });
     return NextResponse.json({
       newScreeningId,

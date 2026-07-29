@@ -197,102 +197,168 @@ async function findCrossProjectNameMatch(params: {
 
 // ── Transfer to another project (real status action) ────────────────────────
 //
-// Vlad's ask, 2026-07-29: "add an option to transfer the candidate to
-// another project from the status dropdown ... you won't have to show that
-// 'moved to project' chip since it will be shown in the status chip which
-// will make more sense." Supersedes findBetterFitMatches (the passive,
-// live-computed "Moved to X" badge from earlier the same day, removed
-// here) — an explicit, recruiter-driven action makes that guesswork
-// redundant.
+// Vlad's ask, 2026-07-29, then redesigned same day after a real bug report:
+// initial version only lived on the status dropdown, always copied the
+// source screening's own score over verbatim. Vlad tested it, hit a real
+// failure (partial state — see the two-step status update below for the
+// fix), and asked for a different shape: a dedicated "Transfer" button at
+// the bottom of the card, with an option to actually re-screen against the
+// destination project's JD (rather than always just carrying the old score
+// over) when the candidate hasn't already been screened there.
 //
-// Design, per Vlad's own confirmed answers: the ORIGINAL screening stays
-// visible in this project (status becomes "transferred", not deleted —
-// same "toned out, not removed" treatment as Archived), AND a real new
-// screening is created in the destination project using the candidate's
-// EXISTING scored result (not a fresh re-score against the destination's
-// JD — this is "send them over," not "re-screen them there"). Reuses
-// getScreeningResume() to re-read the original resume file from storage,
-// since this is triggered from an already-saved Pipeline card with no
-// File object in memory client-side (unlike the existing Fit Suggestion
-// "Transfer to X" button, which runs during a live Screen tab session and
-// still has the original upload on hand) — this is why this couldn't just
-// reuse app/api/screenings/save-one/route.ts's existing transfer flow.
+// Three modes, chosen by the caller (app/api/history/[id]/transfer/route.ts)
+// based on what the recruiter picked in the new TransferControl popover:
+//   - "existing": the candidate already has a screening in the destination
+//     project (found via findCandidateInProject) — no new row at all, the
+//     original screening just points at that existing one.
+//   - "copy": no existing screening there, recruiter chose not to re-score —
+//     same behavior as the original design, carries the source's own result
+//     over as-is (a new row, but zero extra Claude spend).
+//   - "rescore": recruiter chose to actually screen for the destination
+//     project — `rescoredResult` was already computed by
+//     /transfer/preview (a real scoreCandidate call against the
+//     destination JD, shown to the recruiter before they confirmed) and is
+//     used here instead of the source's own result, so this never re-runs
+//     scoring a second time.
+//
+// Reuses getScreeningResume() to re-read the original resume file from
+// storage for "copy"/"rescore" — triggered from an already-saved Pipeline
+// card with no File object in memory client-side (unlike the existing Fit
+// Suggestion "Transfer to X" button, which runs during a live Screen tab
+// session and still has the original upload on hand) — this is why this
+// couldn't just reuse app/api/screenings/save-one/route.ts's existing
+// transfer flow.
 export async function transferScreeningToProject(params: {
   screeningId: number;
   destinationProjectId: number;
   actingUserId?: string;
+  mode: "copy" | "rescore" | "existing";
+  existingScreeningId?: number;
+  rescoredResult?: CandidateResult;
 }): Promise<{ newScreeningId: number; destinationProjectName: string }> {
   const supabase = getSupabaseClient();
-
-  const { data: row, error } = await supabase
-    .from("screenings")
-    .select(
-      "candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, resume_path, resume_mime_type, linkedin_mode, agency_name"
-    )
-    .eq("id", params.screeningId)
-    .single<{
-      candidate_name: string;
-      file_name: string;
-      score: number;
-      must_have_score: number | null;
-      nice_to_have_score: number | null;
-      summary: string;
-      strengths: string[];
-      concerns: string[];
-      career_trajectory: string | null;
-      recommendation: Recommendation | null;
-      resume_path: string;
-      resume_mime_type: string;
-      linkedin_mode: boolean;
-      agency_name: string | null;
-    }>();
-  if (error || !row) throw error ?? new Error("Screening not found");
-
-  const download = await supabase.storage.from(RESUME_BUCKET).download(row.resume_path);
-  if (download.error) throw download.error;
-  const resumeBuffer = Buffer.from(await download.data.arrayBuffer());
 
   const destinationProject = await getProject(params.destinationProjectId);
   if (!destinationProject) throw new Error("Destination project not found");
 
-  const result: CandidateResult = {
-    fileName: row.file_name,
-    candidateName: row.candidate_name,
-    score: row.score,
-    mustHaveScore: row.must_have_score ?? undefined,
-    niceToHaveScore: row.nice_to_have_score ?? undefined,
-    summary: row.summary,
-    strengths: row.strengths,
-    concerns: row.concerns,
-    careerTrajectory: row.career_trajectory ?? undefined,
-    recommendation: row.recommendation ?? "decline",
-  };
+  let newScreeningId: number;
 
-  const { id: newScreeningId } = await saveScreening({
-    result,
-    jobDescription: destinationProject.jobDescription,
-    resumeFile: resumeBuffer,
-    resumeMimeType: row.resume_mime_type,
-    linkedInMode: row.linkedin_mode,
-    agencyName: row.agency_name ?? undefined,
-    projectId: params.destinationProjectId,
-    userId: params.actingUserId,
-    scoreThreshold: destinationProject.scoreThreshold,
-    actingUserId: params.actingUserId,
-    teamId: destinationProject.teamId ?? null,
-  });
+  if (params.mode === "existing") {
+    if (params.existingScreeningId == null) throw new Error("existingScreeningId required for mode \"existing\"");
+    newScreeningId = params.existingScreeningId;
+  } else {
+    const { data: row, error } = await supabase
+      .from("screenings")
+      .select(
+        "candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, resume_path, resume_mime_type, linkedin_mode, agency_name"
+      )
+      .eq("id", params.screeningId)
+      .single<{
+        candidate_name: string;
+        file_name: string;
+        score: number;
+        must_have_score: number | null;
+        nice_to_have_score: number | null;
+        summary: string;
+        strengths: string[];
+        concerns: string[];
+        career_trajectory: string | null;
+        recommendation: Recommendation | null;
+        resume_path: string;
+        resume_mime_type: string;
+        linkedin_mode: boolean;
+        agency_name: string | null;
+      }>();
+    if (error || !row) throw error ?? new Error("Screening not found");
 
-  const { error: updateErr } = await supabase
-    .from("screenings")
-    .update({
-      status: "transferred",
-      transferred_to_project_id: params.destinationProjectId,
-      transferred_to_screening_id: newScreeningId,
-    })
-    .eq("id", params.screeningId);
-  if (updateErr) throw updateErr;
+    const download = await supabase.storage.from(RESUME_BUCKET).download(row.resume_path);
+    if (download.error) throw download.error;
+    const resumeBuffer = Buffer.from(await download.data.arrayBuffer());
+
+    const result: CandidateResult =
+      params.mode === "rescore" && params.rescoredResult
+        ? params.rescoredResult
+        : {
+            fileName: row.file_name,
+            candidateName: row.candidate_name,
+            score: row.score,
+            mustHaveScore: row.must_have_score ?? undefined,
+            niceToHaveScore: row.nice_to_have_score ?? undefined,
+            summary: row.summary,
+            strengths: row.strengths,
+            concerns: row.concerns,
+            careerTrajectory: row.career_trajectory ?? undefined,
+            recommendation: row.recommendation ?? "decline",
+          };
+
+    const saved = await saveScreening({
+      result,
+      jobDescription: destinationProject.jobDescription,
+      resumeFile: resumeBuffer,
+      resumeMimeType: row.resume_mime_type,
+      linkedInMode: row.linkedin_mode,
+      agencyName: row.agency_name ?? undefined,
+      projectId: params.destinationProjectId,
+      userId: params.actingUserId,
+      scoreThreshold: destinationProject.scoreThreshold,
+      actingUserId: params.actingUserId,
+      teamId: destinationProject.teamId ?? null,
+    });
+    newScreeningId = saved.id;
+  }
+
+  // Two-step update, split deliberately — round-43's first version did this
+  // as one combined update and Vlad hit exactly the failure this avoids:
+  // the destination screening got created successfully, but the single
+  // update (status + the two migration-gated pointer columns) then threw
+  // because supabase-migration-transfer-to-project.sql hadn't been run yet
+  // ("column does not exist"), which surfaced as "Transfer failed" to the
+  // recruiter even though a real copy now silently existed in the
+  // destination project. Splitting it means the plain-text `status` flip
+  // (needs no migration) always lands even if the pointer columns can't
+  // yet be written — no more silent partial state.
+  await updateScreeningStatus(params.screeningId, "transferred", params.actingUserId);
+  try {
+    const { error: pointerErr } = await supabase
+      .from("screenings")
+      .update({
+        transferred_to_project_id: params.destinationProjectId,
+        transferred_to_screening_id: newScreeningId,
+      })
+      .eq("id", params.screeningId);
+    if (pointerErr) throw pointerErr;
+  } catch {
+    // Best-effort — see comment above. Status is already correctly
+    // "transferred" regardless; only the destination link is missing until
+    // the migration runs, same graceful-degradation contract as
+    // enrichTransferInfo() below.
+  }
 
   return { newScreeningId, destinationProjectName: destinationProject.name };
+}
+
+// Cheap, no-Claude-call check for whether this candidate (by normalized
+// name) already has a screening sitting in the destination project —
+// powers TransferControl's precheck step, so re-screening is only ever
+// offered when there's genuinely nothing to reuse yet. Project-scoped
+// (not team-scoped like findCrossProjectNameMatch), since this is checking
+// one specific destination the recruiter already picked, not surfacing a
+// candidate-wide search.
+export async function findCandidateInProject(
+  candidateName: string,
+  projectId: number
+): Promise<{ screeningId: number; score: number } | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("id, candidate_name, score")
+    .eq("project_id", projectId)
+    .returns<{ id: number; candidate_name: string; score: number }[]>();
+  if (error || !data) return null;
+
+  const target = normalizeCandidateName(candidateName);
+  const match = data.find((row) => normalizeCandidateName(row.candidate_name) === target);
+  return match ? { screeningId: match.id, score: match.score } : null;
 }
 
 // Isolated, best-effort enrichment for the three transfer fields above —
