@@ -21,8 +21,15 @@ type Mode = "copy" | "rescore" | "existing";
  *   project (precheck), that score is shown immediately — no Claude call
  *   spent re-deriving something already known.
  * - If THIS screening has already been transferred somewhere, that's
- *   mentioned right here (a small link, same spot the "Transfer" button
- *   would occupy) instead of the whole control disappearing.
+ *   mentioned right here (the button's own label, plus a note + view link
+ *   inside the popover) instead of the whole control disappearing — and
+ *   the control STAYS fully usable, so transferring again to a different
+ *   project is a normal, supported flow (Vlad's ask, 2026-07-29: "when I
+ *   try to press transfer to another project it doesn't do anything" —
+ *   an earlier version hard-stopped here with a plain, non-reopenable
+ *   link). The backend needs no changes to support this: every call
+ *   already overwrites the pointer columns and re-sets status, whether
+ *   this is the first transfer or the third.
  * - No separate "Confirm transfer" step after screening — Vlad's ask:
  *   "I assume during the screening the candidate is being transferred
  *   already so there's no need for the confirm transfer button." Each path
@@ -149,26 +156,6 @@ export function TransferControl({
     await commitTransfer("rescore", result);
   }
 
-  // Already transferred — mention it right here instead of hiding this
-  // control with no trace. Not an interactive re-transfer flow (none
-  // exists yet), just a small link matching where the Transfer button
-  // would otherwise sit.
-  if (alreadyTransferred) {
-    return (
-      <Link
-        href={alreadyTransferred.screeningId != null ? `/candidates/${alreadyTransferred.screeningId}` : "#"}
-        onClick={(e) => e.stopPropagation()}
-        title={`Already transferred to "${alreadyTransferred.projectName ?? "another project"}"`}
-        className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sky-50 px-3.5 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-400 dark:hover:bg-sky-500/20"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M17 8l4 4-4 4M3 12h18" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        Transferred to {alreadyTransferred.projectName ?? "another project"}
-      </Link>
-    );
-  }
-
   const hasExisting = precheck !== "idle" && precheck !== "loading" && precheck !== "error";
   const previewReady = preview !== "idle" && preview !== "loading" && preview !== "error";
 
@@ -180,18 +167,38 @@ export function TransferControl({
           if (open) reset();
           setOpen((o) => !o);
         }}
+        title={alreadyTransferred ? `Already transferred to "${alreadyTransferred.projectName ?? "another project"}" — click to transfer somewhere else` : undefined}
         className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sky-50 px-3.5 py-1.5 text-sm font-medium text-sky-700 transition-colors hover:bg-sky-100 dark:bg-sky-500/10 dark:text-sky-400 dark:hover:bg-sky-500/20"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M17 8l4 4-4 4M3 12h18" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        Transfer
+        {alreadyTransferred ? `Transferred to ${alreadyTransferred.projectName ?? "another project"}` : "Transfer"}
       </button>
 
       {open && (
         <div className="absolute bottom-full left-0 z-10 mb-2 w-72 rounded-xl border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+          {/* Vlad's ask, 2026-07-29: clicking this used to do nothing once
+              a screening was already transferred — the control used to
+              hard-stop and render a plain, non-reopenable Link instead of
+              this popover. Now it stays fully usable afterward too: this
+              note just adds context (where it currently is, with a way to
+              view it) above the same picker, so transferring again to a
+              DIFFERENT project is a normal, supported flow — the backend
+              already re-points the pointer columns and status on every
+              call, nothing DB-side needed to allow this. */}
+          {alreadyTransferred && (
+            <p className="mb-2 flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+              Currently transferred to <span className="font-semibold text-zinc-700 dark:text-zinc-200">{alreadyTransferred.projectName ?? "another project"}</span>
+              {alreadyTransferred.screeningId != null && (
+                <Link href={`/candidates/${alreadyTransferred.screeningId}`} onClick={(e) => e.stopPropagation()} className="underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200">
+                  · View
+                </Link>
+              )}
+            </p>
+          )}
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Transfer to project
+            {alreadyTransferred ? "Transfer to a different project" : "Transfer to project"}
           </p>
           <select
             value={projectId}
