@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -21,62 +21,140 @@ function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "lin
   return "applicant";
 }
 
+// Stacked-by-source bars, added 2026-07-27 (Vlad's ask: "combine sourced/
+// applied/agency [into] the main funnel... so it's easier to track stages
+// for those sources with the main funnel stages") — replaces the old flat
+// single-color bar. Each stage's segment widths are proportional to that
+// stage's own bySource split (not the overall max), so within one bar the
+// three colors always show that stage's actual source mix; segment order
+// (Applied, Sourced, Agency) and colors match the legend above and the old
+// standalone SourceSplit component this replaces.
+//
+// Hover tooltip, added 2026-07-27 (Vlad's ask: "an interactive field that
+// pops up when I put a mouseover the funnel rows") — replaces the native
+// `title` attribute (slow to appear, unstyled, can't show more than one line
+// well) with a real on-hover popover, same pattern as this page's own
+// ActivityLine tooltip on the Analytics page (hoveredIdx state, absolute-
+// positioned box, role="tooltip"). Shows the stage's total plus the exact
+// per-source breakdown and each source's share of that stage.
+//
+// Follows the cursor's exact x position, added 2026-07-27 (Vlad's follow-up:
+// "have it shown on exact mouse position") — tracked via onMouseMove's
+// nativeEvent.offsetX (relative to the bar container itself, since the
+// listener is bound directly on it), clamped so the w-56 tooltip can't run
+// past either edge of that row's own width. Vertical position stays pinned
+// just above the bar (bottom-full) rather than also following Y — the bar is
+// only 28px tall, so tracking Y added jitter without adding anything useful.
+const TOOLTIP_HALF_WIDTH = 112; // half of w-56 (224px)
+
 function StageBar({ stages }: { stages: FunnelData["stages"] }) {
+  const [hover, setHover] = useState<{ key: string; x: number } | null>(null);
   const max = Math.max(...stages.map((s) => s.count), 1);
+
+  function updateHoverX(key: string, e: MouseEvent<HTMLDivElement>) {
+    const width = e.currentTarget.clientWidth;
+    const x = Math.min(Math.max(e.nativeEvent.offsetX, TOOLTIP_HALF_WIDTH), Math.max(width - TOOLTIP_HALF_WIDTH, TOOLTIP_HALF_WIDTH));
+    setHover({ key, x });
+  }
+
   return (
     <div className="flex flex-col gap-3">
-      {stages.map((s) => (
-        <div key={s.key} className="flex items-center gap-3">
-          <span className="w-32 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.label}</span>
-          <div className="relative h-7 flex-1 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
+      {stages.map((s) => {
+        const barWidthPct = Math.max((s.count / max) * 100, s.count > 0 ? 2 : 0);
+        const inboundPct = s.count > 0 ? (s.bySource.inbound / s.count) * 100 : 0;
+        const outboundPct = s.count > 0 ? (s.bySource.outbound / s.count) * 100 : 0;
+        const agencyPct = s.count > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
+        const isHovered = hover?.key === s.key;
+        return (
+          <div key={s.key} className="flex items-center gap-3">
+            <span className="w-32 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.label}</span>
             <div
-              className="h-full rounded-lg bg-violet-500 dark:bg-violet-600 transition-all"
-              style={{ width: `${Math.max((s.count / max) * 100, s.count > 0 ? 2 : 0)}%` }}
-            />
+              className="relative h-7 flex-1 overflow-visible rounded-lg bg-zinc-100 dark:bg-zinc-800"
+              onMouseEnter={(e) => updateHoverX(s.key, e)}
+              onMouseMove={(e) => updateHoverX(s.key, e)}
+              onMouseLeave={() => setHover(null)}
+            >
+              <div className="h-full overflow-hidden rounded-lg">
+                <div className="flex h-full rounded-lg transition-all" style={{ width: `${barWidthPct}%` }}>
+                  {/* Colors updated 2026-07-27 (Vlad's ask) — gray/LinkedIn-blue/orange
+                      everywhere a source is shown, not just here; see SourceIcon.tsx's
+                      header comment for the full token list and reasoning. */}
+                  {s.bySource.inbound > 0 && <div className="h-full bg-zinc-400 dark:bg-zinc-500" style={{ width: `${inboundPct}%` }} />}
+                  {s.bySource.outbound > 0 && <div className="h-full bg-[#0A66C2]" style={{ width: `${outboundPct}%` }} />}
+                  {s.bySource.agency > 0 && <div className="h-full bg-orange-500" style={{ width: `${agencyPct}%` }} />}
+                </div>
+              </div>
+              {isHovered && (
+                <div
+                  role="tooltip"
+                  className="pointer-events-none absolute bottom-full z-20 mb-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-3 text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                  style={{ left: hover.x }}
+                >
+                  <p className="mb-1.5">
+                    <span className="font-semibold text-zinc-800 dark:text-zinc-100">
+                      {s.label} — {s.count.toLocaleString()}
+                    </span>
+                    {s.conversionFromPrevious != null && (
+                      <span className="block font-normal text-zinc-400 dark:text-zinc-500">{s.conversionFromPrevious}% of previous</span>
+                    )}
+                  </p>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-zinc-400 dark:bg-zinc-500" /> Applied
+                      </span>
+                      <span className="tabular-nums">
+                        {s.bySource.inbound.toLocaleString()} ({Math.round(inboundPct)}%)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-[#0A66C2]" /> Sourced (LinkedIn)
+                      </span>
+                      <span className="tabular-nums">
+                        {s.bySource.outbound.toLocaleString()} ({Math.round(outboundPct)}%)
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-orange-500" /> Agency
+                      </span>
+                      <span className="tabular-nums">
+                        {s.bySource.agency.toLocaleString()} ({Math.round(agencyPct)}%)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <span className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
+              {s.count.toLocaleString()}
+            </span>
+            <span className="w-14 shrink-0 text-right text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
+              {s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—"}
+            </span>
           </div>
-          <span className="w-14 shrink-0 text-right text-sm font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
-            {s.count.toLocaleString()}
-          </span>
-          <span className="w-14 shrink-0 text-right text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
-            {s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—"}
-          </span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-// Three-way source split — Agency added 2026-07-20 (Vlad's ask) alongside
-// Applied/Sourced (LinkedIn). Green (Applied) and red (Agency) match the
-// SourceIcon fills used elsewhere on this page and on ResultCard/All
-// Candidates/Pipeline; violet (Sourced/LinkedIn) is this bar's own accent,
-// distinct from the LinkedIn-brand-blue SourceIcon uses for that same source.
-function SourceSplit({ split }: { split: FunnelData["sourceSplit"] }) {
-  const total = split.inbound + split.outbound + split.agency;
-  const inboundPct = total > 0 ? Math.round((split.inbound / total) * 100) : 0;
-  const outboundPct = total > 0 ? Math.round((split.outbound / total) * 100) : 0;
-  const agencyPct = total > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
+// Small color legend for StageBar's segments — shown once above the funnel
+// instead of repeating labels on every row. Same colors/order as the old
+// standalone SourceSplit section this replaces.
+function SourceLegend() {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex h-3 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-        <div className="h-full bg-green-500" style={{ width: `${inboundPct}%` }} />
-        <div className="h-full bg-violet-500" style={{ width: `${outboundPct}%` }} />
-        <div className="h-full bg-red-500" style={{ width: `${agencyPct}%` }} />
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-        <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Applied
-          <span className="font-semibold tabular-nums">{split.inbound.toLocaleString()}</span>
-        </span>
-        <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> Sourced (LinkedIn)
-          <span className="font-semibold tabular-nums">{split.outbound.toLocaleString()}</span>
-        </span>
-        <span className="flex items-center gap-2 text-zinc-600 dark:text-zinc-300">
-          <span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Agency
-          <span className="font-semibold tabular-nums">{split.agency.toLocaleString()}</span>
-        </span>
-      </div>
+    <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+      <span className="flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-zinc-400 dark:bg-zinc-500" /> Applied
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-[#0A66C2]" /> Sourced (LinkedIn)
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-orange-500" /> Agency
+      </span>
     </div>
   );
 }
@@ -261,7 +339,8 @@ export default function FunnelViewPage() {
                   <select
                     value={selectedProjectId}
                     onChange={(e) => setSelectedProjectId(e.target.value === "" ? "" : Number(e.target.value))}
-                    className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                    title={selectedProjectId !== "" ? (roleOptions.find((p) => p.projectId === selectedProjectId)?.projectName ?? "All roles") : "All roles"}
+                    className="w-32 truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
                   >
                     <option value="">All roles</option>
                     {roleOptions.map((project) => (
@@ -303,6 +382,12 @@ export default function FunnelViewPage() {
                 </h2>
                 <span className="text-xs text-zinc-400 dark:text-zinc-500">count · % of previous stage</span>
               </div>
+              {/* Source legend, added 2026-07-27 — each bar below is now
+                  itself split by source (see StageBar), replacing the old
+                  standalone "Sourced vs. Applied" section. */}
+              <div className="mb-4">
+                <SourceLegend />
+              </div>
               {activeRecruiters.length > 0 && (
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-medium text-zinc-400 dark:text-zinc-500">
@@ -330,24 +415,6 @@ export default function FunnelViewPage() {
                 </p>
               ) : (
                 <StageBar stages={activeStages} />
-              )}
-              {activeArchivedOrRejected > 0 && (
-                <p className="mt-4 border-t border-zinc-100 pt-4 text-xs text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
-                  {activeArchivedOrRejected.toLocaleString()} candidate{activeArchivedOrRejected === 1 ? "" : "s"} archived or
-                  rejected along the way — excluded from the bars above, counted at whichever stage they last reached.
-                </p>
-              )}
-            </div>
-
-            {/* Source split */}
-            <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-              <h2 className="mb-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                Sourced vs. Applied {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}
-              </h2>
-              {activeSourceSplit.inbound + activeSourceSplit.outbound + activeSourceSplit.agency === 0 ? (
-                <p className="py-2 text-center text-sm text-zinc-400">No data yet.</p>
-              ) : (
-                <SourceSplit split={activeSourceSplit} />
               )}
             </div>
 
@@ -409,10 +476,10 @@ export default function FunnelViewPage() {
                             title={c.source === "agency" ? `Agency: ${c.agencyName ?? "—"}` : undefined}
                             className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
                               c.source === "outbound"
-                                ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-400"
+                                ? "bg-[#0A66C2]/10 text-[#0A66C2] dark:bg-[#0A66C2]/20 dark:text-[#5B9BD5]"
                                 : c.source === "agency"
-                                ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
-                                : "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400"
+                                ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
+                                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-500/20 dark:text-zinc-400"
                             }`}
                           >
                             <SourceIcon type={toSourceIconType(c.source)} agencyName={c.agencyName} size={11} showApplicant />

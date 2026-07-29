@@ -59,6 +59,7 @@ interface ScreeningRow {
   archive_reason: string | null;
   agency_name: string | null;
   user_id: string | null;
+  batch_id: string | null;
   created_at: string;
 }
 
@@ -100,6 +101,7 @@ function rowToRecord(row: ScreeningRow): ScreeningRecord {
     ...(row.archive_reason ? { archiveReason: row.archive_reason } : {}),
     ...(row.agency_name ? { agencyName: row.agency_name } : {}),
     ...(row.user_id != null ? { recruiterId: row.user_id } : {}),
+    ...(row.batch_id != null ? { batchId: row.batch_id } : {}),
     createdAt: row.created_at,
   };
 }
@@ -176,21 +178,57 @@ async function findCrossProjectNameMatch(params: {
   candidateName: string;
   excludeProjectId: number;
   excludeScreeningId: number;
-}): Promise<{ screeningId: number; projectId: number | null } | null> {
+}): Promise<{ screeningId: number; projectId: number | null; score: number } | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("screenings")
-    .select("id, candidate_name, project_id")
+    .select("id, candidate_name, project_id, score")
     .eq("team_id", params.teamId)
     .neq("id", params.excludeScreeningId)
-    .returns<{ id: number; candidate_name: string; project_id: number | null }[]>();
+    .returns<{ id: number; candidate_name: string; project_id: number | null; score: number }[]>();
   if (error || !data) return null;
 
   const target = normalizeCandidateName(params.candidateName);
   const match = data.find(
     (row) => row.project_id !== params.excludeProjectId && normalizeCandidateName(row.candidate_name) === target
   );
-  return match ? { screeningId: match.id, projectId: match.project_id } : null;
+  return match ? { screeningId: match.id, projectId: match.project_id, score: match.score } : null;
+}
+
+// ── Cross-project candidate lookup (Fit Suggestion pre-check) ───────────────
+//
+// Vlad's ask, 2026-07-28: before spending a Claude call re-scoring a
+// candidate against another project (the Cross-Project Fit Suggestion, see
+// app/api/cross-project-fit/route.ts and its /gate sibling), check for free
+// whether they're already screened there — if so there's nothing to
+// suggest, so skip scoring that project entirely and just mention it
+// instead. Same normalizeCandidateName comparison as
+// findCrossProjectNameMatch above, just returning "which of these
+// projectIds already have them" instead of a single best match. Scoped to
+// an explicit project list the caller already team-scoped (via
+// listProjects(teamIds)), so no team_id filter is needed here.
+export async function findProjectsWithCandidate(params: {
+  candidateName: string;
+  projectIds: number[];
+}): Promise<Set<number>> {
+  const { candidateName, projectIds } = params;
+  if (projectIds.length === 0) return new Set();
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("project_id, candidate_name")
+    .in("project_id", projectIds)
+    .returns<{ project_id: number | null; candidate_name: string }[]>();
+  if (error || !data) return new Set();
+
+  const target = normalizeCandidateName(candidateName);
+  const matched = new Set<number>();
+  for (const row of data) {
+    if (row.project_id != null && normalizeCandidateName(row.candidate_name) === target) {
+      matched.add(row.project_id);
+    }
+  }
+  return matched;
 }
 
 // ── Rejection history (system-wide, any recruiter) ──────────────────────────
@@ -314,8 +352,20 @@ export async function saveScreening(params: {
    * (a fingerprinting failure must never block the screening from saving).
    */
   fingerprint?: ResumeFingerprint | null;
+  /**
+   * Groups screenings saved together in one screening run — a plain
+   * client-generated UUID, written unconditionally on every save once wired
+   * in (same "always write, never conditional" pattern as agencyName above
+   * — see that field's comment). REQUIRES
+   * supabase-migration-batch-id.sql to have run FIRST: once
+   * app/api/screen-resumes/route.ts starts passing this on every call (see
+   * that file's do-not-touch exception, 2026-07-28), every screening save
+   * would throw if the column doesn't exist yet. Added for the durable
+   * /projects/[id]/batches/[batchId] page — Vlad's ask, 2026-07-28.
+   */
+  batchId?: string;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId } = params;
   const supabase = getSupabaseClient();
 
   // Real bug found 2026-07-20 (Vlad: "FunnelView didn't save the recruiter
@@ -404,6 +454,7 @@ export async function saveScreening(params: {
       resume_mime_type: resumeMimeType,
       linkedin_mode: linkedInMode ?? false,
       agency_name: agencyName ?? null,
+      batch_id: batchId ?? null,
       project_id: projectId ?? null,
       user_id: actingUser?.id ?? userId ?? null,
       team_id: teamId,
@@ -599,6 +650,7 @@ export async function saveScreening(params: {
       // (e.g. a third project) still shows both.
       if (crossNameMatch && crossNameMatch.screeningId !== result.historyAlertMatchId) {
         result.crossProjectNameMatchScreeningId = crossNameMatch.screeningId;
+        result.crossProjectNameMatchScore = crossNameMatch.score;
         if (crossNameMatch.projectId != null) {
           result.crossProjectNameMatchProjectId = crossNameMatch.projectId;
           const matchedProject = await getProject(crossNameMatch.projectId).catch(() => null);
@@ -615,6 +667,14 @@ export async function saveScreening(params: {
 
 // ── List ───────────────────────────────────────────────────────────────────
 
+// batch_id is deliberately NOT in this shared select — see the
+// [[feedback_migration_sequencing]] rule (global memory vault): adding a new
+// column to SCREENING_COLUMNS before its migration is confirmed run has
+// caused two real outages (candidates vanishing entirely, 2026-07-09 and
+// 2026-07-10). listScreeningsByBatch() below uses its own isolated select
+// instead, so the new batch-results page can fail gracefully on its own if
+// the migration hasn't run yet, without touching Pipeline/All Candidates/
+// every other hot path that reads through this constant.
 const SCREENING_COLUMNS =
   "id, candidate_name, file_name, score, must_have_score, nice_to_have_score, summary, strengths, concerns, career_trajectory, recommendation, status, status_updated_at, job_description, resume_mime_type, linkedin_mode, flagged, flag_note, notes, lever_url, credibility, photo_url, linkedin_pdf_path, interview_questions, project_id, duplicate_flag, duplicate_match_id, history_alert_type, history_alert_match_id, name_match_id, previous_status, archive_reason, agency_name, user_id, created_at";
 
@@ -716,6 +776,33 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
   return attachRecruiterEmails(await enrichHistoryAlerts((data ?? []).map(rowToRecord)));
 }
 
+/**
+ * Screenings saved together in one screening run — powers the durable
+ * /projects/[id]/batches/[batchId] page (Vlad's ask, 2026-07-28). Its own
+ * isolated select (SCREENING_COLUMNS + batch_id) rather than reusing the
+ * shared SCREENING_COLUMNS constant — see that constant's comment. This
+ * means if supabase-migration-batch-id.sql hasn't run yet, only this one
+ * function fails (caught by the API route, surfaced as a normal error to
+ * just this page) instead of breaking Pipeline/All Candidates/every other
+ * page that reads through the shared constant.
+ *
+ * projectId is required, not just batchId — a UUID is already effectively
+ * unguessable, but scoping to the project it claims to belong to is a
+ * cheap extra correctness check and matches the URL shape.
+ */
+export async function listScreeningsByBatch(projectId: number, batchId: string): Promise<ScreeningRecord[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select(`${SCREENING_COLUMNS}, batch_id`)
+    .eq("project_id", projectId)
+    .eq("batch_id", batchId)
+    .order("score", { ascending: false })
+    .returns<ScreeningRow[]>();
+  if (error) throw error;
+  return attachRecruiterEmails(await enrichHistoryAlerts((data ?? []).map(rowToRecord)));
+}
+
 // ── Get resume ─────────────────────────────────────────────────────────────
 
 export async function getScreeningResume(
@@ -778,6 +865,21 @@ export async function updateScreening(
      */
     linkedInMode?: boolean;
     agencyName?: string;
+    /**
+     * Rescore fields, added 2026-07-27 (Vlad's ask: "add a rescreen button on
+     * actual pipeline cards") — app/api/history/[id]/rescreen/route.ts is the
+     * only caller. Deliberately excludes candidateName, fileName, and status:
+     * a rescore refreshes the scoring output against the current JD/
+     * calibration library, it doesn't re-identify the candidate or move them
+     * off whatever stage a recruiter already parked them on.
+     */
+    score?: number;
+    mustHaveScore?: number;
+    niceToHaveScore?: number;
+    summary?: string;
+    strengths?: string[];
+    concerns?: string[];
+    recommendation?: Recommendation;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -805,6 +907,13 @@ export async function updateScreening(
   // (see decisions-log.md, 2026-07-20) — same column already wired into
   // saveScreening()'s INSERT unconditionally, so it's already a live column.
   if (fields.agencyName !== undefined) update.agency_name = fields.agencyName || null;
+  if (fields.score !== undefined) update.score = fields.score;
+  if (fields.mustHaveScore !== undefined) update.must_have_score = fields.mustHaveScore;
+  if (fields.niceToHaveScore !== undefined) update.nice_to_have_score = fields.niceToHaveScore;
+  if (fields.summary !== undefined) update.summary = fields.summary;
+  if (fields.strengths !== undefined) update.strengths = fields.strengths;
+  if (fields.concerns !== undefined) update.concerns = fields.concerns;
+  if (fields.recommendation !== undefined) update.recommendation = fields.recommendation;
   if (Object.keys(update).length === 0) return;
 
   // Attribution needs the "before" value for status/flagged — everything else
@@ -841,6 +950,9 @@ export async function updateScreening(
     }
     if (fields.credibility !== undefined) {
       await logAction({ screeningId: id, userId: actorUserId, actionType: "credibility_check" });
+    }
+    if (fields.score !== undefined) {
+      await logAction({ screeningId: id, userId: actorUserId, actionType: "rescreen" });
     }
   }
 }

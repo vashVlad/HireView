@@ -40,6 +40,17 @@ export interface FunnelStageCount {
   count: number;
   /** Percentage of the immediately preceding stage's count. Null for the first stage. */
   conversionFromPrevious: number | null;
+  /**
+   * Same stage, split by source — added 2026-07-27 (Vlad's ask: "combine
+   * sourced/applied/agency [into] the main funnel... so it's easier to track
+   * stages for those sources with the main funnel stages"). Always sums to
+   * exactly `count`, since it's computed by re-running the same stage
+   * predicate against each source's own candidate subset (see
+   * lib/funnelview/data.ts's computeStages). Replaces the old standalone
+   * "Sourced vs. Applied" section, which only ever showed one blended total
+   * with no per-stage breakdown.
+   */
+  bySource: FunnelSourceSplit;
 }
 
 export interface FunnelSourceSplit {

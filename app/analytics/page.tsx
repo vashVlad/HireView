@@ -15,6 +15,8 @@ interface AnalyticsData {
   byRecruiter: { userId: string; email: string; count: number }[];
   recentActivity: { date: string; count: number; avgScore: number }[];
   recruiterList: { id: string; email: string; role: string }[];
+  /** Added 2026-07-27 (Vlad's ask) — powers the project filter below, alongside recruiterId. */
+  projectList: { id: number; name: string }[];
 }
 
 // Matches the stat-card pattern from the admin/users redesign: soft accent
@@ -112,6 +114,11 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recruiterId, setRecruiterId] = useState("");
+  // Project filter, added 2026-07-27 (Vlad's ask: "an option to choose a
+  // project and a recruiter so it shows statistics for a specific recruiter
+  // working on the specific project") — combines with recruiterId below,
+  // same pattern (empty string = no filter).
+  const [projectId, setProjectId] = useState("");
 
   // Default date range: last 90 days
   const defaultFrom = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
@@ -124,6 +131,7 @@ export default function AnalyticsPage() {
     setError(null);
     const params = new URLSearchParams({ from, to });
     if (recruiterId) params.set("recruiterId", recruiterId);
+    if (projectId) params.set("projectId", projectId);
     const res = await fetch(`/api/analytics?${params}`);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -133,7 +141,7 @@ export default function AnalyticsPage() {
     }
     setData(await res.json());
     setLoading(false);
-  }, [from, to, recruiterId]);
+  }, [from, to, recruiterId, projectId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -149,12 +157,20 @@ export default function AnalyticsPage() {
           title="Analytics"
           subtitle="Team-wide screening activity. Admin only."
           action={
-            <div className="flex flex-wrap items-center gap-2">
+            // Back in PageHeader's action slot (right side of the icon/title),
+            // 2026-07-27 (Vlad's ask, after two other layouts didn't land) —
+            // one row: Recruiter, Project, From, To. Selects capped at w-32 +
+            // truncate so a long name/email can't blow out the row (full
+            // value still available via the title tooltip); date inputs at
+            // their natural width (an earlier attempt to force-equal-width
+            // via flex-1/w-0 squeezed the date value into the calendar icon).
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
               {data && data.recruiterList.length > 1 && (
                 <select
                   value={recruiterId}
                   onChange={(e) => setRecruiterId(e.target.value)}
-                  className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                  title={data.recruiterList.find((r) => r.id === recruiterId)?.email ?? "All recruiters"}
+                  className="w-32 truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
                 >
                   <option value="">All recruiters</option>
                   {data.recruiterList.map((r) => (
@@ -164,9 +180,24 @@ export default function AnalyticsPage() {
                   ))}
                 </select>
               )}
+              {data && data.projectList.length > 1 && (
+                <select
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  title={data.projectList.find((p) => String(p.id) === projectId)?.name ?? "All projects"}
+                  className="w-32 truncate rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                >
+                  <option value="">All projects</option>
+                  {data.projectList.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
                 className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" />
-              <span className="text-zinc-400">→</span>
+              <span className="text-zinc-400">&#x2192;</span>
               <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
                 className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300" />
             </div>

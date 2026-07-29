@@ -9,7 +9,7 @@ import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
-import { ResultCard, type FitSuggestion } from "@/components/ResultCard";
+import { ResultCard, type FitSuggestion, type AlreadyInProject } from "@/components/ResultCard";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -80,6 +80,7 @@ function formatActionText(a: ScreeningAction, candidateName: string): string {
     case "unflagged": return `removed the flag from ${candidateName}`;
     case "note": return `added a note on ${candidateName}`;
     case "credibility_check": return `ran a credibility check on ${candidateName}`;
+    case "rescreen": return `rescreened ${candidateName}`;
     default: return `updated ${candidateName}`;
   }
 }
@@ -252,6 +253,56 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
 }
 
 // ── Screen tab ─────────────────────────────────────────────────────────────
+//
+// Batch results persistence (sessionStorage), added 2026-07-28 (Vlad's ask):
+// after screening a batch and clicking "View full result" on an
+// already-screened candidate's card, pressing Back should return to that
+// exact batch — not a blank Screen form. ScreenTab is conditionally rendered
+// by its parent (`{tab === "screen" && <ScreenTab .../>}`), so it fully
+// unmounts on any tab switch; the results view previously lived only in this
+// component's React state with no URL of its own, so switching tabs and back
+// (even without ever leaving the page) already lost it before this fix, not
+// just the round trip through the candidate page. sessionStorage, keyed per
+// project, survives both: read once synchronously on mount (via the lazy
+// useState initializers below, before first paint) and written whenever the
+// results view's data changes. Cleared on "Screen more" (handleReset).
+//
+// Raw File objects can't be persisted (not JSON-serializable) — restored
+// existingMatches entries carry `file: undefined`, which
+// AlreadyScreenedCard already handles gracefully (disables "Re-screen
+// anyway" with a "try re-uploading" tooltip, the same pattern ResultCard's
+// fit-suggestion/transfer actions already use for a missing original file).
+// Everything else (viewing scores, status changes, "View full result",
+// cross-project fit on the real results) is unaffected — those act on saved
+// ids, not the raw file.
+function batchStorageKey(projectId: number): string {
+  return `hv:screen-batch:${projectId}`;
+}
+
+interface PersistedBatch {
+  results: CandidateResult[];
+  existingMatches: { match: CheckExistingResult }[];
+  existingCandidates: ExistingCandidateRef[];
+  nameMatches: [string, ExistingCandidateRef][];
+  rejectionHistoryBaseline: RejectionHistoryEntry[];
+  rejectionMatches: [string, RejectionHistoryEntry][];
+  fileErrors: ScreenResumesError[];
+  /** See the currentBatchId state below and app/projects/[id]/batches/[batchId]/page.tsx. */
+  batchId?: string;
+}
+
+function readPersistedBatch(projectId: number): PersistedBatch | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(batchStorageKey(projectId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedBatch;
+    if (!Array.isArray(parsed.results) || parsed.results.length === 0) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   project: Project;
@@ -270,11 +321,35 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
    */
   onScreeningFieldSaved?: (id: number, fields: Partial<ScreeningRecord>) => void;
 }) {
+  // Read once per mount — see the block comment above this component for
+  // why this exists. `initialBatch` is resolved before any of the state
+  // below initializes, so each field below can restore from it in one pass.
+  const [initialBatch] = useState(() => readPersistedBatch(project.id));
+
   const [files, setFiles] = useState<File[]>([]);
-  const [screenView, setScreenView] = useState<ScreenView>("form");
-  const [results, setResults] = useState<CandidateResult[]>([]);
-  const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>([]);
+  const [screenView, setScreenView] = useState<ScreenView>(() => (initialBatch ? "results" : "form"));
+  const [results, setResults] = useState<CandidateResult[]>(() => initialBatch?.results ?? []);
+  const [fileErrors, setFileErrors] = useState<ScreenResumesError[]>(() => initialBatch?.fileErrors ?? []);
   const [formError, setFormError] = useState<string | null>(null);
+  // Durable, database-backed link to this batch (/projects/[id]/batches/
+  // [batchId]) — set from POST /api/screen-resumes's response once
+  // something new is actually scored. Vlad's ask, 2026-07-28: a real
+  // cross-device/shareable-with-a-teammate URL, since sessionStorage (this
+  // component's own results-view restore, above) only ever lives in one
+  // browser tab.
+  // NOT cleared by handleReset()/"Screen more" (2026-07-28 fix — Claude Code
+  // found the original behavior lost the link the moment "Screen more" was
+  // clicked: if that next round turned out to be all-duplicate skips, no new
+  // batchId is ever generated to replace it, so the duplicate cards'
+  // "View full result" -> Back had nowhere real to go even though the prior
+  // batch still exists in the DB. Only overwritten below (handleSubmit, once
+  // a real new batchId comes back) — never cleared, so it always points at
+  // the most recent batch that actually has content, across any number of
+  // "Screen more" rounds. This is client-side-only React state either way,
+  // so the fix has the same multi-team/cross-device story as the DB-backed
+  // page itself — nothing here is shared across users, only the URL it
+  // points to is.
+  const [currentBatchId, setCurrentBatchId] = useState<string | undefined>(() => initialBatch?.batchId);
   // Files that matched an existing screening in this project via the free
   // pre-check (app/api/screen-resumes/check-existing) — set aside before
   // ever reaching the scoring route, keyed by the original File so a
@@ -292,22 +367,29 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // covered more reliably by the post-score name-match check below
   // (existingCandidates/nameMatches), which compares actual extracted
   // identity instead of a filename. See decisions-log.md, 2026-07-15.
+  // `file` is optional — undefined right after a sessionStorage restore
+  // (raw File objects aren't JSON-serializable), see the block comment
+  // above this component. AlreadyScreenedCard already handles that case.
   const [existingMatches, setExistingMatches] = useState<
-    { match: CheckExistingResult; file: File }[]
-  >([]);
+    { match: CheckExistingResult; file?: File }[]
+  >(() => initialBatch?.existingMatches ?? []);
   // Candidates already saved in this project, by normalized name — the one
   // signal exact-content hashing can't catch (two different resume files
   // for the same person). Populated during the pre-check, compared against
   // AFTER scoring since candidate name doesn't exist before then.
-  const [existingCandidates, setExistingCandidates] = useState<ExistingCandidateRef[]>([]);
+  const [existingCandidates, setExistingCandidates] = useState<ExistingCandidateRef[]>(() => initialBatch?.existingCandidates ?? []);
   // fileName -> matched existing candidate, purely informational (scoring
   // already happened by the time a name match is knowable).
-  const [nameMatches, setNameMatches] = useState<Map<string, ExistingCandidateRef>>(new Map());
+  const [nameMatches, setNameMatches] = useState<Map<string, ExistingCandidateRef>>(
+    () => new Map(initialBatch?.nameMatches ?? [])
+  );
   // System-wide (any project, any team) prior rejections, by normalized
   // name — Teti's request, 2026-07-10. Same pattern as nameMatches, just
   // sourced from checkData.rejectionHistory instead of existingCandidates.
-  const [rejectionHistoryBaseline, setRejectionHistoryBaseline] = useState<RejectionHistoryEntry[]>([]);
-  const [rejectionMatches, setRejectionMatches] = useState<Map<string, RejectionHistoryEntry>>(new Map());
+  const [rejectionHistoryBaseline, setRejectionHistoryBaseline] = useState<RejectionHistoryEntry[]>(() => initialBatch?.rejectionHistoryBaseline ?? []);
+  const [rejectionMatches, setRejectionMatches] = useState<Map<string, RejectionHistoryEntry>>(
+    () => new Map(initialBatch?.rejectionMatches ?? [])
+  );
   // Source picker, 2026-07-20 (Vlad's ask): three mutually-exclusive types —
   // Applicant (default), LinkedIn (existing linkedin_mode, unchanged scoring
   // behavior via isLinkedInMode below), Agency (new, carries a free-text
@@ -344,6 +426,30 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       .catch(() => { if (!cancelled) setOtherActiveCount(0); });
     return () => { cancelled = true; };
   }, [screenView, project.id]);
+
+  // Keep sessionStorage in sync with the results view — see the block
+  // comment above this component. Fires on every relevant change (status
+  // updates, a forced rescore, etc.), not just once at batch-completion
+  // time, so a restored view stays consistent with anything the recruiter
+  // did before navigating away and back.
+  useEffect(() => {
+    if (screenView !== "results" || results.length === 0) return;
+    const toPersist: PersistedBatch = {
+      results,
+      existingMatches: existingMatches.map(({ match }) => ({ match })),
+      existingCandidates,
+      nameMatches: [...nameMatches.entries()],
+      rejectionHistoryBaseline,
+      rejectionMatches: [...rejectionMatches.entries()],
+      fileErrors,
+      batchId: currentBatchId,
+    };
+    try {
+      window.sessionStorage.setItem(batchStorageKey(project.id), JSON.stringify(toPersist));
+    } catch {
+      // Storage full/unavailable — non-fatal, just means Back won't restore this time.
+    }
+  }, [screenView, results, existingMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, fileErrors, currentBatchId, project.id]);
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -389,7 +495,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // how it's always been called — this function is the only thing that
   // decides which files reach it, so /api/screen-resumes and scoreCandidate
   // stay completely untouched either way.
-  async function scoreFiles(filesToScore: File[], signal?: AbortSignal): Promise<{ results: CandidateResult[]; errors: ScreenResumesError[] }> {
+  async function scoreFiles(filesToScore: File[], signal?: AbortSignal): Promise<{ results: CandidateResult[]; errors: ScreenResumesError[]; batchId?: string }> {
     const formData = new FormData();
     formData.set("jobDescription", project.jobDescription);
     formData.set("roleContext", project.name);
@@ -407,6 +513,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     return {
       results: Array.isArray(data.results) ? data.results : [],
       errors: Array.isArray(data.errors) ? data.errors : [],
+      batchId: typeof data.batchId === "string" ? data.batchId : undefined,
     };
   }
 
@@ -456,9 +563,9 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
         }
       }
 
-      const { results: scored, errors } = newFiles.length > 0
+      const { results: scored, errors, batchId } = newFiles.length > 0
         ? await scoreFiles(newFiles, controller.signal)
-        : { results: [], errors: [] };
+        : { results: [], errors: [], batchId: undefined as string | undefined };
 
       setResults(scored);
       setFileErrors(errors);
@@ -467,6 +574,11 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       setNameMatches(findNameMatches(scored, candidates));
       setRejectionHistoryBaseline(rejections);
       setRejectionMatches(findRejectionMatches(scored, rejections));
+      // Durable "come back to this batch" link — only set when this call
+      // actually scored something new (batchId is undefined when every file
+      // in the upload was a duplicate skip, matching newFiles.length > 0
+      // above). See the block comment above ScreenTab.
+      if (batchId) setCurrentBatchId(batchId);
       setScreenView("results");
       if (scored.length > 0) onScreeningsSaved();
     } catch (err) {
@@ -554,6 +666,15 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     setExistingMatches([]);
     setExistingCandidates([]);
     setNameMatches(new Map());
+    setRejectionHistoryBaseline([]);
+    setRejectionMatches(new Map());
+    // currentBatchId is deliberately NOT cleared here — see its declaration
+    // above for why (2026-07-28 fix).
+    try {
+      window.sessionStorage.removeItem(batchStorageKey(project.id));
+    } catch {
+      // non-fatal
+    }
   }
 
   if (screenView === "results") {
@@ -568,10 +689,27 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               {fileErrors.length > 0 && ` · ${fileErrors.length} file${fileErrors.length !== 1 ? "s" : ""} failed`}
             </p>
           </div>
-          <button type="button" onClick={handleReset}
-            className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
-            Screen more
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Durable, bookmarkable/shareable link to this exact batch —
+                Vlad's ask, 2026-07-28. Only present once at least one new
+                candidate was actually scored (see currentBatchId above). */}
+            {currentBatchId && (
+              <Link
+                href={`/projects/${project.id}/batches/${currentBatchId}`}
+                className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Link to this batch
+              </Link>
+            )}
+            <button type="button" onClick={handleReset}
+              className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
+              Screen more
+            </button>
+          </div>
         </div>
 
         {fileErrors.length > 0 && (
@@ -599,7 +737,21 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
             // more) is assumed to not need it. Below-threshold candidates
             // (the original case) are still fully covered, since anything
             // under threshold is also under threshold + 15.
-            const eligibleForFitCheck = result.score < project.scoreThreshold + FIT_CHECK_MARGIN;
+            //
+            // Suppressed entirely, 2026-07-27, when a cross-project NAME
+            // match already fired (Vlad: "don't try to screen again for
+            // that already screened project... don't show looking for a
+            // better fit — just show that it was already screened"). If we
+            // already positively know this exact candidate was screened for
+            // a specific other project (crossProjectNameMatchScreeningId,
+            // set in lib/screenings.ts), there's no point spending a Claude
+            // call guessing which OTHER project might fit better — we
+            // already know exactly where they exist. ResultCard shows the
+            // "Also screened in [project]" mention instead (unconditional
+            // on crossProjectNameMatchScreeningId, independent of this flag).
+            const eligibleForFitCheck =
+              result.score < project.scoreThreshold + FIT_CHECK_MARGIN
+              && result.crossProjectNameMatchScreeningId == null;
             return (
             <ResultCard
               key={result.fileName}
@@ -616,20 +768,24 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               onCheckCrossProjectPromise={eligibleForFitCheck ? () => {
                 const run = async () => {
                   const file = files.find((f) => f.name === result.fileName);
-                  if (!file) return false;
+                  if (!file) return { promising: false, alreadyIn: [] as AlreadyInProject[] };
                   const fd = new FormData();
                   fd.set("resumeFile", file);
                   fd.set("currentProjectId", String(project.id));
+                  fd.set("candidateName", result.candidateName);
                   const res = await fetch("/api/cross-project-fit/gate", { method: "POST", body: fd });
-                  if (!res.ok) return false;
+                  if (!res.ok) return { promising: false, alreadyIn: [] as AlreadyInProject[] };
                   const data = await res.json().catch(() => null);
-                  return Boolean(data?.promising);
+                  return {
+                    promising: Boolean(data?.promising),
+                    alreadyIn: (data?.alreadyIn ?? []) as AlreadyInProject[],
+                  };
                 };
                 // Chained onto the same shared queue as onFindBetterFit below —
                 // gate checks and real checks never run concurrently either.
                 const chained = fitQueueRef.current.then(run, run);
                 fitQueueRef.current = chained.catch(() => {});
-                return chained as Promise<boolean>;
+                return chained as Promise<{ promising: boolean; alreadyIn: AlreadyInProject[] }>;
               } : undefined}
               onFindBetterFit={eligibleForFitCheck ? () => {
                 const run = async () => {
@@ -638,19 +794,23 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
                   const fd = new FormData();
                   fd.set("resumeFile", file);
                   fd.set("currentProjectId", String(project.id));
+                  fd.set("candidateName", result.candidateName);
                   const res = await fetch("/api/cross-project-fit", { method: "POST", body: fd });
                   if (!res.ok) {
                     const body = await res.json().catch(() => null);
                     throw new Error(body?.error ?? "Could not check other roles");
                   }
                   const data = await res.json();
-                  return data.suggestion as FitSuggestion | null;
+                  return {
+                    suggestion: (data.suggestion ?? null) as FitSuggestion | null,
+                    alreadyIn: (data.alreadyIn ?? []) as AlreadyInProject[],
+                  };
                 };
                 // Chain onto the shared queue so this call waits for anything
                 // already in flight, regardless of which card triggered it.
                 const chained = fitQueueRef.current.then(run, run);
                 fitQueueRef.current = chained.catch(() => {});
-                return chained as Promise<FitSuggestion | null>;
+                return chained as Promise<{ suggestion: FitSuggestion | null; alreadyIn: AlreadyInProject[] }>;
               } : undefined}
               onTransferToProject={eligibleForFitCheck ? async (suggestion: FitSuggestion) => {
                 const file = files.find((f) => f.name === result.fileName);
@@ -683,6 +843,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               onForceRescore={handleForceRescore}
               onStatusChange={handleStatusChange}
               onArchiveReasonChange={handleArchiveReasonChange}
+              returnTo={currentBatchId ? `/projects/${project.id}/batches/${currentBatchId}` : undefined}
             />
           ))}
         </ul>
@@ -715,10 +876,12 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
 
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
         <div className="flex flex-wrap gap-1.5">
+          {/* Colors updated 2026-07-27 (Vlad's ask) — gray/LinkedIn-blue/orange
+              everywhere a source is shown; see SourceIcon.tsx's header comment. */}
           <button type="button" onClick={() => setSourceType("applicant")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "applicant"
-                ? "bg-green-600 text-white"
+                ? "bg-zinc-500 text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
             <SourceIcon type="applicant" showApplicant size={14} />
@@ -727,7 +890,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
           <button type="button" onClick={() => setSourceType("linkedin")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "linkedin"
-                ? "bg-violet-600 text-white"
+                ? "bg-[#0A66C2] text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
             <SourceIcon type="linkedin" size={14} />
@@ -736,7 +899,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
           <button type="button" onClick={() => setSourceType("agency")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "agency"
-                ? "bg-red-600 text-white"
+                ? "bg-orange-500 text-white"
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
             <SourceIcon type="agency" size={14} />
@@ -756,7 +919,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
             placeholder="Agency name…"
             value={agencyNameInput}
             onChange={(e) => setAgencyNameInput(e.target.value)}
-            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm placeholder-zinc-400 focus:border-red-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
+            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm placeholder-zinc-400 focus:border-orange-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
           />
         )}
       </div>
@@ -840,6 +1003,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   }, [expandedId]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Rescreen, added 2026-07-27 (Vlad's ask) — re-runs scoring for an
+  // already-saved candidate in place. rescreenErrorId is cleared on the next
+  // attempt (success or failure) rather than ever building up a list, since
+  // only the most recent attempt's outcome is worth showing inline.
+  const [rescreeningId, setRescreeningId] = useState<number | null>(null);
+  const [rescreenErrorId, setRescreenErrorId] = useState<number | null>(null);
   const [pendingFlagId, setPendingFlagId] = useState<number | null>(null);
   const [pendingFlagNote, setPendingFlagNote] = useState("");
   // Editable source, 2026-07-20 (Vlad's ask): clicking the SourceIcon on a
@@ -1047,6 +1216,30 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     finally {
       setDeletingId(null);
       setConfirmDeleteId(null);
+    }
+  }
+
+  // Re-runs scoring for an already-saved candidate against the project's
+  // CURRENT job description + calibration library, and updates this same
+  // screening row in place (app/api/history/[id]/rescreen/route.ts) — added
+  // 2026-07-27 (Vlad's ask). Only the scoring fields come back; status,
+  // notes, flags, credibility, etc. are untouched both server- and
+  // client-side, so a rescore never disturbs where the recruiter already
+  // has this candidate parked.
+  async function handleRescreen(id: number) {
+    setRescreeningId(id);
+    setRescreenErrorId(null);
+    try {
+      const res = await fetch(`/api/history/${id}/rescreen`, { method: "POST" });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      if (data.screening) {
+        setScreenings((prev) => prev.map((s) => (s.id === id ? { ...s, ...data.screening } : s)));
+      }
+    } catch {
+      setRescreenErrorId(id);
+    } finally {
+      setRescreeningId(null);
     }
   }
 
@@ -1310,6 +1503,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     className="shrink-0 rounded-full transition-opacity hover:opacity-70">
                     <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} showApplicant />
                   </button>
+                  {/* Visible agency name, added 2026-07-27 (Vlad's ask) —
+                      matches the same addition on ResultCard.tsx and
+                      app/candidates/page.tsx, so all three source-badge
+                      surfaces stay in sync (same convention as the LinkedIn
+                      badge consistency fix, 2026-07-17). */}
+                  {pendingSourceId !== s.id && getSourceType(s) === "agency" && s.agencyName && (
+                    <span className="shrink-0 truncate text-[11px] font-medium text-orange-600 dark:text-orange-400">
+                      {s.agencyName}
+                    </span>
+                  )}
                   {pendingSourceId === s.id && (
                     <div className="flex shrink-0 items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <div className="mx-0.5 h-4 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
@@ -1342,12 +1545,12 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                             else setPendingSourceId(null);
                           }}
                           placeholder="Agency name…"
-                          className="w-28 rounded-full border border-red-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-red-500 dark:border-red-500/40 dark:bg-zinc-900 dark:text-zinc-100"
+                          className="w-28 rounded-full border border-orange-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-orange-500 dark:border-orange-500/40 dark:bg-zinc-900 dark:text-zinc-100"
                         />
                       ) : (
                         <button type="button" title="Agency"
                           onClick={() => setPendingSourceType("agency")}
-                          className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-red-400" : "opacity-40 hover:opacity-100"}`}>
+                          className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-orange-400" : "opacity-40 hover:opacity-100"}`}>
                           <SourceIcon type="agency" agencyName={s.agencyName} size={13} />
                         </button>
                       )}
@@ -1573,20 +1776,50 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <button type="button"
-                    onClick={() => {
-                      const sw = window.screen.availWidth;
-                      const sh = window.screen.availHeight;
-                      const halfW = Math.floor(sw / 2);
-                      window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
-                    }}
-                    className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                    View resume
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button type="button"
+                      onClick={() => {
+                        const sw = window.screen.availWidth;
+                        const sh = window.screen.availHeight;
+                        const halfW = Math.floor(sw / 2);
+                        window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+                      }}
+                      className="inline-flex w-fit items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      View resume
+                    </button>
+                    {/* Rescreen, added 2026-07-27 (Vlad: "add a rescreen
+                        button on actual pipeline cards somewhere at the
+                        bottom") — re-runs scoring for this ALREADY-SAVED
+                        candidate against the project's current job
+                        description + calibration library and updates this
+                        same screening record in place (see
+                        app/api/history/[id]/rescreen/route.ts). Distinct
+                        from AlreadyScreenedCard's "Re-screen anyway", which
+                        only ever handles a pre-save duplicate upload and
+                        creates a NEW screening row — this one is for a
+                        recruiter who wants a stale score refreshed (JD
+                        changed, more calibration examples since) without
+                        losing the candidate's stage/notes/history. Status is
+                        deliberately left untouched by the route itself. */}
+                    <button type="button"
+                      disabled={rescreeningId === s.id}
+                      onClick={() => handleRescreen(s.id)}
+                      className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={rescreeningId === s.id ? "animate-spin" : ""}>
+                        <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      {rescreeningId === s.id ? "Rescreening…" : "Rescreen"}
+                    </button>
+                    {rescreenErrorId === s.id && (
+                      <span className="text-xs text-rose-600 dark:text-rose-400">Rescreen failed — try again.</span>
+                    )}
+                  </div>
                   {confirmDeleteId === s.id ? (
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-zinc-500 dark:text-zinc-400">Delete this record?</span>

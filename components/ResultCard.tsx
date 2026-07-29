@@ -25,6 +25,18 @@ export interface FitSuggestion {
   jobDescription: string;
 }
 
+/**
+ * A project the candidate is already screened in — excluded from cross-
+ * project fit scoring entirely (nothing to suggest there) and surfaced as a
+ * plain mention instead. Vlad's ask, 2026-07-28: "if the person already
+ * exists in one of the projects just simply mention that and don't screen
+ * it again."
+ */
+export interface AlreadyInProject {
+  projectId: number;
+  projectName: string;
+}
+
 export function ResultCard({
   result,
   rank,
@@ -65,9 +77,9 @@ export function ResultCard({
    * 50 threshold here, 80 elsewhere, never checked under the old rule).
    */
   eligibleForFitCheck?: boolean;
-  onFindBetterFit?: () => Promise<FitSuggestion | null>;
+  onFindBetterFit?: () => Promise<{ suggestion: FitSuggestion | null; alreadyIn: AlreadyInProject[] }>;
   /** Cheap Claude classification call — decides whether this candidate is worth auto-firing the full cross-project check for. */
-  onCheckCrossProjectPromise?: () => Promise<boolean>;
+  onCheckCrossProjectPromise?: () => Promise<{ promising: boolean; alreadyIn: AlreadyInProject[] }>;
   onTransferToProject?: (suggestion: FitSuggestion) => Promise<void>;
   /** Count of other active projects across every team this recruiter belongs to. undefined = not checked yet, 0 = nothing to suggest against. */
   otherActiveCount?: number;
@@ -111,6 +123,7 @@ export function ResultCard({
   const [checkingFit, setCheckingFit] = useState(false);
   const [fitChecked, setFitChecked] = useState(false);
   const [fitSuggestion, setFitSuggestion] = useState<FitSuggestion | null>(null);
+  const [alreadyInProjects, setAlreadyInProjects] = useState<AlreadyInProject[]>([]);
   const [fitError, setFitError] = useState<string | null>(null);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
@@ -143,8 +156,9 @@ export function ResultCard({
     setCheckingFit(true);
     setFitError(null);
     try {
-      const suggestion = await onFindBetterFit();
+      const { suggestion, alreadyIn } = await onFindBetterFit();
       setFitSuggestion(suggestion);
+      if (alreadyIn.length > 0) setAlreadyInProjects(alreadyIn);
       setFitChecked(true);
     } catch (err) {
       setFitError(err instanceof Error ? err.message : "Could not check other roles");
@@ -192,7 +206,9 @@ export function ResultCard({
       setCheckingGate(true);
       let promising = false;
       try {
-        promising = await onCheckCrossProjectPromise();
+        const gateResult = await onCheckCrossProjectPromise();
+        promising = gateResult.promising;
+        if (gateResult.alreadyIn.length > 0) setAlreadyInProjects(gateResult.alreadyIn);
       } catch {
         promising = false;
       }
@@ -270,6 +286,17 @@ export function ResultCard({
               </Link>
             )}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} />
+            {/* Visible agency name, added 2026-07-27 (Vlad's ask: "also show
+                agency name when it's given") — previously only surfaced as a
+                hover tooltip via SourceIcon's title (sourceLabelWithDetail),
+                easy to miss. Red to match the agency icon/badge's existing
+                accent color elsewhere in this app (the agency-name input
+                field's border, the Agency picker's selected-ring color). */}
+            {getSourceType(result) === "agency" && result.agencyName && (
+              <span className={`shrink-0 font-medium text-orange-600 dark:text-orange-400 ${solo ? "text-sm" : "text-xs"}`}>
+                {result.agencyName}
+              </span>
+            )}
           </div>
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
@@ -334,6 +361,10 @@ export function ResultCard({
                 ) : (
                   <span className="font-medium">&#x201C;another project&#x201D;</span>
                 )}
+                {/* Score, added 2026-07-27 (Vlad's ask) — the matched
+                    screening's own score, not this one's, so a recruiter
+                    knows at a glance how that other pass went. */}
+                {result.crossProjectNameMatchScore != null && <> &#x2014; Scored {result.crossProjectNameMatchScore}</>}
               </>
             ) : (
               result.fileName
@@ -345,7 +376,8 @@ export function ResultCard({
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
           <div className="flex items-center justify-between gap-2">
             <p className="text-center flex-1">
-              A different resume file for a candidate named <strong>{nameMatch.candidateName}</strong> already exists in this project — worth a second look, wasn&#x2019;t caught before scoring.
+              A different resume file for a candidate named <strong>{nameMatch.candidateName}</strong>{" "}
+              already exists in this project — worth a second look, wasn&#x2019;t caught before scoring.
             </p>
             {savedId !== undefined && !nameCompareAssessment && (
               <button type="button" onClick={() => setShowNameCompare((v) => !v)}
@@ -397,7 +429,30 @@ export function ResultCard({
           stronger-fitting open role exists elsewhere. A cheap Claude gate decides
           whether to auto-fire the real check; manual link otherwise. */}
       {eligibleForFitCheck && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
-        <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
+        <div className="mt-3 flex flex-col gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
+          {/* Already-in-project mention, added 2026-07-28 (Vlad's ask): these
+              projects were excluded from scoring entirely (free name-match
+              pre-check, no Claude call spent) since there's nothing to
+              suggest where the candidate already exists — just say so.
+              Shown independently of fitChecked/fitSuggestion below, since it
+              can resolve from either the gate call or the full check. */}
+          {alreadyInProjects.length > 0 && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Already screened in{" "}
+              {alreadyInProjects.map((p, i) => (
+                <span key={p.projectId}>
+                  {i > 0 && ", "}
+                  <Link
+                    href={`/projects/${p.projectId}?tab=pipeline`}
+                    className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                  >
+                    {p.projectName}
+                  </Link>
+                </span>
+              ))}
+              .
+            </p>
+          )}
           {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
           {!fitError && (checkingGate || checkingFit) && (
             <p className="text-xs text-violet-500 dark:text-violet-400">Checking other active roles…</p>

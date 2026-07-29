@@ -4,6 +4,7 @@ import { scoreCandidate } from "@/lib/scoreCandidate";
 import { listProjects } from "@/lib/projects";
 import { getUserTeamIds } from "@/lib/teams";
 import { getAuthUser } from "@/lib/auth";
+import { findProjectsWithCandidate } from "@/lib/screenings";
 import type { CandidateResult } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData();
   const resumeFile = formData.get("resumeFile");
   const currentProjectIdField = formData.get("currentProjectId");
+  const candidateNameField = formData.get("candidateName");
 
   if (!(resumeFile instanceof File)) {
     return NextResponse.json({ error: "resumeFile is required" }, { status: 400 });
@@ -70,10 +72,11 @@ export async function POST(request: NextRequest) {
   const currentProjectId = typeof currentProjectIdField === "string" && currentProjectIdField.trim()
     ? parseInt(currentProjectIdField.trim(), 10) || undefined
     : undefined;
+  const candidateName = typeof candidateNameField === "string" ? candidateNameField.trim() : "";
 
   const teamIds = await getUserTeamIds(user.id);
   if (teamIds.length === 0) {
-    return NextResponse.json({ suggestion: null });
+    return NextResponse.json({ suggestion: null, alreadyIn: [] });
   }
 
   const projects = await listProjects(teamIds);
@@ -82,7 +85,22 @@ export async function POST(request: NextRequest) {
   );
 
   if (candidates.length === 0) {
-    return NextResponse.json({ suggestion: null });
+    return NextResponse.json({ suggestion: null, alreadyIn: [] });
+  }
+
+  // Free (no Claude call) pre-check, Vlad's ask 2026-07-28: don't re-score a
+  // candidate against a project they're already screened in — nothing to
+  // suggest there, so exclude it from scoring and just mention it instead.
+  const alreadyInIds = candidateName
+    ? await findProjectsWithCandidate({ candidateName, projectIds: candidates.map((p) => p.id) })
+    : new Set<number>();
+  const alreadyIn = candidates
+    .filter((p) => alreadyInIds.has(p.id))
+    .map((p) => ({ projectId: p.id, projectName: p.name }));
+  const toScore = candidates.filter((p) => !alreadyInIds.has(p.id));
+
+  if (toScore.length === 0) {
+    return NextResponse.json({ suggestion: null, alreadyIn });
   }
 
   let resumeText: string;
@@ -93,10 +111,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Could not read the resume file" }, { status: 400 });
   }
 
-  // Score against each candidate project, 3 at a time — same concurrency
-  // cap as the primary screening route, for the same rate-limit reason.
-  // The full result + jobDescription ride along so a "Transfer" action can
-  // save directly via /api/screenings/save-one without re-scoring.
+  // Score against each remaining candidate project, 3 at a time — same
+  // concurrency cap as the primary screening route, for the same
+  // rate-limit reason. The full result + jobDescription ride along so a
+  // "Transfer" action can save directly via /api/screenings/save-one
+  // without re-scoring.
   const scored: {
     projectId: number;
     projectName: string;
@@ -106,8 +125,8 @@ export async function POST(request: NextRequest) {
     jobDescription: string;
   }[] = [];
   const CONCURRENCY = 3;
-  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-    const batch = candidates.slice(i, i + CONCURRENCY);
+  for (let i = 0; i < toScore.length; i += CONCURRENCY) {
+    const batch = toScore.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       batch.map(async (project) => {
         try {
@@ -144,5 +163,6 @@ export async function POST(request: NextRequest) {
           jobDescription: best.jobDescription,
         }
       : null,
+    alreadyIn,
   });
 }

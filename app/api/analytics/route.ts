@@ -33,6 +33,13 @@ export async function GET(request: NextRequest) {
   const from = params.get("from");
   const to = params.get("to");
   const recruiterIdFilter = params.get("recruiterId") ?? null;
+  // Project filter, added 2026-07-27 (Vlad's ask: "an option to choose a
+  // project and a recruiter so it shows statistics for a specific recruiter
+  // working on the specific project") — combines with recruiterIdFilter
+  // above via separate .eq() calls, so picking both narrows to exactly that
+  // recruiter's screenings on exactly that project.
+  const projectIdParam = params.get("projectId");
+  const projectIdFilter = projectIdParam ? parseInt(projectIdParam, 10) : null;
 
   // ── Build live screenings query ─────────────────────────────────────────
 
@@ -43,6 +50,9 @@ export async function GET(request: NextRequest) {
   if (from) screeningsQuery = screeningsQuery.gte("created_at", from);
   if (to) screeningsQuery = screeningsQuery.lte("created_at", to + "T23:59:59Z");
   if (recruiterIdFilter) screeningsQuery = screeningsQuery.eq("user_id", recruiterIdFilter);
+  if (projectIdFilter != null && !Number.isNaN(projectIdFilter)) {
+    screeningsQuery = screeningsQuery.eq("project_id", projectIdFilter);
+  }
 
   // ── Run queries in parallel ────────────────────────────────────────────────
 
@@ -162,6 +172,14 @@ export async function GET(request: NextRequest) {
     role: (u.app_metadata?.role as string) ?? "recruiter",
   }));
 
+  // Project list for the filter dropdown, added 2026-07-27 alongside
+  // projectIdFilter above — every project regardless of whether it has any
+  // screenings in the current date range, so switching the date range never
+  // makes a project silently disappear from the dropdown.
+  const projectList = projects
+    .map((p) => ({ id: p.id, name: p.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   return NextResponse.json({
     totalScreened,
     passedToPipeline,
@@ -173,5 +191,6 @@ export async function GET(request: NextRequest) {
     byRecruiter,
     recentActivity,
     recruiterList,
+    projectList,
   });
 }
