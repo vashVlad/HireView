@@ -240,24 +240,14 @@ export function TransferControl({
           {typeof projectId === "number" && precheck === "idle" && (
             <div className="mt-2.5 flex flex-col gap-2">
               {preview === "idle" && (
-                <>
-                  <button
-                    type="button"
-                    disabled={committing}
-                    onClick={handleScreenAndTransfer}
-                    className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Screen &amp; transfer
-                  </button>
-                  <button
-                    type="button"
-                    disabled={committing}
-                    onClick={() => commitTransfer("copy")}
-                    className="text-left text-xs font-medium text-zinc-500 underline decoration-dotted underline-offset-2 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-200"
-                  >
-                    {committing ? "Transferring…" : "Or transfer with the current score as-is"}
-                  </button>
-                </>
+                <button
+                  type="button"
+                  disabled={committing}
+                  onClick={() => commitTransfer("copy")}
+                  className="text-left text-xs font-medium text-zinc-500 underline decoration-dotted underline-offset-2 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  {committing ? "Transferring…" : "Or transfer with the current score as-is"}
+                </button>
               )}
               {preview === "loading" && (
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">Screening…</p>
@@ -295,7 +285,13 @@ export function TransferControl({
             <p className="mt-2 text-xs text-rose-500">{error}</p>
           )}
 
-          <div className="mt-3 flex items-center justify-end">
+          {/* Screen & transfer lives at the bottom of the popover, next to
+              Cancel — Vlad's ask: keep the primary action in the same
+              footer spot the other confirmation buttons used to sit in,
+              rather than up in the middle of the options list. Only shows
+              once a destination with nothing existing there is picked and
+              before a screen is actually in flight/committed. */}
+          <div className="mt-3 flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={() => { setOpen(false); reset(); }}
@@ -303,6 +299,16 @@ export function TransferControl({
             >
               Cancel
             </button>
+            {typeof projectId === "number" && precheck === "idle" && preview === "idle" && (
+              <button
+                type="button"
+                disabled={committing}
+                onClick={handleScreenAndTransfer}
+                className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Screen &amp; transfer
+              </button>
+            )}
           </div>
         </div>
       )}
