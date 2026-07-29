@@ -1512,7 +1512,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       Duplicate detected
                     </button>
                   )}
-                  {s.historyAlertType && (
+                  {/* 2026-07-29 (Vlad's ask): "if the candidate shows (moved
+                      to project) then remove (previously seen)" — the
+                      milder "previously_seen" alert is redundant once
+                      "Moved to X" is already telling the recruiter about a
+                      different project with a stronger match; showing both
+                      was just noise pointing at largely the same idea.
+                      "known_fraud_pattern" is a distinct, more serious
+                      signal (not just "also seen elsewhere") and stays
+                      regardless. */}
+                  {s.historyAlertType && (s.historyAlertType === "known_fraud_pattern" || !betterFitMatches[s.id]) && (
                     <Link
                       href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
                       onClick={(e) => e.stopPropagation()}
