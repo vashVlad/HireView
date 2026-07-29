@@ -337,6 +337,18 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   // cross-device/shareable-with-a-teammate URL, since sessionStorage (this
   // component's own results-view restore, above) only ever lives in one
   // browser tab.
+  // NOT cleared by handleReset()/"Screen more" (2026-07-28 fix — Claude Code
+  // found the original behavior lost the link the moment "Screen more" was
+  // clicked: if that next round turned out to be all-duplicate skips, no new
+  // batchId is ever generated to replace it, so the duplicate cards'
+  // "View full result" -> Back had nowhere real to go even though the prior
+  // batch still exists in the DB. Only overwritten below (handleSubmit, once
+  // a real new batchId comes back) — never cleared, so it always points at
+  // the most recent batch that actually has content, across any number of
+  // "Screen more" rounds. This is client-side-only React state either way,
+  // so the fix has the same multi-team/cross-device story as the DB-backed
+  // page itself — nothing here is shared across users, only the URL it
+  // points to is.
   const [currentBatchId, setCurrentBatchId] = useState<string | undefined>(() => initialBatch?.batchId);
   // Files that matched an existing screening in this project via the free
   // pre-check (app/api/screen-resumes/check-existing) — set aside before
@@ -656,7 +668,8 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     setNameMatches(new Map());
     setRejectionHistoryBaseline([]);
     setRejectionMatches(new Map());
-    setCurrentBatchId(undefined);
+    // currentBatchId is deliberately NOT cleared here — see its declaration
+    // above for why (2026-07-28 fix).
     try {
       window.sessionStorage.removeItem(batchStorageKey(project.id));
     } catch {
