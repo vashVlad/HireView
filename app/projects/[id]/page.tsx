@@ -24,7 +24,7 @@ import type {
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
-import { avatarColor, avatarInitial } from "@/lib/avatarColor";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
 import { getSourceType, type SourceType } from "@/lib/sourceType";
@@ -70,20 +70,6 @@ function formatStatusDate(iso: string) {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function formatActionText(a: ScreeningAction, candidateName: string): string {
-  switch (a.actionType) {
-    case "created": return `screened ${candidateName}`;
-    case "status_change": return `moved ${candidateName} to ${CANDIDATE_STATUS_LABELS[a.toValue as CandidateStatus] ?? a.toValue}`;
-    case "stage_change": return `moved ${candidateName} to ${a.toValue} stage`;
-    case "flagged": return `flagged ${candidateName}`;
-    case "unflagged": return `removed the flag from ${candidateName}`;
-    case "note": return `added a note on ${candidateName}`;
-    case "credibility_check": return `ran a credibility check on ${candidateName}`;
-    case "rescreen": return `rescreened ${candidateName}`;
-    default: return `updated ${candidateName}`;
-  }
 }
 
 // ── Filters tab ────────────────────────────────────────────────────────────
@@ -1880,28 +1866,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 </div>
 
                 {/* ── Attribution timeline ──────────────────────────────── */}
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Activity</p>
-                  {actionsMap[s.id] === undefined || actionsMap[s.id] === "loading" ? (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500">Loading…</p>
-                  ) : (actionsMap[s.id] as ScreeningAction[]).length === 0 ? (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500">No activity recorded yet.</p>
-                  ) : (
-                    <ul className="flex flex-col gap-1.5">
-                      {(actionsMap[s.id] as ScreeningAction[]).map((a) => (
-                        <li key={a.id} className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                          <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(a.userEmail)}`}>
-                            {avatarInitial(a.userEmail)}
-                          </span>
-                          <span>
-                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">{a.userEmail}</span>{" "}
-                            {formatActionText(a, s.candidateName)} on {formatDate(a.createdAt)}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                {/* Extracted 2026-07-29 into components/ActivityTimeline.tsx
+                    so the batch-results page and candidate full page (both
+                    render ResultCard.tsx, neither showed activity before)
+                    get the exact same component, not a second copy. */}
+                <ActivityTimeline actions={actionsMap[s.id]} candidateName={s.candidateName} />
 
                 {/* Calibration feedback */}
                 <div className="flex items-center gap-2">

@@ -53,6 +53,16 @@ const STAGE_TEXT_COLORS: Record<TrackerStage, string> = {
  * actual reason is picked from the second dropdown, at which point both the
  * status and the reason commit together in one step. Picking any other
  * status while this pending state is showing just cancels it normally.
+ *
+ * Every OTHER status/stage change is now gated the same conceptual way, as
+ * of 2026-07-29 (Vlad: status changes "can be accidental" and every one
+ * gets logged to Activity, which "we can avoid"). Picking a value shows it
+ * as pending — the select visually reflects the pick — but neither
+ * `onStatusChange` nor `onStageChange` fires, and nothing is logged, until
+ * an explicit Confirm click. Cancel (or picking a different value) discards
+ * the pending pick with zero side effects. Archived keeps its own existing
+ * gate above untouched (picking a reason already IS its confirm step,
+ * doubling that up with a second Confirm click would be redundant).
  */
 export function StatusStageControl({
   status,
@@ -84,11 +94,31 @@ export function StatusStageControl({
   transferredToScreeningId?: number;
 }) {
   const [pendingArchive, setPendingArchive] = useState(false);
+  // General confirm/cancel gate, 2026-07-29 — see doc comment above. Only
+  // one of these is ever meaningfully set at a time in normal use (a
+  // recruiter changes status OR stage, not both in the same click), but
+  // they're independent so a stray pending stage pick can't get silently
+  // dropped by an unrelated status change or vice versa.
+  const [pendingStatus, setPendingStatus] = useState<CandidateStatus | null>(null);
+  const [pendingStage, setPendingStage] = useState<TrackerStage | null>(null);
+  const hasPendingChange = pendingStatus !== null || pendingStage !== null;
   const gateOnReason = onArchiveReasonChange !== undefined;
-  const displayStatus = pendingArchive ? "archived" : status;
-  const showStage = status === "screening" && !pendingArchive;
+  const displayStatus = pendingArchive ? "archived" : pendingStatus ?? status;
+  const showStage = displayStatus === "screening" && !pendingArchive;
   const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
   const showTransferredLink = status === "transferred" && transferredToScreeningId != null;
+
+  function confirmPending() {
+    if (pendingStatus !== null) onStatusChange(pendingStatus);
+    if (pendingStage !== null) onStageChange(pendingStage);
+    setPendingStatus(null);
+    setPendingStage(null);
+  }
+
+  function cancelPending() {
+    setPendingStatus(null);
+    setPendingStage(null);
+  }
   // "Transferred" is never offered as something to pick FROM another
   // status — it only ever gets set by TransferControl's own commit flow —
   // but if a candidate already IS "transferred", it still needs to appear
@@ -106,12 +136,16 @@ export function StatusStageControl({
         value={displayStatus}
         onChange={(e) => {
           const next = e.target.value as CandidateStatus;
+          if (next === status) { setPendingStatus(null); return; }
           if (next === "archived" && gateOnReason) {
             setPendingArchive(true);
+            setPendingStatus(null);
             return;
           }
           setPendingArchive(false);
-          onStatusChange(next);
+          // Doesn't commit yet — just shows as picked until Confirm. See
+          // the general confirm/cancel gate in this component's doc comment.
+          setPendingStatus(next);
         }}
         className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
       >
@@ -138,15 +172,44 @@ export function StatusStageControl({
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
           <select
-            value={stage ?? ""}
-            onChange={(e) => { if (e.target.value) onStageChange(e.target.value as TrackerStage); }}
-            className={`cursor-pointer appearance-none bg-transparent py-1 pl-1.5 pr-1 outline-none ${stage ? STAGE_TEXT_COLORS[stage] : "opacity-60"}`}
+            value={pendingStage ?? stage ?? ""}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              const next = e.target.value as TrackerStage;
+              setPendingStage(next === stage ? null : next);
+            }}
+            className={`cursor-pointer appearance-none bg-transparent py-1 pl-1.5 pr-1 outline-none ${(pendingStage ?? stage) ? STAGE_TEXT_COLORS[pendingStage ?? stage!] : "opacity-60"}`}
           >
             <option value="" disabled>Stage</option>
             {TRACKER_STAGES.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
+        </>
+      )}
+      {hasPendingChange && (
+        <>
+          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); confirmPending(); }}
+            title="Confirm"
+            className="flex shrink-0 items-center justify-center py-1 pl-1 pr-0.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); cancelPending(); }}
+            title="Cancel"
+            className="flex shrink-0 items-center justify-center py-1 pl-0.5 pr-1 text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </>
       )}
       {showArchiveReason && (
