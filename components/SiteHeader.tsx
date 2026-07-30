@@ -112,22 +112,38 @@ export function SiteHeader({ active }: { active: NavHref }) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200/70 bg-white/85 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-950/85">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-        <Link href="/projects" className="flex items-center gap-3">
+      <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3.5 sm:px-6">
+        {/* Narrow-screen fix, 2026-07-30: this row had no wrap and no
+            fallback — on a phone-width viewport (especially for an admin,
+            with 3 extra nav items) the logo+title, full nav pill, theme
+            toggle, and avatar together are comfortably wider than the
+            screen, with nothing to absorb the overflow. Title hides below
+            `sm` (logo alone still reads as the brand mark) and the nav
+            itself becomes independently horizontally scrollable — the logo
+            and the theme toggle/avatar group on the right both stay
+            `shrink-0` so they're never the thing that gets squeezed.
+            `overflow-y-hidden` alongside `overflow-x-auto` — a real CSS
+            quirk (CSS2.1 §11.1.1: overflow-x non-visible with overflow-y
+            left at its visible default makes the browser compute overflow-y
+            as auto too) meant this pill could grow an unwanted vertical
+            scrollbar from a sub-pixel height rounding, not anything
+            actually worth scrolling. Caught 2026-07-30 on the tabs bar
+            below, same fix applied here for the same reason. */}
+        <Link href="/projects" className="flex shrink-0 items-center gap-3">
           <Logo size={34} />
-          <h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+          <h1 className="hidden text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:block">
             HireView
           </h1>
         </Link>
-        <div className="flex items-center gap-3">
-          <nav className="flex items-center gap-1 rounded-full border border-zinc-200/70 bg-zinc-100/80 p-1 dark:border-zinc-800/60 dark:bg-zinc-900/80">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
+          <nav className="flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden rounded-full border border-zinc-200/70 bg-zinc-100/80 p-1 dark:border-zinc-800/60 dark:bg-zinc-900/80">
             {NAV_ITEMS.map((item) => {
               const isActive = active === item.href;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                  className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
                     isActive
                       ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-50"
                       : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
@@ -140,7 +156,7 @@ export function SiteHeader({ active }: { active: NavHref }) {
 
             {isAdmin && (
               <>
-                <span className="mx-1 h-4 w-px bg-zinc-300 dark:bg-zinc-700" />
+                <span className="mx-1 h-4 w-px shrink-0 bg-zinc-300 dark:bg-zinc-700" />
                 {ADMIN_NAV_ITEMS.map((item) => {
                   const isActive = active === item.href;
                   const showBadge = item.href === "/admin/users" && pendingRequests > 0;
@@ -148,7 +164,7 @@ export function SiteHeader({ active }: { active: NavHref }) {
                     <Link
                       key={item.href}
                       href={item.href}
-                      className={`relative flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                      className={`relative flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
                         isActive
                           ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-50"
                           : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
@@ -167,14 +183,16 @@ export function SiteHeader({ active }: { active: NavHref }) {
               </>
             )}
           </nav>
-          <ThemeToggle />
+          <div className="shrink-0">
+            <ThemeToggle />
+          </div>
 
           {/* User menu — colored-initial avatar, same avatarColor()/
               avatarInitial() pattern already used for team chips and the
               Activity timeline, instead of a generic outline icon. A small
               violet corner dot marks admins, same badge style already used
               on the pending-requests indicator below. */}
-          <div className="relative" ref={menuRef}>
+          <div className="relative shrink-0" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((o) => !o)}
               aria-label="Account menu"
