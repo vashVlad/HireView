@@ -97,6 +97,25 @@ const CREDIBILITY_TOOL = {
         enum: ["clean", "minor_concerns", "significant_concerns"],
         description: "Derive this from the rows, don't judge independently: significant_concerns if at least one row has severity 'material'; minor_concerns if there are discrepancy rows but all are severity 'minor'; clean if there are no discrepancy rows at all.",
       },
+      resolvedConcerns: {
+        type: "array",
+        description:
+          "Only populate when ORIGINAL SCREENING CONCERNS are listed in the prompt below (omit entirely, don't emit an empty array, if none were provided). For each original concern that this cross-reference document actually resolves with CONCRETE evidence, add one entry. Apply the same rigor as discrepancy detection: a concern only counts as resolved if the cross-reference gives specific, checkable information that directly addresses it — e.g. the concern was 'no clear evidence of team leadership' and the LinkedIn profile has multiple recommendations specifically praising the candidate's leadership on a named project, or the concern was 'unexplained 8-month gap' and the cross-reference shows a role that fills that exact gap. Do NOT mark a concern resolved just because the cross-reference doesn't contradict it, generally looks impressive, or is silent on the topic — silence is not resolution. When in doubt, leave it out; under-crediting is the safe direction here, the same way over-flagging a discrepancy as material would be the unsafe direction there.",
+        items: {
+          type: "object",
+          properties: {
+            concern: {
+              type: "string",
+              description: "The exact original concern text this resolves — copy verbatim from the list provided in the prompt, don't paraphrase.",
+            },
+            explanation: {
+              type: "string",
+              description: "One sentence, max 20 words: what specific evidence in the cross-reference resolves this concern.",
+            },
+          },
+          required: ["concern", "explanation"],
+        },
+      },
       linkedInSignals: {
         type: "object" as const,
         description:
@@ -147,14 +166,40 @@ export function computeCredibilityScoreDelta(rows: CredibilityRow[]): number {
   return -Math.min(25, materialCount * 8);
 }
 
+/**
+ * Deterministic, not model-decided — same principle as
+ * computeCredibilityScoreDelta above, applied to the positive side. Added
+ * 2026-07-29, Vlad's ask: if the cross-reference document actually resolves
+ * a concern the original JD-fit screening flagged, the candidate should get
+ * some credit back, not just be exposed to further deductions. Deliberately
+ * smaller magnitude than the deduction side (+5/+15 vs -8/-25) — clearing a
+ * doubt is good news, but shouldn't be as easy to gain points from as a real
+ * discrepancy is to lose them, so a credibility check stays net-cautious by
+ * design rather than becoming an easy way to inflate a score.
+ */
+export function computeCredibilityScoreBonus(resolvedConcerns: { concern: string; explanation: string }[]): number {
+  if (!resolvedConcerns || resolvedConcerns.length === 0) return 0;
+  return Math.min(15, resolvedConcerns.length * 5);
+}
+
 export async function assessCredibility(params: {
   resumeText: string;
   crossRefText?: string;
   roleContext?: string;
   /** Detected server-side via detectLinkedIn() — enables LinkedIn-specific prompting and signal extraction. Phase 2.4. */
   isLinkedIn?: boolean;
+  /**
+   * Concerns the ORIGINAL JD-fit screening (scoreCandidate.ts) flagged for
+   * this candidate, e.g. result.concerns from the initial score. When
+   * provided, the model checks whether the cross-reference document
+   * resolves any of them (see resolvedConcerns in CREDIBILITY_TOOL) and the
+   * resulting scoreDelta can be positive, not just <= 0. Omit or pass an
+   * empty array to skip this — resolvedConcerns is left out of the response
+   * entirely in that case, matching the pre-2026-07-29 behavior exactly.
+   */
+  originalConcerns?: string[];
 }): Promise<CredibilityAssessment> {
-  const { resumeText, crossRefText, roleContext, isLinkedIn } = params;
+  const { resumeText, crossRefText, roleContext, isLinkedIn, originalConcerns } = params;
 
   const roleNote = roleContext
     ? `The recruiter is screening for: ${roleContext}. Use this to contextualize whether the candidate's industry background is relevant.`
@@ -162,6 +207,7 @@ export async function assessCredibility(params: {
 
   const hasCrossRef = Boolean(crossRefText);
   const crossRefLabel = isLinkedIn ? "LinkedIn profile" : "cross-reference document";
+  const hasOriginalConcerns = Boolean(originalConcerns && originalConcerns.length > 0);
 
   const comparisonInstruction = hasCrossRef
     ? `Compare the resume against the ${crossRefLabel} line by line.${isLinkedIn ? " The cross-reference is a LinkedIn profile PDF — see instruction 7 for LinkedIn-specific signals to extract." : " The cross-reference may be a second resume version or any other verification document."}`
@@ -175,11 +221,19 @@ export async function assessCredibility(params: {
     ? `7. Since the cross-reference is a LinkedIn profile PDF, populate linkedInSignals with profile activity signals — NOT skill comparison (the rows above already handle that). Extract: the connection count if visible (e.g. "500+" or "47"), the number of written recommendations received (0 if absent), whether the About/Summary section exists and has meaningful content, and the most recent certification or LinkedIn Learning course date if visible (YYYY-MM). Then derive the activity verdict using these criteria exactly: active = 500+ connections OR 3+ recommendations OR (summary present AND recent cert/course within the last 12 months); minimal = under 100 connections AND 0 recommendations AND no summary; moderate = everything else. An active LinkedIn presence is harder to fabricate and corroborates the resume; a minimal profile on a claimed senior is worth noting but not disqualifying on its own.`
     : "";
 
+  const resolvedConcernsStep = hasOriginalConcerns && hasCrossRef
+    ? `8. The ORIGINAL JD-fit screening flagged these concerns about the candidate:\n${(originalConcerns ?? []).map((c) => `   - ${c}`).join("\n")}\nFor each one the ${crossRefLabel} actually resolves with concrete, specific evidence, add an entry to resolvedConcerns per the tool schema's rules. Apply the same rigor as discrepancy detection — silence on a topic, or the cross-reference merely "not contradicting" a concern, does NOT count as resolving it. When genuinely unsure, leave it out.`
+    : "";
+
+  const originalConcernsNote = hasOriginalConcerns
+    ? "\n\nNote: original screening concerns are listed in instruction 8 below — resolvedConcerns only applies if the cross-reference document is present."
+    : "";
+
   const userContent = `You are a recruiting assistant performing a credibility check on a candidate. This recruiter works in IT staffing/consulting, so staffing-agency-vs-client-site naming patterns are common and expected — do not treat them as suspicious on their own.
 
 ${roleNote}
 
-${comparisonInstruction}
+${comparisonInstruction}${originalConcernsNote}
 
 Your job:
 1. ${hasCrossRef ? `Flag every ${crossRefLabel} field as match, discrepancy (tagged severity: material or minor), or cannot_verify, using the tolerance rules in the tool schema. Be precise about severity — over-flagging stylistic differences as full discrepancies erodes trust in this tool as much as missing a real one does.` : "Skip cross-reference comparison — leave rows empty."}
@@ -189,6 +243,7 @@ Your job:
 5. Read the career trajectory for consistency and signs of inflation.
 6. If the cross-reference document appears to be a second resume version, include resumeDelta describing what changed and whether it looks like honest tailoring or suspicious rearrangement. Otherwise omit resumeDelta.
 ${linkedInStep}
+${resolvedConcernsStep}
 
 Be precise and brief. trajectoryNote and industryNote must be one sentence each — no exceptions. Do not write paragraphs.
 
@@ -216,6 +271,10 @@ ${resumeText}${crossRefSection}`;
   }
 
   const assessment = toolUse.input as CredibilityAssessment;
-  assessment.scoreDelta = computeCredibilityScoreDelta(assessment.rows ?? []);
+  const deduction = computeCredibilityScoreDelta(assessment.rows ?? []);
+  const bonus = computeCredibilityScoreBonus(assessment.resolvedConcerns ?? []);
+  assessment.scoreDeduction = deduction;
+  assessment.scoreBonus = bonus;
+  assessment.scoreDelta = deduction + bonus;
   return assessment;
 }
