@@ -91,13 +91,15 @@ export async function POST(request: NextRequest) {
   // Free (no Claude call) pre-check, Vlad's ask 2026-07-28: don't re-score a
   // candidate against a project they're already screened in — nothing to
   // suggest there, so exclude it from scoring and just mention it instead.
-  const alreadyInIds = candidateName
+  // 2026-07-30: now carries screeningId + score too, so ResultCard can link
+  // straight to that screening and show its score, not just the project name.
+  const alreadyInMap = candidateName
     ? await findProjectsWithCandidate({ candidateName, projectIds: candidates.map((p) => p.id) })
-    : new Set<number>();
+    : new Map<number, { screeningId: number; score: number }>();
   const alreadyIn = candidates
-    .filter((p) => alreadyInIds.has(p.id))
-    .map((p) => ({ projectId: p.id, projectName: p.name }));
-  const toScore = candidates.filter((p) => !alreadyInIds.has(p.id));
+    .filter((p) => alreadyInMap.has(p.id))
+    .map((p) => ({ projectId: p.id, projectName: p.name, ...alreadyInMap.get(p.id)! }));
+  const toScore = candidates.filter((p) => !alreadyInMap.has(p.id));
 
   if (toScore.length === 0) {
     return NextResponse.json({ suggestion: null, alreadyIn });

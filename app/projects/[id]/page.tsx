@@ -25,6 +25,7 @@ import type {
   ExistingCandidateRef, FraudRiskAssessment, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
+import type { CrossProjectMatch } from "@/lib/screenings";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
@@ -1100,6 +1101,28 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     };
   }, [projectId]);
 
+  // "Also screened in X — Scored Y", Vlad's ask 2026-07-30: shown on every
+  // Pipeline card at all times, not gated by score/eligibility like
+  // ResultCard's own already-in mention (see ResultCard.tsx's matching
+  // comment). One batched fetch for the whole tab instead of one per
+  // candidate — see app/api/projects/[id]/cross-project-matches/route.ts.
+  const [crossProjectMatchesMap, setCrossProjectMatchesMap] = useState<Record<number, CrossProjectMatch[]>>({});
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects/${projectId}/cross-project-matches`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        setCrossProjectMatchesMap(data.matches ?? {});
+      })
+      .catch(() => {
+        // Non-fatal — the "Also screened in" line just doesn't show without this.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
   // Lazy-load the attribution timeline the first time a card is expanded.
   useEffect(() => {
     if (expandedId == null || actionsMap[expandedId] !== undefined) return;
@@ -1790,6 +1813,27 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
             {expanded && (
               <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
+
+                {/* ── Also screened in ──────────────────────────────────── */}
+                {/* Standing badge, Vlad's ask 2026-07-30 — plain lines, shown
+                    at the top of the expanded card regardless of score. See
+                    crossProjectMatchesMap's fetch effect above. */}
+                {crossProjectMatchesMap[s.id] && crossProjectMatchesMap[s.id].length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    {crossProjectMatchesMap[s.id].map((m) => (
+                      <p key={m.screeningId} className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Also screened in{" "}
+                        <Link
+                          href={`/candidates/${m.screeningId}`}
+                          className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                        >
+                          {m.projectName}
+                        </Link>
+                        {" "}— Scored {m.score}
+                      </p>
+                    ))}
+                  </div>
+                )}
 
                 {/* ── Career story ──────────────────────────────────────── */}
                 <div>

@@ -467,25 +467,97 @@ async function enrichTransferInfo(records: ScreeningRecord[]): Promise<Screening
 export async function findProjectsWithCandidate(params: {
   candidateName: string;
   projectIds: number[];
-}): Promise<Set<number>> {
+}): Promise<Map<number, { screeningId: number; score: number }>> {
   const { candidateName, projectIds } = params;
-  if (projectIds.length === 0) return new Set();
+  if (projectIds.length === 0) return new Map();
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("screenings")
-    .select("project_id, candidate_name")
+    .select("id, project_id, candidate_name, score")
     .in("project_id", projectIds)
-    .returns<{ project_id: number | null; candidate_name: string }[]>();
-  if (error || !data) return new Set();
+    .returns<{ id: number; project_id: number | null; candidate_name: string; score: number }[]>();
+  if (error || !data) return new Map();
 
   const target = normalizeCandidateName(candidateName);
-  const matched = new Set<number>();
+  const matched = new Map<number, { screeningId: number; score: number }>();
   for (const row of data) {
     if (row.project_id != null && normalizeCandidateName(row.candidate_name) === target) {
-      matched.add(row.project_id);
+      matched.set(row.project_id, { screeningId: row.id, score: row.score });
     }
   }
   return matched;
+}
+
+// ── Cross-project matches (standing Pipeline badge) ──────────────────────
+//
+// Vlad's ask, 2026-07-30: simplify the "Already screened in" mention into a
+// plain line — "Also screened in X — Scored Y" — and show it on every
+// Pipeline card at all times, not just when the on-demand Cross-Project Fit
+// Suggestion flow happens to have populated it (that flow only runs for
+// below-threshold/marginal candidates — see ResultCard's eligibleForFitCheck
+// — and findProjectsWithCandidate above only returns matches for an explicit
+// projectIds list the caller already has in hand). This is a separate,
+// batched, team-wide lookup: one query per Pipeline tab load (not one per
+// candidate), so every card — regardless of score — can show its cross-
+// project matches without spending a Claude call or an extra round trip per
+// card. Same normalizeCandidateName comparison as every other name-match
+// helper in this file; no fingerprint corroboration, since this is a plain
+// informational mention, not a fraud/duplication signal (contrast
+// findCrossProjectNameMatch above, which does corroborate).
+export interface CrossProjectMatch {
+  screeningId: number;
+  projectId: number;
+  projectName: string;
+  score: number;
+}
+
+export async function findCrossProjectMatchesForProject(params: {
+  teamId: number;
+  projectId: number;
+}): Promise<Map<number, CrossProjectMatch[]>> {
+  const { teamId, projectId } = params;
+  const supabase = getSupabaseClient();
+
+  // This project's own candidates — what we're matching against.
+  const { data: ownRows, error: ownError } = await supabase
+    .from("screenings")
+    .select("id, candidate_name")
+    .eq("project_id", projectId)
+    .returns<{ id: number; candidate_name: string }[]>();
+  if (ownError || !ownRows || ownRows.length === 0) return new Map();
+
+  // Every other screening on the same team, in one query.
+  const { data: otherRows, error: otherError } = await supabase
+    .from("screenings")
+    .select("id, candidate_name, project_id, score")
+    .eq("team_id", teamId)
+    .neq("project_id", projectId)
+    .returns<{ id: number; candidate_name: string; project_id: number | null; score: number }[]>();
+  if (otherError || !otherRows || otherRows.length === 0) return new Map();
+
+  const projectIds = [...new Set(otherRows.map((r) => r.project_id).filter((id): id is number => id != null))];
+  const names = await Promise.all(
+    projectIds.map(async (pid) => [pid, (await getProject(pid).catch(() => null))?.name] as const)
+  );
+  const nameById = new Map(names);
+
+  const byNormalizedName = new Map<string, CrossProjectMatch[]>();
+  for (const row of otherRows) {
+    if (row.project_id == null) continue;
+    const projectName = nameById.get(row.project_id);
+    if (!projectName) continue;
+    const key = normalizeCandidateName(row.candidate_name);
+    const list = byNormalizedName.get(key) ?? [];
+    list.push({ screeningId: row.id, projectId: row.project_id, projectName, score: row.score });
+    byNormalizedName.set(key, list);
+  }
+
+  const result = new Map<number, CrossProjectMatch[]>();
+  for (const own of ownRows) {
+    const matches = byNormalizedName.get(normalizeCandidateName(own.candidate_name));
+    if (matches && matches.length > 0) result.set(own.id, matches);
+  }
+  return result;
 }
 
 // ── Rejection history (system-wide, any recruiter) ──────────────────────────
