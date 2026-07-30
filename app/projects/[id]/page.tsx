@@ -1064,6 +1064,17 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   // away, not wait around forever for someone to retroactively pick a
   // reason nobody's going to add. Vlad's ask, 2026-07-16.
   const [justArchivedIds, setJustArchivedIds] = useState<Set<number>>(new Set());
+  // "Multiple roles" collapsed-profile toggle, 2026-07-30 (Vlad's ask): a
+  // merged cluster with no real fraud signal (plain "previously_seen" cross-
+  // project match, or a same-project nameMatchId) no longer renders every
+  // member's card by default — only the most recent one shows, with a
+  // "Multiple roles · N" chip that expands to reveal the older submission(s)
+  // right beneath it, "so it looks like one profile but with multiple
+  // submissions." Real fraud clusters (duplicateFlag/known_fraud_pattern)
+  // are unaffected — those keep the old always-expanded rose-bannered
+  // treatment, since hiding a suspected-fraud duplicate by default would be
+  // exactly the wrong instinct. Keyed by matchClusters' cluster.index.
+  const [expandedClusters, setExpandedClusters] = useState<Set<number>>(new Set());
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
   // Mirrors credibilityMap exactly — added 2026-07-30, same gap Activity
@@ -1170,6 +1181,34 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
   const matchClusters = useMemo(() => computeMatchClusters(screenings), [screenings]);
 
+  // Vlad's ask, 2026-07-30 (screenshot: two merged cards both showing
+  // "Previously seen" reads as noisy/redundant, stacked right under the
+  // "Possible duplicate" cluster banner). Within a merged cluster, only the
+  // most recently screened member keeps its own historyAlertType badge —
+  // it "sticks with" whichever submission the recruiter is actually
+  // looking at, instead of repeating on every older resubmission in the
+  // group. Doesn't touch historyAlertType itself (still set on every
+  // matching row in the DB, still drives Ring grouping/clusterIsFraud) —
+  // purely a display-level dedup for this one badge.
+  const suppressedHistoryAlertIds = useMemo(() => {
+    const byCluster = new Map<number, ScreeningRecord[]>();
+    for (const s of screenings) {
+      if (s.historyAlertType == null) continue;
+      const cluster = matchClusters.get(s.id);
+      if (!cluster) continue;
+      const list = byCluster.get(cluster.index) ?? [];
+      list.push(s);
+      byCluster.set(cluster.index, list);
+    }
+    const suppressed = new Set<number>();
+    for (const members of byCluster.values()) {
+      if (members.length <= 1) continue;
+      const latest = members.reduce((a, b) => (new Date(a.createdAt) > new Date(b.createdAt) ? a : b));
+      for (const m of members) if (m.id !== latest.id) suppressed.add(m.id);
+    }
+    return suppressed;
+  }, [screenings, matchClusters]);
+
   // Card merging, 2026-07-20 (Vlad's ask): replaces the old "Ring N" badge +
   // click-to-highlight mechanic entirely. Every matchClusters group (any of
   // duplicateMatchId/historyAlertMatchId/nameMatchId — see
@@ -1177,15 +1216,23 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   // separate cards linked by a clickable Ring chip. Display-only: doesn't
   // touch any data, every member screening stays fully independent
   // underneath (own status, own flag, own everything) — this only changes
-  // how they're grouped in the DOM. Fraud-signal clusters (duplicateFlag/
-  // historyAlertType present on any member) get a red-tinted header instead
-  // of the neutral gray one, so a merged card still reads as a fraud flag at
-  // a glance rather than looking identical to an ordinary resubmission.
+  // how they're grouped in the DOM. Fraud-signal clusters (duplicateFlag or
+  // a real known_fraud_pattern match) get a red-tinted header instead of the
+  // neutral gray one, so a merged card still reads as a fraud flag at a
+  // glance rather than looking identical to an ordinary resubmission.
+  //
+  // Narrowed 2026-07-30 (Vlad's ask): this used to treat ANY historyAlertType
+  // as a fraud signal, including "previously_seen" — the same real person
+  // submitting for a different role, not fraud at all ("it's the same
+  // person under two different projects"). Only duplicateFlag (content-hash
+  // match) or an actual known_fraud_pattern match still counts here; a plain
+  // previously_seen cluster now falls through to the "Multiple roles"
+  // treatment below instead of the rose "Possible duplicate" banner.
   function clusterHasFraudSignal(cluster: MatchCluster | undefined): boolean {
     if (!cluster) return false;
     return cluster.memberIds.some((id) => {
       const m = screenings.find((r) => r.id === id);
-      return m?.duplicateFlag || m?.historyAlertType != null;
+      return m?.duplicateFlag || m?.historyAlertType === "known_fraud_pattern";
     });
   }
 
@@ -1200,16 +1247,47 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     return [...byId.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [screenings]);
 
-  const filteredScreenings = screenings
-    .filter((s) => {
+  // Vlad's ask, 2026-07-30: a merged cluster (duplicate/history-alert/name-
+  // match) used to be pinned to the very top of its active/archived split
+  // via "Ring grouping" — cluster index as the primary sort key, regardless
+  // of how old the cluster's members were. A duplicate pair from months ago
+  // could sit above every recent candidate. Replaced with item-based
+  // grouping: each cluster becomes one "queue item" (its members, most
+  // recent first) positioned wherever that MOST RECENT member naturally
+  // belongs — "the screening from July 16 should be connected to July 30
+  // (the most recent one)," not forced to the top regardless of date/score.
+  // Grouping into items before sorting (rather than sorting raw screenings
+  // with a cluster tiebreaker) guarantees a cluster's members can never end
+  // up interleaved with an unrelated candidate that happens to share the
+  // anchor's score/date — they're one unit until flattened at the end.
+  function buildQueueItems(list: ScreeningRecord[]): ScreeningRecord[][] {
+    const itemsByClusterIndex = new Map<number, ScreeningRecord[]>();
+    const items: ScreeningRecord[][] = [];
+    for (const s of list) {
+      const cluster = matchClusters.get(s.id);
+      if (!cluster) { items.push([s]); continue; }
+      let item = itemsByClusterIndex.get(cluster.index);
+      if (!item) { item = []; itemsByClusterIndex.set(cluster.index, item); items.push(item); }
+      item.push(s);
+    }
+    for (const item of items) item.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return items;
+  }
+
+  const filteredScreenings = buildQueueItems(
+    screenings.filter((s) => {
       if (search && !s.candidateName.toLowerCase().includes(search.toLowerCase())) return false;
       if (statusFilter && s.status !== statusFilter) return false;
       if (recruiterFilter && s.recruiterId !== recruiterFilter) return false;
       if (flaggedFilter && !s.flagged) return false;
       return true;
     })
-    .slice()
-    .sort((a, b) => {
+  )
+    .sort((itemA, itemB) => {
+      // Each item's first member is its most recent — the anchor this
+      // item's position is decided by.
+      const a = itemA[0];
+      const b = itemB[0];
       // Archival Logic, 2026-07-15 (Vlad's ask): archived candidates always
       // sink below every active candidate, regardless of score sort, so the
       // main pipeline list only ever contains active candidates and the
@@ -1233,20 +1311,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         const bArchived = isSettledArchived(b) ? 1 : 0;
         if (aArchived !== bArchived) return aArchived - bArchived;
       }
-      // Ring grouping, 2026-07-17 (Vlad's ask, mirrored from the same fix on
-      // app/candidates/page.tsx): within the active/archived split above,
-      // candidates sharing a fraud-signal Ring are grouped together instead
-      // of scattered by score — Ring 1's members adjacent, then Ring 2's,
-      // etc. No-cluster candidates sink to the end of their split via
-      // Infinity. Score sort still applies as the tiebreaker within a ring.
-      const clusterA = matchClusters.get(a.id)?.index ?? Infinity;
-      const clusterB = matchClusters.get(b.id)?.index ?? Infinity;
-      if (clusterA !== clusterB) return clusterA - clusterB;
       if (sortOrder === "desc") return b.score - a.score;
       if (sortOrder === "asc") return a.score - b.score;
-      if (sortOrder === "newest") return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      return 0;
-    });
+      // Default and "newest" both fall back to plain recency — the anchor
+      // is already each item's own most recent member either way.
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    })
+    .flat();
   const archivedCount = filteredScreenings.filter(isSettledArchived).length;
 
   function getNotesText(s: ScreeningRecord) {
@@ -1526,6 +1597,34 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         }
         const clusterIsFraud = clusterHasFraudSignal(cluster);
         const mergeIsFraud = mergePosition === "first" && clusterIsFraud;
+        // "Multiple roles" collapsed profile, 2026-07-30 — see
+        // expandedClusters' doc comment above. A non-fraud cluster only
+        // shows its most recent ("first") member by default; older siblings
+        // stay mounted (so expanding is instant, no re-fetch) but visually
+        // hidden via `hidden` until the cluster is expanded.
+        const isNonFraudCluster = isMergeable && !clusterIsFraud;
+        const clusterExpanded = cluster != null && expandedClusters.has(cluster.index);
+        const hiddenAsCollapsedSibling = isNonFraudCluster && mergePosition !== "first" && mergePosition !== "solo" && !clusterExpanded;
+        // Any middle/last member of a non-fraud cluster toggles between
+        // `hidden` and visible as expandedClusters changes — plays the
+        // slow reveal animation (see .animate-reveal-down in globals.css)
+        // every time it becomes visible, since display:none->block always
+        // restarts a CSS animation.
+        const isCollapsibleSibling = isNonFraudCluster && mergePosition !== "first" && mergePosition !== "solo";
+        // 2026-07-30 follow-up (Vlad's ask): the "Multiple roles" toggle
+        // moved from an inline chip into a full-width bar sitting on top of
+        // the card, mirroring the "Possible duplicate" banner — so a
+        // non-fraud cluster's "first" member ALWAYS has something above it
+        // now (collapsed or expanded), same as a fraud cluster does. Only a
+        // true "solo" card is fully isolated (normal full rounding).
+        const showsAsIsolated = mergePosition === "solo";
+        // The collapsed "first" member of a non-fraud cluster has no visible
+        // sibling below it (still hidden), so — unlike a fraud cluster's
+        // "first" member, which always has a visible sibling beneath it —
+        // it's the last visible thing in its stack and needs a rounded
+        // bottom. Flips to flat once expanded and an actual sibling appears
+        // below it.
+        const roundedBottomWhileCollapsed = isNonFraudCluster && mergePosition === "first" && !clusterExpanded;
         return (
           <Fragment key={s.id}>
           {isFirstArchived && (
@@ -1537,20 +1636,55 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
               <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
             </li>
           )}
-          {mergePosition === "first" && (
-            <li aria-hidden className={`flex items-center gap-1.5 rounded-t-2xl border border-b-0 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide ${
-              mergeIsFraud
-                ? "border-rose-200 bg-rose-50/70 text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400"
-                : "border-zinc-200 bg-zinc-50/70 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40 dark:text-zinc-500"
-            }`}>
+          {/* Vlad's ask, 2026-07-30: this banner used to show for EVERY
+              merged cluster, including plain "Same person" resubmissions
+              with no actual duplicate/fraud signal — bothered him as one
+              more rose/amber-adjacent warning sitting at the top of the
+              list for something that isn't actually a problem. Now gated
+              on mergeIsFraud too, so a same-person-no-signal cluster just
+              merges visually (rounded corners, stacked cards) with no
+              labeled header above it at all — only a real duplicateFlag/
+              historyAlertType still gets called out. */}
+          {mergePosition === "first" && mergeIsFraud && (
+            <li aria-hidden className="flex items-center gap-1.5 rounded-t-2xl border border-b-0 border-rose-200 bg-rose-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
                 <circle cx="9" cy="9" r="4" /><circle cx="15" cy="15" r="4" />
               </svg>
-              {mergeIsFraud ? "Possible duplicate" : "Same person"} · {mergeGroupSize} submissions
+              Possible duplicate · {mergeGroupSize} submissions
             </li>
           )}
-          <li data-candidate-id={s.id} className={`${mergePosition !== "solo" ? "-mt-3" : ""} scroll-mt-24 bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
-            mergePosition === "solo" ? "rounded-2xl"
+          {/* "Multiple roles" toggle, redesigned 2026-07-30 (Vlad's ask):
+              moved out of the inline badge row into a full-width bar sitting
+              on top of the card — same footprint as the "Possible duplicate"
+              banner above, but neutral-toned (this isn't a fraud signal) and
+              itself clickable across its full width. Stays visible whether
+              collapsed or expanded, acting as a persistent header for "one
+              profile, multiple submissions." */}
+          {mergePosition === "first" && isNonFraudCluster && (
+            <li>
+              <button
+                type="button"
+                onClick={() => {
+                  const idx2 = cluster!.index;
+                  setExpandedClusters((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(idx2)) next.delete(idx2); else next.add(idx2);
+                    return next;
+                  });
+                }}
+                title={clusterExpanded ? "Hide older submissions" : "This candidate has other submissions — click to show them"}
+                className="flex w-full items-center gap-1.5 rounded-t-2xl border border-b-0 border-zinc-200 bg-zinc-50 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              >
+                Multiple roles · {mergeGroupSize} submissions
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className={`ml-auto shrink-0 transition-transform ${clusterExpanded ? "rotate-180" : ""}`}>
+                  <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </li>
+          )}
+          <li data-candidate-id={s.id} className={`${hiddenAsCollapsedSibling ? "hidden" : isCollapsibleSibling ? "animate-reveal-down" : ""} ${!showsAsIsolated ? "-mt-3" : ""} scroll-mt-24 bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
+            showsAsIsolated ? "rounded-2xl"
+            : roundedBottomWhileCollapsed ? "rounded-t-none rounded-b-2xl"
             : mergePosition === "first" ? "rounded-t-none rounded-b-none"
             : mergePosition === "last" ? "rounded-t-none rounded-b-2xl"
             : "rounded-none"
@@ -1613,8 +1747,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       explicit action instead of a passive guess.
                       "known_fraud_pattern" is a distinct, more serious
                       signal (not just "also seen elsewhere") and stays
-                      regardless. */}
-                  {s.historyAlertType && (s.historyAlertType === "known_fraud_pattern" || s.status !== "transferred") && (
+                      regardless. Also suppressed on every non-latest member
+                      of a merged cluster — see suppressedHistoryAlertIds
+                      above — and on every member of a non-fraud cluster
+                      (isNonFraudCluster can only ever mean a plain
+                      "previously_seen" match here, never known_fraud_
+                      pattern — see clusterHasFraudSignal), superseded by
+                      the "Multiple roles" toggle bar above the card instead. */}
+                  {s.historyAlertType && !suppressedHistoryAlertIds.has(s.id) && !isNonFraudCluster && (s.historyAlertType === "known_fraud_pattern" || s.status !== "transferred") && (
                     <Link
                       href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
                       onClick={(e) => e.stopPropagation()}
@@ -1644,6 +1784,9 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       Name match
                     </button>
                   )}
+                  {/* "Multiple roles" toggle lives as a full-width bar above
+                      the card now (2026-07-30) — see the <li> rendered just
+                      before this card in the map above. */}
                   <button type="button"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -3128,17 +3271,17 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
       <SiteHeader active="/projects" />
 
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 py-10">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-10 sm:px-6">
         {/* Header */}
         <div className="mb-8 flex flex-col gap-1">
           <Link href="/projects" className="mb-1 inline-flex items-center gap-1 text-xs text-zinc-400 transition-colors hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M5 12l7 7M5 12l7-7" strokeLinecap="round" strokeLinejoin="round" /></svg>
             Projects
           </Link>
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{project.name}</h2>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h2 className="min-w-0 break-words text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{project.name}</h2>
             {project.status === "archived" && (
-              <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">Archived</span>
+              <span className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">Archived</span>
             )}
           </div>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
@@ -3146,11 +3289,22 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           </p>
         </div>
 
-        {/* Tabs */}
-        <div className="mb-6 flex items-center gap-1 border-b border-zinc-200 dark:border-zinc-800">
+        {/* Tabs — narrow-screen fix, 2026-07-30: 5 tabs (2 with live counts
+            appended, e.g. "Pipeline (42)") never wrapped and never scrolled,
+            just silently overflowed the page on a phone-width viewport.
+            `overflow-x-auto` + `shrink-0 whitespace-nowrap` on each button
+            turns that into a horizontally scrollable row instead — same
+            fallback pattern as SiteHeader's own nav fix right above it.
+            Explicit `overflow-y-hidden` alongside it — Vlad caught a visible
+            vertical scroll affordance on this row that turned out to be a
+            real CSS quirk: setting only overflow-x non-visible makes the
+            browser compute overflow-y as `auto` too (CSS2.1 §11.1.1), so
+            any tiny rounding overflow in row height was enough to show a
+            vertical scrollbar nobody wanted. */}
+        <div className="mb-6 flex items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-zinc-200 dark:border-zinc-800">
           {TABS.map((t) => (
             <button key={t.key} type="button" onClick={() => { setTab(t.key); setExpandedId(null); }}
-              className={`-mb-px px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+              className={`-mb-px shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
                 tab === t.key
                   ? "border-violet-600 text-violet-700 dark:border-violet-400 dark:text-violet-400"
                   : "border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
@@ -3224,7 +3378,13 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           />
         )}
       </main>
-      {tab === "pipeline" && <ScrollToTopButton />}
+      {/* Vlad's ask, 2026-07-30: "add a go to the top" right after screening
+          results come back — this tab can run just as long as Pipeline once
+          a batch of resumes scores, but only ever had the floating back-to-
+          top button on the Pipeline tab. Same component, same behavior
+          (stays hidden until scrolled past its own threshold), just no
+          longer gated to one tab. */}
+      {(tab === "pipeline" || tab === "screen") && <ScrollToTopButton />}
     </div>
   );
 }

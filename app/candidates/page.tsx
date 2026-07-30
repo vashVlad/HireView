@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
+import { FraudRiskChecker } from "@/components/FraudRiskChecker";
 import { InsightList } from "@/components/InsightList";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -14,12 +16,11 @@ import { StatusStageControl } from "@/components/StatusStageControl";
 import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
 import { getSourceType, type SourceType } from "@/lib/sourceType";
-import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import type { ScreeningAction } from "@/lib/screeningActions";
 import {
   CANDIDATE_STATUSES, CANDIDATE_STATUS_LABELS,
   type CandidateStatus, type CredibilityAssessment, type CredibilitySignal,
-  type ProjectSummary, type ScreeningRecord, type TrackerStage,
+  type FraudRiskAssessment, type ProjectSummary, type ScreeningRecord, type TrackerStage,
 } from "@/lib/types";
 
 // ── Credibility signal inline badge ───────────────────────────────────────
@@ -50,29 +51,6 @@ function formatStatusDate(iso: string) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// Added 2026-07-27 (Vlad: "activities are not shown on the result card on
-// the all candidates page") — this page has always had its own separate
-// CandidateCard component (not a shared ResultCard), and it never grew the
-// Activity/attribution timeline that app/projects/[id]/page.tsx's Pipeline
-// tab has had since Phase 1.2. Same GET /api/history/[id]/actions endpoint,
-// same ScreeningAction type, same formatActionText mapping — copied here
-// rather than extracted into a shared helper, matching how this file already
-// duplicates formatDate/SIGNAL_BADGE/etc. instead of importing from the
-// Pipeline tab's page module (which isn't set up to export anything).
-function formatActionText(a: ScreeningAction, candidateName: string): string {
-  switch (a.actionType) {
-    case "created": return `screened ${candidateName}`;
-    case "status_change": return `moved ${candidateName} to ${CANDIDATE_STATUS_LABELS[a.toValue as CandidateStatus] ?? a.toValue}`;
-    case "stage_change": return `moved ${candidateName} to ${a.toValue} stage`;
-    case "flagged": return `flagged ${candidateName}`;
-    case "unflagged": return `removed the flag from ${candidateName}`;
-    case "note": return `added a note on ${candidateName}`;
-    case "credibility_check": return `ran a credibility check on ${candidateName}`;
-    case "rescreen": return `rescreened ${candidateName}`;
-    default: return `updated ${candidateName}`;
-  }
-}
-
 // ── Candidate card ─────────────────────────────────────────────────────────
 
 function CandidateCard({
@@ -82,6 +60,10 @@ function CandidateCard({
   trackerStage,
   mergePosition = "solo",
   clusterIsFraud,
+  suppressHistoryAlert = false,
+  isNonFraudCluster = false,
+  hiddenAsCollapsedSibling = false,
+  clusterExpanded = false,
   onStatusChange,
   onStageChange,
   onArchiveReasonChange,
@@ -89,6 +71,7 @@ function CandidateCard({
   onDelete,
   onSaveNotes,
   onCredibilityComplete,
+  onFraudRiskComplete,
   onSourceChange,
 }: {
   screening: ScreeningRecord;
@@ -108,6 +91,27 @@ function CandidateCard({
   mergePosition?: "solo" | "first" | "middle" | "last";
   /** Only meaningful when mergePosition !== "solo" — tints the merged card's border/header rose instead of neutral gray when the cluster carries a real duplicateFlag/historyAlertType. */
   clusterIsFraud?: boolean;
+  /**
+   * Vlad's ask, 2026-07-30: hides this card's own "Previously seen"/"Known
+   * fraud pattern" badge when it's not the most recently screened member of
+   * its merged cluster — see suppressedHistoryAlertIds in CandidatesPage.
+   * Purely a display decision; historyAlertType itself is untouched.
+   */
+  suppressHistoryAlert?: boolean;
+  /**
+   * "Multiple roles" collapsed profile, 2026-07-30 (Vlad's ask) — mirrors
+   * app/projects/[id]/page.tsx's PipelineTab exactly. A merged cluster with
+   * no real fraud signal (plain "previously_seen" cross-project match, or a
+   * same-project nameMatchId) only shows its most recent member by default;
+   * the "Multiple roles · N" toggle bar that reveals the rest lives in the
+   * parent's render loop (a full-width bar above this card, same footprint
+   * as the "Possible duplicate" banner — see CandidatesPage), not inside
+   * this component.
+   */
+  isNonFraudCluster?: boolean;
+  /** True for non-"first" members of a non-fraud cluster while it's collapsed — rendered but visually hidden so expanding is instant. */
+  hiddenAsCollapsedSibling?: boolean;
+  clusterExpanded?: boolean;
   onStatusChange: (id: number, status: CandidateStatus) => void;
   onStageChange: (id: number, stage: TrackerStage) => void;
   onArchiveReasonChange: (id: number, reason: string) => void;
@@ -124,6 +128,7 @@ function CandidateCard({
    * Mirrors PipelineTab's handleSourceChange exactly (same PATCH shape).
    */
   onSourceChange: (id: number, linkedInMode: boolean, agencyName: string) => void;
+  onFraudRiskComplete: (id: number, assessment: FraudRiskAssessment) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [pendingFlag, setPendingFlag] = useState(false);
@@ -134,9 +139,33 @@ function CandidateCard({
   const [noteText, setNoteText] = useState(s.notes ?? "");
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [credibility, setCredibility] = useState<CredibilityAssessment | undefined>(s.credibility);
+  // Manual fraud risk check, added 2026-07-30 to match ResultCard.tsx/
+  // PipelineTab — this page's card never had it at all (see this
+  // component's other 2026-07-30 comments for the "look the same as
+  // Pipeline" ask this closes out). Same score >= 75 gate as both.
+  const [fraudRisk, setFraudRisk] = useState<FraudRiskAssessment | undefined>(s.fraudRisk);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actions, setActions] = useState<ScreeningAction[] | "loading" | undefined>(undefined);
+  // 2026-07-30 follow-up (Vlad's ask): the "Multiple roles" toggle moved
+  // from an inline chip into a full-width bar sitting on top of the card
+  // (rendered by the parent), mirroring the "Possible duplicate" banner —
+  // so a non-fraud cluster's "first" member ALWAYS has something above it
+  // now (collapsed or expanded), same as a fraud cluster does. Only a true
+  // "solo" card is fully isolated (normal full rounding). Mirrors
+  // PipelineTab exactly.
+  const showsAsIsolated = mergePosition === "solo";
+  // The collapsed "first" member of a non-fraud cluster has no visible
+  // sibling below it (still hidden), so it's the last visible thing in its
+  // stack and needs a rounded bottom — flips to flat once expanded and an
+  // actual sibling appears below it.
+  const roundedBottomWhileCollapsed = isNonFraudCluster && mergePosition === "first" && !clusterExpanded;
+  // Any middle/last member of a non-fraud cluster toggles between `hidden`
+  // and visible as clusterExpanded changes — plays the slow reveal
+  // animation (see .animate-reveal-down in globals.css) every time it
+  // becomes visible, since display:none->block always restarts a CSS
+  // animation. Mirrors PipelineTab exactly.
+  const isCollapsibleSibling = isNonFraudCluster && mergePosition !== "first" && mergePosition !== "solo";
 
   // Lazy-load the attribution timeline the first time this card is expanded —
   // same pattern as PipelineTab's actionsMap in app/projects/[id]/page.tsx,
@@ -174,8 +203,9 @@ function CandidateCard({
 
   return (
     <li id={`candidate-${s.id}`}
-      className={`${mergePosition !== "solo" ? "-mt-3" : ""} bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
-        mergePosition === "solo" ? "rounded-2xl"
+      className={`${hiddenAsCollapsedSibling ? "hidden" : isCollapsibleSibling ? "animate-reveal-down" : ""} ${!showsAsIsolated ? "-mt-3" : ""} bg-white transition-all hover:shadow-md dark:bg-zinc-900 ${
+        showsAsIsolated ? "rounded-2xl"
+        : roundedBottomWhileCollapsed ? "rounded-t-none rounded-b-2xl"
         : mergePosition === "first" ? "rounded-none"
         : mergePosition === "last" ? "rounded-t-none rounded-b-2xl"
         : "rounded-none"
@@ -220,7 +250,7 @@ function CandidateCard({
                 Duplicate detected
               </span>
             )}
-            {s.historyAlertType && (
+            {s.historyAlertType && !suppressHistoryAlert && !isNonFraudCluster && (
               <Link
                 href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
                 onClick={(e) => e.stopPropagation()}
@@ -248,6 +278,9 @@ function CandidateCard({
                 Name match
               </span>
             )}
+            {/* "Multiple roles" toggle lives as a full-width bar above the
+                card now (2026-07-30) — see the <li> rendered just before
+                this card in CandidatesPage's map. */}
             <button type="button"
               onClick={(e) => {
                 e.stopPropagation();
@@ -442,6 +475,30 @@ function CandidateCard({
             }}
           />
 
+          {/* ── Fraud risk check ──────────────────────────────────────── */}
+          {(s.score >= 75 || fraudRisk !== undefined) && (
+            <FraudRiskChecker
+              screeningId={s.id}
+              roleContext={projectName}
+              currentAssessment={fraudRisk}
+              onComplete={async (assessment) => {
+                try {
+                  const res = await fetch(`/api/history/${s.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ fraudRisk: assessment }),
+                  });
+                  if (!res.ok) return false;
+                  setFraudRisk(assessment);
+                  onFraudRiskComplete(s.id, assessment);
+                  return true;
+                } catch {
+                  return false;
+                }
+              }}
+            />
+          )}
+
           {/* ── Assessment ────────────────────────────────────────────── */}
           {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
             <div className="flex items-center gap-1.5">
@@ -471,28 +528,14 @@ function CandidateCard({
           </div>
 
           {/* ── Attribution timeline ──────────────────────────────────── */}
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Activity</p>
-            {actions === undefined || actions === "loading" ? (
-              <p className="text-xs text-zinc-400 dark:text-zinc-500">Loading…</p>
-            ) : actions.length === 0 ? (
-              <p className="text-xs text-zinc-400 dark:text-zinc-500">No activity recorded yet.</p>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {actions.map((a) => (
-                  <li key={a.id} className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                    <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(a.userEmail)}`}>
-                      {avatarInitial(a.userEmail)}
-                    </span>
-                    <span>
-                      <span className="font-semibold text-zinc-700 dark:text-zinc-300">{a.userEmail}</span>{" "}
-                      {formatActionText(a, s.candidateName)} on {formatDate(a.createdAt)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          {/* Vlad's ask, 2026-07-30 ("make sure the result cards look the
+              same as the ones from the Pipeline"): this used to be a
+              hand-rolled copy predating the 2026-07-29 extraction of
+              components/ActivityTimeline.tsx — no relative timestamps, no
+              per-action-type icon, out of sync with ResultCard.tsx and
+              PipelineTab. Same actions data either way, just the shared
+              component now. */}
+          <ActivityTimeline actions={actions} candidateName={s.candidateName} />
 
           {/* Calibration feedback */}
           <div className="flex items-center gap-2">
@@ -552,6 +595,13 @@ export default function CandidatesPage() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [stagesMap, setStagesMap] = useState<Record<number, TrackerStage>>({});
+  // "Multiple roles" collapsed-profile toggle, 2026-07-30 (Vlad's ask) —
+  // mirrors app/projects/[id]/page.tsx's PipelineTab exactly. A merged
+  // cluster with no real fraud signal only shows its most recent member by
+  // default; older siblings stay mounted (instant expand, no re-fetch) but
+  // hidden until the cluster is expanded via its "Multiple roles · N" chip.
+  // Keyed by matchClusters' cluster.index.
+  const [expandedClusters, setExpandedClusters] = useState<Set<number>>(new Set());
 
   // Filters
   const [query, setQuery] = useState("");
@@ -603,6 +653,32 @@ export default function CandidatesPage() {
   const projectMap = Object.fromEntries(projects.map((p) => [p.id, p]));
   const matchClusters = useMemo(() => computeMatchClusters(screenings), [screenings]);
 
+  // Vlad's ask, 2026-07-30 (screenshot: two merged Srinath Venkatesan cards
+  // both showing "Previously seen" reads as noisy, especially stacked right
+  // under the "Possible duplicate" cluster banner). Within a merged cluster,
+  // only the most recently screened member keeps its own historyAlertType
+  // badge — mirrors the identical fix on app/projects/[id]/page.tsx's
+  // PipelineTab. Doesn't touch historyAlertType itself, purely a display
+  // dedup for this one badge.
+  const suppressedHistoryAlertIds = useMemo(() => {
+    const byCluster = new Map<number, ScreeningRecord[]>();
+    for (const s of screenings) {
+      if (s.historyAlertType == null) continue;
+      const cluster = matchClusters.get(s.id);
+      if (!cluster) continue;
+      const list = byCluster.get(cluster.index) ?? [];
+      list.push(s);
+      byCluster.set(cluster.index, list);
+    }
+    const suppressed = new Set<number>();
+    for (const members of byCluster.values()) {
+      if (members.length <= 1) continue;
+      const latest = members.reduce((a, b) => (new Date(a.createdAt) > new Date(b.createdAt) ? a : b));
+      for (const m of members) if (m.id !== latest.id) suppressed.add(m.id);
+    }
+    return suppressed;
+  }, [screenings, matchClusters]);
+
   // Card merging, 2026-07-20 (Vlad's ask) — mirrors the same change on
   // app/projects/[id]/page.tsx's PipelineTab. Every matchClusters group now
   // merges into one visual card instead of separate cards linked by a
@@ -612,40 +688,71 @@ export default function CandidatesPage() {
     if (!cluster) return false;
     return cluster.memberIds.some((id) => {
       const m = screenings.find((r) => r.id === id);
-      return m?.duplicateFlag || m?.historyAlertType != null;
+      // Narrowed 2026-07-30 (Vlad's ask): a plain "previously_seen" cross-
+      // project match is the same real person under two different roles/
+      // projects, not fraud — only a real duplicateFlag or the more serious
+      // "known_fraud_pattern" alert should still read as a fraud signal.
+      // Mirrors the identical fix on app/projects/[id]/page.tsx's PipelineTab.
+      return m?.duplicateFlag || m?.historyAlertType === "known_fraud_pattern";
     });
   }
 
-  const filtered = screenings
-    .filter((s) => {
+  // Vlad's ask, 2026-07-30 (screenshot: a duplicate pair from Jul 16/Jul 30
+  // sitting pinned above every other, more recent candidate): "Ring
+  // grouping" used to sort every merged cluster to the top of the page via
+  // cluster index as the PRIMARY sort key, regardless of how old its
+  // members were. Replaced with item-based grouping — a cluster becomes one
+  // "queue item" (its members, most recent first) positioned wherever that
+  // MOST RECENT member naturally belongs by date/score, with older siblings
+  // connected directly beneath it rather than the whole group jumping to
+  // the top. Grouping into items before sorting (instead of sorting raw
+  // screenings with a cluster tiebreaker) guarantees a cluster's members
+  // can never end up interleaved with an unrelated candidate that happens
+  // to share the anchor's score/date. Mirrors the identical fix on
+  // app/projects/[id]/page.tsx's PipelineTab.
+  function buildQueueItems(list: ScreeningRecord[]): ScreeningRecord[][] {
+    const itemsByClusterIndex = new Map<number, ScreeningRecord[]>();
+    const items: ScreeningRecord[][] = [];
+    for (const s of list) {
+      const cluster = matchClusters.get(s.id);
+      if (!cluster) { items.push([s]); continue; }
+      let item = itemsByClusterIndex.get(cluster.index);
+      if (!item) { item = []; itemsByClusterIndex.set(cluster.index, item); items.push(item); }
+      item.push(s);
+    }
+    for (const item of items) item.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return items;
+  }
+
+  const filtered = buildQueueItems(
+    screenings.filter((s) => {
       if (query && !s.candidateName.toLowerCase().includes(query.toLowerCase())) return false;
       if (statusFilter.size > 0 && !statusFilter.has(s.status)) return false;
       if (projectFilter && s.projectId !== projectFilter) return false;
       if (flaggedOnly && !s.flagged) return false;
-      if (fraudOnly && !(s.duplicateFlag || s.historyAlertType != null || s.nameMatchId != null)) return false;
+      // Narrowed 2026-07-30 (Vlad's ask): the "Multiple roles" cases (a
+      // plain "previously_seen" cross-project match, or a same-project
+      // nameMatchId) aren't fraud signals — matches clusterHasFraudSignal's
+      // definition so this filter and the banner/toggle agree on what
+      // counts as "fraud."
+      if (fraudOnly && !(s.duplicateFlag || s.historyAlertType === "known_fraud_pattern")) return false;
       if (scoreMin !== "" && s.score < Number(scoreMin)) return false;
       if (scoreMax !== "" && s.score > Number(scoreMax)) return false;
       if (dateFrom && new Date(s.createdAt) < new Date(dateFrom)) return false;
       if (dateTo && new Date(s.createdAt) > new Date(`${dateTo}T23:59:59`)) return false;
       return true;
     })
-    .slice()
-    .sort((a, b) => {
-      // Ring grouping, 2026-07-17 (Vlad's ask): candidates sharing a fraud-
-      // signal Ring used to be scattered throughout the list at whatever
-      // position their score happened to land them — findable via the
-      // highlight, but not actually adjacent. Primary sort key is now
-      // cluster index (Ring 1's members together, then Ring 2's, etc.);
-      // candidates with no cluster sink to the end via Infinity. The score
-      // sort below still applies as the tiebreaker within a ring (and among
-      // the ungrouped candidates, same as before this change).
-      const clusterA = matchClusters.get(a.id)?.index ?? Infinity;
-      const clusterB = matchClusters.get(b.id)?.index ?? Infinity;
-      if (clusterA !== clusterB) return clusterA - clusterB;
+  )
+    .sort((itemA, itemB) => {
+      // Each item's first member is its most recent — the anchor this
+      // item's position is decided by.
+      const a = itemA[0];
+      const b = itemB[0];
       if (sortOrder === "desc") return b.score - a.score;
       if (sortOrder === "asc") return a.score - b.score;
-      return 0;
-    });
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    })
+    .flat();
 
   const flaggedCount = screenings.filter((s) => s.flagged).length;
 
@@ -696,6 +803,10 @@ export default function CandidatesPage() {
 
   function handleCredibilityComplete(id: number, assessment: CredibilityAssessment) {
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, credibility: assessment } : s));
+  }
+
+  function handleFraudRiskComplete(id: number, assessment: FraudRiskAssessment) {
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, fraudRisk: assessment } : s));
   }
 
   return (
@@ -778,7 +889,7 @@ export default function CandidatesPage() {
               Flagged{flaggedCount > 0 && ` (${flaggedCount})`}
             </button>
 
-            {/* Fraud signals — matches duplicateFlag, historyAlertType, or nameMatchId, same signals as the CandidateCard badges. */}
+            {/* Fraud signals — matches duplicateFlag or a "known_fraud_pattern" historyAlertType only. Narrowed 2026-07-30: plain "previously_seen"/nameMatchId matches ("Multiple roles") are the same real person, not fraud, so they no longer trip this filter. */}
             <button type="button" onClick={() => setFraudOnly((v) => !v)}
               className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${fraudOnly ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -875,18 +986,56 @@ export default function CandidatesPage() {
               if (mergePosition === "first") {
                 for (let j = idx; j < filtered.length && matchClusters.get(filtered[j].id)?.index === cluster!.index; j++) mergeGroupSize++;
               }
+              // "Multiple roles" collapsed profile, 2026-07-30 — see
+              // expandedClusters' doc comment above. Mirrors PipelineTab.
+              const isNonFraudCluster = isMergeable && !clusterIsFraud;
+              const clusterExpanded = cluster != null && expandedClusters.has(cluster.index);
+              const hiddenAsCollapsedSibling = isNonFraudCluster && mergePosition !== "first" && mergePosition !== "solo" && !clusterExpanded;
               return (
                 <Fragment key={s.id}>
-                  {mergePosition === "first" && (
-                    <li aria-hidden className={`flex items-center gap-1.5 rounded-t-2xl border border-b-0 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide ${
-                      clusterIsFraud
-                        ? "border-rose-200 bg-rose-50/70 text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400"
-                        : "border-zinc-200 bg-zinc-50/70 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/40 dark:text-zinc-500"
-                    }`}>
+                  {/* Vlad's ask, 2026-07-30: hide this banner for plain
+                      "Same person" resubmissions with no real duplicate/
+                      fraud signal — see the matching change in
+                      app/projects/[id]/page.tsx's PipelineTab for the full
+                      reasoning. Only a real clusterIsFraud still gets a
+                      labeled header above the merged group. */}
+                  {mergePosition === "first" && clusterIsFraud && (
+                    <li aria-hidden className="flex items-center gap-1.5 rounded-t-2xl border border-b-0 border-rose-200 bg-rose-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
                         <circle cx="9" cy="9" r="4" /><circle cx="15" cy="15" r="4" />
                       </svg>
-                      {clusterIsFraud ? "Possible duplicate" : "Same person"} · {mergeGroupSize} submissions
+                      Possible duplicate · {mergeGroupSize} submissions
+                    </li>
+                  )}
+                  {/* "Multiple roles" toggle, redesigned 2026-07-30 (Vlad's
+                      ask): moved out of the inline badge row into a
+                      full-width bar sitting on top of the card — same
+                      footprint as the "Possible duplicate" banner above, but
+                      neutral-toned (this isn't a fraud signal) and itself
+                      clickable across its full width. Stays visible whether
+                      collapsed or expanded, acting as a persistent header
+                      for "one profile, multiple submissions." Mirrors
+                      PipelineTab exactly. */}
+                  {mergePosition === "first" && isNonFraudCluster && (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const idx2 = cluster!.index;
+                          setExpandedClusters((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(idx2)) next.delete(idx2); else next.add(idx2);
+                            return next;
+                          });
+                        }}
+                        title={clusterExpanded ? "Hide older submissions" : "This candidate has other submissions — click to show them"}
+                        className="flex w-full items-center gap-1.5 rounded-t-2xl border border-b-0 border-zinc-200 bg-zinc-50 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                      >
+                        Multiple roles · {mergeGroupSize} submissions
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className={`ml-auto shrink-0 transition-transform ${clusterExpanded ? "rotate-180" : ""}`}>
+                          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
                     </li>
                   )}
                   <CandidateCard screening={s}
@@ -895,6 +1044,10 @@ export default function CandidatesPage() {
                     trackerStage={stagesMap[s.id]}
                     mergePosition={mergePosition}
                     clusterIsFraud={clusterIsFraud}
+                    suppressHistoryAlert={suppressedHistoryAlertIds.has(s.id)}
+                    isNonFraudCluster={isNonFraudCluster}
+                    hiddenAsCollapsedSibling={hiddenAsCollapsedSibling}
+                    clusterExpanded={clusterExpanded}
                     onStatusChange={handleStatusChange}
                     onStageChange={handleStageChange}
                     onArchiveReasonChange={handleArchiveReasonChange}
@@ -902,6 +1055,7 @@ export default function CandidatesPage() {
                     onDelete={handleDelete}
                     onSaveNotes={handleSaveNotes}
                     onCredibilityComplete={handleCredibilityComplete}
+                    onFraudRiskComplete={handleFraudRiskComplete}
                     onSourceChange={handleSourceChange}
                   />
                 </Fragment>
