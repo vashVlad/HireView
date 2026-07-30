@@ -77,13 +77,14 @@ export async function POST(request: NextRequest) {
   // Free (no Claude call) pre-check, same as POST's full check, Vlad's ask
   // 2026-07-28: if the candidate is already screened in a project, there's
   // nothing to classify it for — exclude it before the (paid) gate call.
-  const alreadyInIds = candidateName
+  // 2026-07-30: now carries screeningId + score too — see POST's matching comment.
+  const alreadyInMap = candidateName
     ? await findProjectsWithCandidate({ candidateName, projectIds: candidates.map((p) => p.id) })
-    : new Set<number>();
+    : new Map<number, { screeningId: number; score: number }>();
   const alreadyIn = candidates
-    .filter((p) => alreadyInIds.has(p.id))
-    .map((p) => ({ projectId: p.id, projectName: p.name }));
-  const remaining = candidates.filter((p) => !alreadyInIds.has(p.id));
+    .filter((p) => alreadyInMap.has(p.id))
+    .map((p) => ({ projectId: p.id, projectName: p.name, ...alreadyInMap.get(p.id)! }));
+  const remaining = candidates.filter((p) => !alreadyInMap.has(p.id));
 
   // Nothing left to classify — every other active project already has this
   // candidate. Return without spending a Claude call at all.

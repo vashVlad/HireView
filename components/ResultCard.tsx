@@ -38,6 +38,13 @@ export interface FitSuggestion {
 export interface AlreadyInProject {
   projectId: number;
   projectName: string;
+  /**
+   * Added 2026-07-30 (Vlad's ask) alongside the "Also screened in X — Scored
+   * Y" redesign — lets this link straight to that screening's own candidate
+   * page instead of the general Pipeline tab, and show its score inline.
+   */
+  screeningId: number;
+  score: number;
 }
 
 export function ResultCard({
@@ -464,6 +471,34 @@ export function ResultCard({
         </p>
       )}
 
+      {/* Already-in-project mention, added 2026-07-28 (Vlad's ask), redesigned
+          2026-07-30 into a plain line per candidate instead of a boxed
+          paragraph: "these projects were excluded from scoring entirely
+          (free name-match pre-check, no Claude call spent) since there's
+          nothing to suggest where the candidate already exists — just say
+          so." Pulled out of the violet fit-suggestion box below (that box is
+          now only about the actionable "check other roles" flow) and shown
+          independently of fitChecked/fitSuggestion, since it can resolve
+          from either the gate call or the full check. Links straight to the
+          matched screening's own candidate page and shows its score, now
+          that alreadyInProjects carries both (see AlreadyInProject above). */}
+      {eligibleForFitCheck && !transferredTo && hasOtherActiveProjects && alreadyInProjects.length > 0 && (
+        <div className="mt-3 flex flex-col gap-1">
+          {alreadyInProjects.map((p) => (
+            <p key={p.projectId} className="text-xs text-zinc-500 dark:text-zinc-400">
+              Also screened in{" "}
+              <Link
+                href={`/candidates/${p.screeningId}`}
+                className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+              >
+                {p.projectName}
+              </Link>
+              {" "}— Scored {p.score}
+            </p>
+          ))}
+        </div>
+      )}
+
       {/* Cross-project fit — surfaced immediately, right before Career Trajectory,
           so a recruiter sees it before reading anything else. Every candidate is
           already saved regardless of score; this is purely about whether a
@@ -471,29 +506,6 @@ export function ResultCard({
           whether to auto-fire the real check; manual link otherwise. */}
       {eligibleForFitCheck && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
         <div className="mt-3 flex flex-col gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
-          {/* Already-in-project mention, added 2026-07-28 (Vlad's ask): these
-              projects were excluded from scoring entirely (free name-match
-              pre-check, no Claude call spent) since there's nothing to
-              suggest where the candidate already exists — just say so.
-              Shown independently of fitChecked/fitSuggestion below, since it
-              can resolve from either the gate call or the full check. */}
-          {alreadyInProjects.length > 0 && (
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Already screened in{" "}
-              {alreadyInProjects.map((p, i) => (
-                <span key={p.projectId}>
-                  {i > 0 && ", "}
-                  <Link
-                    href={`/projects/${p.projectId}?tab=pipeline`}
-                    className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
-                  >
-                    {p.projectName}
-                  </Link>
-                </span>
-              ))}
-              .
-            </p>
-          )}
           {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
           {!fitError && (checkingGate || checkingFit) && (
             <p className="text-xs text-violet-500 dark:text-violet-400">Checking other active roles…</p>
