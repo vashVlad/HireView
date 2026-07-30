@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, RejectionHistoryEntry } from "@/lib/types";
+import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, FraudRiskAssessment, RejectionHistoryEntry } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
+import { FraudRiskChecker } from "./FraudRiskChecker";
 import { InsightList } from "./InsightList";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
@@ -110,6 +111,11 @@ export function ResultCard({
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
     result.credibility ?? null
   );
+  // Manual fraud risk check — added 2026-07-30, only ever offered at score
+  // >= 75 (see canShowFraudRisk below). See components/FraudRiskChecker.tsx.
+  const [fraudRisk, setFraudRisk] = useState<FraudRiskAssessment | null>(
+    result.fraudRisk ?? null
+  );
   const [archiveReason, setArchiveReason] = useState<string | undefined>(result.archiveReason);
   const [savedId] = useState<number | undefined>(result.id);
   // Notes field, added 2026-07-16 in place of the removed Generate Question
@@ -138,6 +144,12 @@ export function ResultCard({
   const [actions, setActions] = useState<ScreeningAction[] | "loading" | undefined>(undefined);
 
   const canCheck = savedId !== undefined;
+  // Vlad's ask, 2026-07-29: fraud risk checking only makes sense — and is
+  // only ever offered — for strong-looking candidates (score >= 75). A
+  // weaker resume's problems are already visible without this check.
+  // Already-run results stay visible even if a later rescore drops the
+  // score below 75, so a past check is never hidden retroactively.
+  const canShowFraudRisk = canCheck && (result.score >= 75 || fraudRisk !== null);
 
   useEffect(() => {
     if (savedId === undefined) return;
@@ -577,6 +589,28 @@ export function ResultCard({
                 });
                 if (!res.ok) return false;
                 setCredibility(assessment);
+                return true;
+              } catch {
+                return false;
+              }
+            }}
+          />
+        )}
+
+        {canShowFraudRisk && (
+          <FraudRiskChecker
+            screeningId={savedId!}
+            roleContext={roleContext}
+            currentAssessment={fraudRisk ?? undefined}
+            onComplete={async (assessment) => {
+              try {
+                const res = await fetch(`/api/history/${savedId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ fraudRisk: assessment }),
+                });
+                if (!res.ok) return false;
+                setFraudRisk(assessment);
                 return true;
               } catch {
                 return false;

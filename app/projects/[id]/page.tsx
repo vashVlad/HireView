@@ -9,6 +9,7 @@ import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
+import { RejectionCard } from "@/components/RejectionCard";
 import { ResultCard, type FitSuggestion, type AlreadyInProject } from "@/components/ResultCard";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
@@ -2201,10 +2202,6 @@ function DrawerBody({
   const [immigration, setImmigration] = useState(trackerEntry.immigration ?? "");
   const [onHold, setOnHold] = useState(trackerEntry.onHold ?? false);
   const [onHoldReason, setOnHoldReason] = useState(trackerEntry.onHoldReason ?? "");
-  // Teti's request, 2026-07-10 — captured when stage is "Reject" so a
-  // recruiter can see why later. reject_reason migration confirmed run and
-  // wired into getFullTrackerEntries' select same day.
-  const [rejectReason, setRejectReason] = useState(trackerEntry.rejectReason ?? "");
   const [scheduled, setScheduled] = useState(trackerEntry.scheduled ?? false);
   const [interviewDate, setInterviewDate] = useState(trackerEntry.interviewDate ?? "");
   const [saving, setSaving] = useState<string | null>(null);
@@ -2227,7 +2224,6 @@ function DrawerBody({
     setImmigration(trackerEntry.immigration ?? "");
     setOnHold(trackerEntry.onHold ?? false);
     setOnHoldReason(trackerEntry.onHoldReason ?? "");
-    setRejectReason(trackerEntry.rejectReason ?? "");
     setScheduled(trackerEntry.scheduled ?? false);
     setInterviewDate(trackerEntry.interviewDate ?? "");
   }, [selected.id]);
@@ -2418,17 +2414,6 @@ function DrawerBody({
           onBlur={(e) => saveTrackerField({ location: e.target.value }, "location")}
           placeholder="New York, NY" className={inputCls} />
       </div>
-
-      {/* Rejection reason — only shown once this candidate is in the Reject stage */}
-      {trackerEntry.stage === "Reject" && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
-          <FieldLabel label="Rejection reason" fkey="rejectReason" />
-          <textarea rows={2} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
-            onBlur={(e) => saveTrackerField({ rejectReason: e.target.value }, "rejectReason")}
-            placeholder="Why this candidate was rejected — visible system-wide if they apply again"
-            className={`resize-none border-rose-200 bg-white dark:border-rose-500/30 dark:bg-zinc-900 ${inputCls}`} />
-        </div>
-      )}
 
       {/* Steps Completed */}
       <div>
@@ -2827,6 +2812,23 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                 })}
               </div>
             </div>
+
+            {/* Rejection card — right beneath the "Move to stage" chip row per
+                Vlad's ask, 2026-07-29. See components/RejectionCard.tsx. */}
+            {drawerStage === "Reject" && (
+              <RejectionCard
+                // Forces a fresh mount per candidate — RejectionCard owns its
+                // own local state (reason choice, fraud claims) rather than
+                // syncing via a useEffect like DrawerBody's fields do, so
+                // without this key, switching from one Reject-stage candidate
+                // to another would carry over the previous candidate's
+                // half-filled form.
+                key={selected.id}
+                screeningId={selected.id}
+                initialReason={trackerData[selected.id]?.rejectReason ?? ""}
+                onSaveReason={(reason) => onTrackerDataChange(selected.id, { rejectReason: reason })}
+              />
+            )}
 
             {/* Scrollable content */}
             <DrawerBody

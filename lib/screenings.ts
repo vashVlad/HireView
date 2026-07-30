@@ -19,7 +19,7 @@ import { getPrimaryTeamId } from "./teams";
 import { getAuthUser } from "./auth";
 import { getRecruiterEmailMap } from "./recruiters";
 import type {
-  CandidateResult, CandidateStatus, CredibilityAssessment, FullTrackerData,
+  CandidateResult, CandidateStatus, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
   Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage,
 } from "./types";
 import { DEFAULT_AUTO_ARCHIVE_REASON } from "./types";
@@ -1163,6 +1163,27 @@ export async function getScreeningResume(
   return { data, mimeType: row.resume_mime_type, fileName: row.file_name };
 }
 
+/**
+ * Single-purpose helper (mirrors getScreeningResume above) for
+ * app/api/assess-credibility/route.ts's positive-scoring feature added
+ * 2026-07-29 — deliberately just the one column rather than
+ * getScreeningsByIds' full SCREENING_COLUMNS + enrichment pipeline, which
+ * this call site has no use for. Returns [] rather than throwing on any
+ * failure (missing row, RLS, etc.) — a credibility check should never fail
+ * just because the original concerns couldn't be fetched, it should just
+ * skip the resolvedConcerns feature for that run.
+ */
+export async function getScreeningConcerns(id: number): Promise<string[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("concerns")
+    .eq("id", id)
+    .maybeSingle<{ concerns: string[] | null }>();
+  if (error || !data) return [];
+  return data.concerns ?? [];
+}
+
 // ── Update ─────────────────────────────────────────────────────────────────
 
 export async function updateScreening(
@@ -1188,6 +1209,16 @@ export async function updateScreening(
      * this comment; see that file's header for the sequencing rationale.
      */
     crossRefIsLinkedIn?: boolean;
+    /**
+     * Manually-triggered fraud risk check result (FraudRiskChecker.tsx, only
+     * ever offered at score >= 75). Requires
+     * supabase-migration-fraud-calibration.sql — NOT YET CONFIRMED RUN as of
+     * this comment. Written conditionally same as crossRefIsLinkedIn above,
+     * and every caller wraps this update in .catch(() => {}) so a missing
+     * column can never fail the fraud-risk-check response itself, only skip
+     * persisting it.
+     */
+    fraudRisk?: FraudRiskAssessment;
     interviewQuestions?: string[];
     /** See ARCHIVE_REASONS (lib/types.ts) and supabase-migration-archive-reason.sql. */
     archiveReason?: string;
@@ -1238,6 +1269,10 @@ export async function updateScreening(
   // — NOT YET CONFIRMED RUN. Written conditionally (only when the caller
   // passes it) same as archive_reason was before its migration was confirmed.
   if (fields.crossRefIsLinkedIn !== undefined) update.cross_ref_is_linkedin = fields.crossRefIsLinkedIn;
+  // fraud_risk requires supabase-migration-fraud-calibration.sql — NOT YET
+  // CONFIRMED RUN. Same deferred-wiring pattern as cross_ref_is_linkedin
+  // above; every caller wraps this update in .catch(() => {}).
+  if (fields.fraudRisk !== undefined) update.fraud_risk = fields.fraudRisk;
   if (fields.interviewQuestions !== undefined) update.interview_questions = fields.interviewQuestions;
   // archive_reason column not yet confirmed run (supabase-migration-archive-reason.sql)
   // — see that file's header for the sequencing rationale.
@@ -1291,6 +1326,9 @@ export async function updateScreening(
     if (fields.credibility !== undefined) {
       await logAction({ screeningId: id, userId: actorUserId, actionType: "credibility_check" });
     }
+    if (fields.fraudRisk !== undefined) {
+      await logAction({ screeningId: id, userId: actorUserId, actionType: "fraud_risk_check" });
+    }
     if (fields.score !== undefined) {
       await logAction({ screeningId: id, userId: actorUserId, actionType: "rescreen" });
     }
@@ -1307,6 +1345,14 @@ export async function updateScreeningCredibility(
   actorUserId?: string
 ): Promise<void> {
   return updateScreening(id, { credibility }, actorUserId);
+}
+
+export async function updateScreeningFraudRisk(
+  id: number,
+  fraudRisk: FraudRiskAssessment,
+  actorUserId?: string
+): Promise<void> {
+  return updateScreening(id, { fraudRisk }, actorUserId);
 }
 
 export async function deleteScreening(id: number): Promise<void> {

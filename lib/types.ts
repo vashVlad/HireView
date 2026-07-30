@@ -167,15 +167,34 @@ export interface CredibilityAssessment {
   resumeDelta?: string;
   overallSignal: CredibilitySignal;
   /**
-   * Points to subtract from the resume's fit score to reflect credibility
-   * findings — always <= 0. Computed deterministically in code from the
-   * count of severity: "material" discrepancy rows (see
-   * computeCredibilityScoreDelta in lib/assessCredibility.ts), NOT decided by
-   * the model directly, so the number stays consistent and auditable across
-   * runs. Capped so a credibility check can never invert a strong fit score.
-   * Added 2026-07-15, Vlad's ask — shown as a split-color ring on ScoreBadge.
+   * Net points to apply to the resume's fit score to reflect credibility
+   * findings — scoreDeduction + scoreBonus below. Was always <= 0 before
+   * 2026-07-29; can now be positive when resolvedConcerns outweighs any
+   * deduction. Both components are computed deterministically in code
+   * (computeCredibilityScoreDelta / computeCredibilityScoreBonus in
+   * lib/assessCredibility.ts), NOT decided by the model directly, so the
+   * number stays consistent and auditable across runs. Each side is
+   * independently capped so a credibility check can dock or credit a score
+   * but never invert it outright. Added 2026-07-15 (deduction only), Vlad's
+   * ask — shown as a split-color ring on ScoreBadge.
    */
   scoreDelta?: number;
+  /** Always <= 0. The discrepancy-driven component of scoreDelta — see computeCredibilityScoreDelta. */
+  scoreDeduction?: number;
+  /**
+   * Always >= 0. The resolved-concern-driven component of scoreDelta — see
+   * computeCredibilityScoreBonus. Only meaningful when originalConcerns was
+   * passed into assessCredibility(); 0 otherwise.
+   */
+  scoreBonus?: number;
+  /**
+   * Original screening concerns (result.concerns) that this cross-reference
+   * document resolved with concrete evidence — see resolvedConcerns in
+   * CREDIBILITY_TOOL for the exact bar. Absent (not just empty) when no
+   * original concerns were passed in, matching the pre-2026-07-29 response
+   * shape. Added 2026-07-29, Vlad's ask.
+   */
+  resolvedConcerns?: { concern: string; explanation: string }[];
   /** Populated only when the cross-reference document is a LinkedIn profile PDF. Phase 2.4. */
   linkedInSignals?: LinkedInSignals;
 }
@@ -194,6 +213,13 @@ export interface CandidateResult {
   recommendation: Recommendation;
   status?: CandidateStatus;
   credibility?: CredibilityAssessment;
+  /**
+   * Manually-triggered fraud risk check result — mirrors
+   * ScreeningRecord.fraudRisk, present here too for the same reason
+   * archiveReason is (the post-screening ResultCard predates a real
+   * ScreeningRecord read-back). See FraudRiskAssessment. Added 2026-07-30.
+   */
+  fraudRisk?: FraudRiskAssessment;
   /**
    * Mirrors ScreeningRecord.archiveReason — needed here too because the
    * post-screening ResultCard (app/projects/[id]/page.tsx's Screen tab) lets
@@ -377,6 +403,14 @@ export interface ScreeningRecord {
   notes?: string;
   leverUrl?: string;
   credibility?: CredibilityAssessment;
+  /**
+   * Manually-triggered fraud risk check result, only ever offered at score
+   * >= 75 (FraudRiskChecker). Deliberately NOT in the shared SCREENING_COLUMNS
+   * select yet — see supabase-migration-fraud-calibration.sql's header for
+   * the deferred-wiring plan this follows (same as archiveReason before it).
+   * Added 2026-07-30.
+   */
+  fraudRisk?: FraudRiskAssessment;
   photoUrl?: string;
   linkedInPdfPath?: string;
   interviewQuestions?: string[];
@@ -469,6 +503,110 @@ export interface CalibrationExample {
   fileName: string;
   resumeMimeType: string;
   extractedText: string;
+  createdAt: string;
+}
+
+// ── Fraud calibration ────────────────────────────────────────────────────────
+// Added 2026-07-30, Vlad's ask: a system-wide (not project-scoped, unlike
+// CalibrationExample above) library of real, confirmed-fraudulent resumes,
+// built up over time from the RejectionCard's "Suspected fraud" checkbox.
+// lib/assessFraudRisk.ts few-shots against these the same way scoreCandidate.ts
+// few-shots against CalibrationExample — see that file for the parallel.
+// See supabase-migration-fraud-calibration.sql for the table this mirrors.
+
+/**
+ * Broad category of the confirmed fraud, picked by the recruiter when
+ * flagging a rejection as fraud. Deliberately a small fixed set (not free
+ * text) so lib/assessFraudRisk.ts can group/weight examples by type instead
+ * of treating every past case as equally relevant to a new resume.
+ */
+export type FraudPatternType =
+  | "fabricated_experience"
+  | "inflated_title"
+  | "fake_employer"
+  | "education_mismatch"
+  | "timeline_gap_concealment"
+  | "boilerplate_resume"
+  | "other";
+
+export const FRAUD_PATTERN_TYPES: FraudPatternType[] = [
+  "fabricated_experience",
+  "inflated_title",
+  "fake_employer",
+  "education_mismatch",
+  "timeline_gap_concealment",
+  "boilerplate_resume",
+  "other",
+];
+
+export const FRAUD_PATTERN_TYPE_LABELS: Record<FraudPatternType, string> = {
+  fabricated_experience: "Fabricated experience",
+  inflated_title: "Inflated title",
+  fake_employer: "Fake employer",
+  education_mismatch: "Education mismatch",
+  timeline_gap_concealment: "Concealed timeline gap",
+  boilerplate_resume: "Boilerplate / résumé-mill",
+  other: "Other",
+};
+
+/**
+ * One specific fabricated point on a confirmed-fraud resume — a resume can
+ * have more than one, which is why this is an array on the example rather
+ * than a single freeform note (Vlad's ask: "hit specific points from the
+ * resume that the system can identify").
+ */
+export interface FraudCalibrationClaim {
+  /** The specific claim as it appears on the resume, e.g. "Senior Engineer at Google, 2019-2022". */
+  claimText: string;
+  /** Why this claim was confirmed fabricated — the decision-maker's comment from the Rejection card. */
+  explanation: string;
+}
+
+export interface FraudCalibrationExample {
+  id: number;
+  patternType: FraudPatternType;
+  claims: FraudCalibrationClaim[];
+  fileName: string;
+  resumeMimeType: string;
+  extractedText: string;
+  /** Traceability only — which real rejection this came from. Not a live reference; the source screening may later be deleted or archived without affecting this example. */
+  sourceScreeningId?: number;
+  createdAt: string;
+}
+
+/** One risk signal lib/assessFraudRisk.ts found on a NEW resume, citing which calibration pattern it resembles. */
+export interface FraudRiskSignal {
+  /** The specific text/claim on the resume being screened that triggered this signal. */
+  claimText: string;
+  patternType: FraudPatternType;
+  /** Why this resembles a known fraud pattern — cites age/graduation year/role-gap reasoning per Vlad's ask. */
+  explanation: string;
+  /** ID of the confirmed-fraud calibration example this most closely resembles, if any. Absent when the signal is based purely on internal resume inconsistency with no close match on file. */
+  matchedExampleId?: number;
+}
+
+export type FraudRiskLevel = "low" | "moderate" | "high";
+
+/**
+ * Result of a manually-triggered fraud risk check (only offered at score
+ * >= 75, per Vlad's ask — kept manual and opt-in so it can never push a
+ * batch screening run over the 60s route timeout). Persisted to
+ * screenings.fraud_risk once supabase-migration-fraud-calibration.sql has
+ * run — see that migration's header for the deferred-wiring plan.
+ */
+export interface FraudRiskAssessment {
+  signals: FraudRiskSignal[];
+  /**
+   * 0-100, deterministic — computed in code by computeFraudRiskScore()
+   * (lib/assessFraudRisk.ts) from the model-cited signals, NOT invented by
+   * the model directly, same principle as CredibilityAssessment.scoreDelta.
+   * This is the "percentage" from Vlad's original ask ("gives a percentage
+   * or warning of fake experience").
+   */
+  riskScore: number;
+  /** Deterministic bucket of riskScore — see fraudRiskLevelFromScore(). Powers the risk badge's color. */
+  overallRisk: FraudRiskLevel;
+  summary: string;
   createdAt: string;
 }
 

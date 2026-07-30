@@ -26,6 +26,7 @@ export function formatActionText(a: ScreeningAction, candidateName: string): str
     case "note": return `added a note on ${candidateName}`;
     case "credibility_check": return `ran a credibility check on ${candidateName}`;
     case "rescreen": return `rescreened ${candidateName}`;
+    case "fraud_risk_check": return `ran a fraud risk check on ${candidateName}`;
     default: return `updated ${candidateName}`;
   }
 }
@@ -74,6 +75,8 @@ function ActionIcon({ type }: { type: ActionType }) {
       return <svg {...common}><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6l-8-4Z" /><path d="m9 12 2 2 4-4" /></svg>;
     case "rescreen":
       return <svg {...common}><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5" /></svg>;
+    case "fraud_risk_check":
+      return <svg {...common}><path d="M12 9v4M12 17h.01" /><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /></svg>;
     default:
       return <svg {...common}><circle cx="12" cy="12" r="8" /></svg>;
   }
