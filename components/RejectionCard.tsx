@@ -166,12 +166,12 @@ export function RejectionCard({
               {claims.map((claim, i) => (
                 <div key={i} className="flex flex-col gap-1.5 rounded-lg border border-rose-100 bg-rose-50/50 p-2 dark:border-rose-500/15 dark:bg-rose-500/5">
                   <div className="flex items-start gap-1.5">
-                    <input
-                      type="text"
+                    <textarea
+                      rows={2}
                       value={claim.claimText}
                       onChange={(e) => updateClaim(i, "claimText", e.target.value)}
                       placeholder='Claim as it appears on the resume, e.g. "Senior Engineer at Google, 2019-2022"'
-                      className={`min-w-0 flex-1 ${inputCls}`}
+                      className={`min-w-0 flex-1 resize-none ${inputCls}`}
                     />
                     {claims.length > 1 && (
                       <button type="button" onClick={() => removeClaim(i)}
@@ -183,12 +183,12 @@ export function RejectionCard({
                       </button>
                     )}
                   </div>
-                  <input
-                    type="text"
+                  <textarea
+                    rows={2}
                     value={claim.explanation}
                     onChange={(e) => updateClaim(i, "explanation", e.target.value)}
                     placeholder="How this was confirmed fabricated (from the interview)"
-                    className={inputCls}
+                    className={`resize-none ${inputCls}`}
                   />
                 </div>
               ))}

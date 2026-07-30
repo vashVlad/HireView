@@ -101,7 +101,14 @@ export function StatusStageControl({
   // dropped by an unrelated status change or vice versa.
   const [pendingStatus, setPendingStatus] = useState<CandidateStatus | null>(null);
   const [pendingStage, setPendingStage] = useState<TrackerStage | null>(null);
-  const hasPendingChange = pendingStatus !== null || pendingStage !== null;
+  // Vlad's ask, 2026-07-30: once a new status is picked, don't keep showing
+  // its name in the pill — that reads as "already changed" and it's easy to
+  // walk away thinking the click alone was enough. While a status is
+  // pending, the select is replaced entirely by Confirm/Cancel (below) so
+  // the ONLY thing visible is the explicit action still required. Scoped to
+  // status specifically, per Vlad's wording — stage-only pending keeps its
+  // existing inline label + trailing Confirm/Cancel.
+  const statusPending = pendingStatus !== null;
   const gateOnReason = onArchiveReasonChange !== undefined;
   const displayStatus = pendingArchive ? "archived" : pendingStatus ?? status;
   const showStage = displayStatus === "screening" && !pendingArchive;
@@ -132,29 +139,54 @@ export function StatusStageControl({
       className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}
       onClick={(e) => e.stopPropagation()}
     >
-      <select
-        value={displayStatus}
-        onChange={(e) => {
-          const next = e.target.value as CandidateStatus;
-          if (next === status) { setPendingStatus(null); return; }
-          if (next === "archived" && gateOnReason) {
-            setPendingArchive(true);
-            setPendingStatus(null);
-            return;
-          }
-          setPendingArchive(false);
-          // Doesn't commit yet — just shows as picked until Confirm. See
-          // the general confirm/cancel gate in this component's doc comment.
-          setPendingStatus(next);
-        }}
-        className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
-      >
-        {selectableStatuses.map((s) => (
-          <option key={s} value={s}>
-            {CANDIDATE_STATUS_LABELS[s]}
-          </option>
-        ))}
-      </select>
+      {statusPending ? (
+        <span className="flex shrink-0 items-center gap-1 py-1 pl-2.5 pr-1">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); confirmPending(); }}
+            title="Confirm"
+            className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); cancelPending(); }}
+            title="Cancel"
+            className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </span>
+      ) : (
+        <select
+          value={displayStatus}
+          onChange={(e) => {
+            const next = e.target.value as CandidateStatus;
+            if (next === status) { setPendingStatus(null); return; }
+            if (next === "archived" && gateOnReason) {
+              setPendingArchive(true);
+              setPendingStatus(null);
+              return;
+            }
+            setPendingArchive(false);
+            // Doesn't commit yet — replaces this select with Confirm/Cancel
+            // until one is clicked. See this component's doc comment.
+            setPendingStatus(next);
+          }}
+          className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
+        >
+          {selectableStatuses.map((s) => (
+            <option key={s} value={s}>
+              {CANDIDATE_STATUS_LABELS[s]}
+            </option>
+          ))}
+        </select>
+      )}
       {showTransferredLink && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
@@ -187,7 +219,12 @@ export function StatusStageControl({
           </select>
         </>
       )}
-      {hasPendingChange && (
+      {/* Stage-only pending still gets its own trailing Confirm/Cancel here
+          (the stage select above keeps showing its picked value — Vlad's
+          ask was specifically about status, see statusPending above).
+          Status-pending already rendered its own Confirm/Cancel in place of
+          the select, so it's excluded here to avoid showing the pair twice. */}
+      {pendingStage !== null && !statusPending && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
           <button

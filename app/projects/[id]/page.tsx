@@ -7,6 +7,7 @@ import { AlreadyScreenedCard } from "@/components/AlreadyScreenedCard";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
+import { FraudRiskChecker } from "@/components/FraudRiskChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
 import { RejectionCard } from "@/components/RejectionCard";
@@ -21,7 +22,7 @@ import { TransferControl } from "@/components/TransferControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
   CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
-  ExistingCandidateRef, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
+  ExistingCandidateRef, FraudRiskAssessment, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
@@ -1064,6 +1065,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [justArchivedIds, setJustArchivedIds] = useState<Set<number>>(new Set());
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
+  // Mirrors credibilityMap exactly — added 2026-07-30, same gap Activity
+  // Timeline had before it was extracted: this tab renders its own inline
+  // card markup, not ResultCard.tsx, so anything added to ResultCard doesn't
+  // automatically appear here too.
+  const [fraudRiskMap, setFraudRiskMap] = useState<Record<number, FraudRiskAssessment>>({});
   const [actionsMap, setActionsMap] = useState<Record<number, ScreeningAction[] | "loading">>({});
   // Transfer destination list, Vlad's ask 2026-07-29: projects this
   // recruiter/admin can transfer a candidate INTO, passed down to each
@@ -1108,10 +1114,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   useEffect(() => {
     setScreenings(initialScreenings);
     const saved: Record<number, CredibilityAssessment> = {};
+    const savedFraudRisk: Record<number, FraudRiskAssessment> = {};
     for (const s of initialScreenings) {
       if (s.credibility) saved[s.id] = s.credibility;
+      if (s.fraudRisk) savedFraudRisk[s.id] = s.fraudRisk;
     }
     setCredibilityMap(saved);
+    setFraudRiskMap(savedFraudRisk);
   }, [initialScreenings]);
 
   const handleStageChange = onStageChange;
@@ -1835,6 +1844,31 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     }
                   }}
                 />
+
+                {/* ── Fraud risk check ──────────────────────────────────── */}
+                {/* Same score >= 75 gate as ResultCard.tsx's canShowFraudRisk
+                    — added 2026-07-30, this tab was missing it entirely
+                    (same class of gap Activity Timeline had before). */}
+                {(s.score >= 75 || fraudRiskMap[s.id] !== undefined) && (
+                  <FraudRiskChecker
+                    screeningId={s.id}
+                    currentAssessment={fraudRiskMap[s.id]}
+                    onComplete={async (assessment) => {
+                      try {
+                        const res = await fetch(`/api/history/${s.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ fraudRisk: assessment }),
+                        });
+                        if (!res.ok) return false;
+                        setFraudRiskMap((prev) => ({ ...prev, [s.id]: assessment }));
+                        return true;
+                      } catch {
+                        return false;
+                      }
+                    }}
+                  />
+                )}
 
                 {/* ── Assessment ────────────────────────────────────────── */}
                 {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
