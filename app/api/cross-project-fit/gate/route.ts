@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
-import { listProjects } from "@/lib/projects";
+import { getFitExclusionMap, listProjects } from "@/lib/projects";
 import { getUserTeamIds } from "@/lib/teams";
 import { getAuthUser } from "@/lib/auth";
 import { getAnthropicClient, CLAUDE_MODEL } from "@/lib/anthropic";
@@ -69,9 +69,14 @@ export async function POST(request: NextRequest) {
   if (teamIds.length === 0) return NextResponse.json({ promising: false, alreadyIn: [] });
 
   const projects = await listProjects(teamIds);
-  const candidates = projects.filter(
+  const baseCandidates = projects.filter(
     (p) => p.id !== currentProjectId && p.status === "active" && p.jobDescription.trim().length > 0
   );
+  // Same exclusion toggle as POST /api/cross-project-fit (Vlad's ask,
+  // 2026-07-30) — a project opted out via Settings should never be
+  // classified as a candidate here either, not just skipped in the full check.
+  const excluded = await getFitExclusionMap(baseCandidates.map((p) => p.id));
+  const candidates = baseCandidates.filter((p) => !excluded.has(p.id));
   if (candidates.length === 0) return NextResponse.json({ promising: false, alreadyIn: [] });
 
   // Free (no Claude call) pre-check, same as POST's full check, Vlad's ask

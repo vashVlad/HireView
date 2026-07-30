@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { assessCredibility, detectLinkedIn } from "@/lib/assessCredibility";
 import { extractResumeText } from "@/lib/parseResume";
-import { getScreeningResume, updateScreening } from "@/lib/screenings";
+import { getScreeningConcerns, getScreeningResume, updateScreening } from "@/lib/screenings";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
 
@@ -138,11 +138,22 @@ export async function POST(request: NextRequest) {
   let resumeText: string;
   let crossRefText: string;
   let crossRefPath: string | undefined;
+  let originalConcerns: string[];
   try {
-    const [main, crossRef] = await Promise.all([loadMainResume(), loadCrossRef()]);
+    // originalConcerns (added 2026-07-29, positive-scoring feature) is an
+    // independent read, same reasoning as the main-resume/cross-ref split
+    // above — folded into the same Promise.all rather than awaited after,
+    // and never allowed to fail the whole request (see getScreeningConcerns'
+    // own comment: fails closed to [], not thrown).
+    const [main, crossRef, concerns] = await Promise.all([
+      loadMainResume(),
+      loadCrossRef(),
+      getScreeningConcerns(screeningId),
+    ]);
     resumeText = main;
     crossRefText = crossRef.crossRefText;
     crossRefPath = crossRef.crossRefPath;
+    originalConcerns = concerns;
   } catch (err) {
     if (err instanceof RouteError) return err.response;
     throw err;
@@ -158,6 +169,7 @@ export async function POST(request: NextRequest) {
     crossRefText,
     roleContext: typeof roleContext === "string" ? roleContext : undefined,
     isLinkedIn,
+    originalConcerns,
   });
 
   // Persist cross-reference doc path (reuses linkedin_pdf_path column — no schema change)

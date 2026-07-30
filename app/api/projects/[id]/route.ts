@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteProject, getProject, updateProject } from "@/lib/projects";
+import { deleteProject, getProject, getProjectFitExclusion, updateProject } from "@/lib/projects";
 import { canAccessProject, getAuthUser, isAdmin } from "@/lib/auth";
 
 export async function GET(
@@ -19,7 +19,10 @@ export async function GET(
   try {
     const project = await getProject(numId);
     if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json({ project });
+    // Isolated read, merged on — see getProjectFitExclusion's own comment
+    // for why this is kept out of getProject()'s shared select.
+    const excludeFromFitSuggestions = await getProjectFitExclusion(numId);
+    return NextResponse.json({ project: { ...project, excludeFromFitSuggestions } });
   } catch (err) {
     console.error("Project GET error:", err);
     return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });
@@ -62,6 +65,7 @@ export async function PATCH(
       ...(body?.status !== undefined && { status: body.status }),
       ...(body?.scoreThreshold !== undefined && { scoreThreshold: Number(body.scoreThreshold) }),
       ...(body?.teamId !== undefined && { teamId: body.teamId === null ? null : Number(body.teamId) }),
+      ...(body?.excludeFromFitSuggestions !== undefined && { excludeFromFitSuggestions: Boolean(body.excludeFromFitSuggestions) }),
     });
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -138,15 +138,19 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
   // even see, everywhere this renders (ResultCard, Pipeline, All Candidates).
   // The toggle button in the header still lets the recruiter close it.
   const [open, setOpen] = useState(true);
-  const [tab, setTab] = useState<"flags" | "matches">("flags");
+  const [tab, setTab] = useState<"flags" | "matches" | "resolved">("flags");
 
   const rows = assessment.rows ?? [];
   const flags = rows.filter((r) => r.status === "discrepancy");
   const materialFlags = flags.filter((r) => r.severity === "material");
   const matches = rows.filter((r) => r.status === "match");
   const isLinkedIn = !!assessment.linkedInSignals;
+  // Resolved concerns — added 2026-07-29, Vlad's ask: credit the candidate
+  // when the cross-reference document actually clears something the
+  // original JD-fit screening flagged, not just penalize discrepancies.
+  const resolved = assessment.resolvedConcerns ?? [];
 
-  const activeRows = tab === "flags" ? flags : matches;
+  const activeRows = tab === "flags" ? flags : tab === "matches" ? matches : [];
 
   return (
     <div className="rounded-xl border border-zinc-100 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/40">
@@ -181,8 +185,15 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
             {matches.length} match{matches.length !== 1 ? "es" : ""}
           </span>
           {!!assessment.scoreDelta && (
-            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-rose-700 dark:bg-rose-500/20 dark:text-rose-400">
-              {assessment.scoreDelta} score
+            // Sign-aware as of 2026-07-29 — scoreDelta used to be always
+            // <= 0 (a discrepancy deduction), now it's net of that and a
+            // possible resolved-concern bonus, so it can be positive too.
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+              assessment.scoreDelta > 0
+                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400"
+                : "bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-400"
+            }`}>
+              {assessment.scoreDelta > 0 ? "+" : ""}{assessment.scoreDelta} score
             </span>
           )}
         </div>
@@ -232,18 +243,54 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
                 {matches.length}
               </span>
             </button>
+            {/* Resolved tab — only shown when there's something to show;
+                added 2026-07-29 alongside the resolved-concern scoring bonus. */}
+            {resolved.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setTab("resolved")}
+                className={`flex items-center gap-1.5 border-b-2 pb-2 text-xs font-medium transition-colors ${
+                  tab === "resolved"
+                    ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                    : "border-transparent text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+                }`}
+              >
+                Resolved
+                <span className={`rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums ${tab === "resolved" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"}`}>
+                  {resolved.length}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Rows */}
-          <div className="flex flex-col gap-1.5">
-            {activeRows.length > 0 ? (
-              activeRows.map((row, i) => <CredibilityRowItem key={i} row={row} isLinkedIn={isLinkedIn} />)
-            ) : (
-              <p className="py-2 text-center text-xs text-zinc-400 dark:text-zinc-500">
-                {tab === "flags" ? "No flags — everything checked out." : "No verified matches."}
-              </p>
-            )}
-          </div>
+          {tab === "resolved" ? (
+            <div className="flex flex-col gap-1.5">
+              {resolved.map((r, i) => (
+                <div key={i} className="flex gap-2.5 rounded-lg border-l-2 border-emerald-400 bg-emerald-50/40 px-3 py-2.5 dark:border-emerald-500/50 dark:bg-emerald-500/5">
+                  <span className="mt-0.5 shrink-0">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-emerald-500 dark:text-emerald-400">
+                      <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
+                    <span className="font-semibold text-emerald-800 dark:text-emerald-300">{r.concern}</span>
+                    <span className="text-zinc-600 dark:text-zinc-300">{r.explanation}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {activeRows.length > 0 ? (
+                activeRows.map((row, i) => <CredibilityRowItem key={i} row={row} isLinkedIn={isLinkedIn} />)
+              ) : (
+                <p className="py-2 text-center text-xs text-zinc-400 dark:text-zinc-500">
+                  {tab === "flags" ? "No flags — everything checked out." : "No verified matches."}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* LinkedIn signals panel — only when cross-ref was a LinkedIn PDF */}
           {isLinkedIn && assessment.linkedInSignals && (

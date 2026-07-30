@@ -97,6 +97,14 @@ export async function updateProject(
      * here since this is the shared data-layer function.
      */
     teamId?: number | null;
+    /**
+     * See Project.excludeFromFitSuggestions (lib/types.ts). Requires
+     * supabase-migration-exclude-from-fit-suggestions.sql — NOT YET
+     * CONFIRMED RUN as of this comment. Written conditionally same as every
+     * other deferred column (e.g. crossRefIsLinkedIn on updateScreening) —
+     * the write itself only fails if the column is genuinely missing.
+     */
+    excludeFromFitSuggestions?: boolean;
   }
 ): Promise<void> {
   const supabase = getSupabaseClient();
@@ -107,8 +115,41 @@ export async function updateProject(
   if (fields.status !== undefined) payload.status = fields.status;
   if (fields.scoreThreshold !== undefined) payload.score_threshold = Math.max(0, Math.min(100, fields.scoreThreshold));
   if (fields.teamId !== undefined) payload.team_id = fields.teamId;
+  if (fields.excludeFromFitSuggestions !== undefined) payload.exclude_from_fit_suggestions = fields.excludeFromFitSuggestions;
   const { error } = await supabase.from("projects").update(payload).eq("id", id);
   if (error) throw error;
+}
+
+/**
+ * Isolated, single-purpose read for Project.excludeFromFitSuggestions —
+ * kept OUT of listProjects()/getProject()'s shared select per the Migration
+ * Sequencing rule (see supabase-migration-exclude-from-fit-suggestions.sql's
+ * header). Fails closed to an empty set (nothing excluded) on any error,
+ * including the column not existing yet, so a missing migration can only
+ * ever make Cross-Project Fit Suggestion behave as if no project opted out
+ * — it can never break listing/reading projects elsewhere in the app.
+ */
+export async function getFitExclusionMap(projectIds: number[]): Promise<Set<number>> {
+  if (projectIds.length === 0) return new Set();
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("projects")
+      .select("id, exclude_from_fit_suggestions")
+      .in("id", projectIds)
+      .returns<{ id: number; exclude_from_fit_suggestions: boolean | null }[]>();
+    if (error) throw error;
+    return new Set((data ?? []).filter((r) => r.exclude_from_fit_suggestions).map((r) => r.id));
+  } catch (err) {
+    console.error("getFitExclusionMap failed (non-fatal — treated as nothing excluded):", err);
+    return new Set();
+  }
+}
+
+/** Single-id convenience wrapper around getFitExclusionMap, for Settings' own read. */
+export async function getProjectFitExclusion(id: number): Promise<boolean> {
+  const set = await getFitExclusionMap([id]);
+  return set.has(id);
 }
 
 export async function deleteProject(id: number): Promise<void> {
