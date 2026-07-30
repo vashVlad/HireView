@@ -623,6 +623,18 @@ export interface Project {
   /** Minimum score to save to pipeline history. Default 45. Range 0–100. */
   scoreThreshold: number;
   teamId?: number;
+  /**
+   * Opt this role out of Cross-Project Fit Suggestion (Phase 2.1) — when
+   * true, a candidate who scores below threshold on some OTHER project will
+   * never have this project checked/suggested as a better fit for them.
+   * Default false (included), added 2026-07-30, Vlad's ask. Deliberately
+   * NOT in the shared listProjects()/getProject() select — see
+   * supabase-migration-exclude-from-fit-suggestions.sql's header for the
+   * deferred-wiring rationale. Only populated when explicitly fetched via
+   * getProjectFitExclusion()/getFitExclusionMap() (lib/projects.ts); absent
+   * (not just false) means "not checked," not "confirmed included."
+   */
+  excludeFromFitSuggestions?: boolean;
   createdAt: string;
   updatedAt: string;
 }

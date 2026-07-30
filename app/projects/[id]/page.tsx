@@ -2063,12 +2063,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
 // ── Settings tab ───────────────────────────────────────────────────────────
 
-function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThresholdSaved }: {
+function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThresholdSaved, onFitExclusionSaved }: {
   project: Project;
   onNameSaved: (name: string) => void;
   onStatusToggled: (status: "active" | "archived") => void;
   onDeleted: () => void;
   onThresholdSaved: (threshold: number) => void;
+  onFitExclusionSaved: (excludeFromFitSuggestions: boolean) => void;
 }) {
   const router = useRouter();
   const [nameValue, setNameValue] = useState(project.name);
@@ -2079,6 +2080,11 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [threshold, setThreshold] = useState(project.scoreThreshold ?? 45);
   const [savingThreshold, setSavingThreshold] = useState(false);
+  // Cross-Project Fit Suggestion opt-out — Vlad's ask, 2026-07-30. See
+  // Project.excludeFromFitSuggestions (lib/types.ts) for the deferred-
+  // wiring note; requires supabase-migration-exclude-from-fit-suggestions.sql.
+  const [excludeFromFit, setExcludeFromFit] = useState(project.excludeFromFitSuggestions ?? false);
+  const [savingFitExclusion, setSavingFitExclusion] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   async function saveName() {
@@ -2104,6 +2110,19 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
       onThresholdSaved(threshold);
     } catch { /* non-fatal */ }
     finally { setSavingThreshold(false); }
+  }
+
+  async function saveFitExclusion(next: boolean) {
+    setExcludeFromFit(next);
+    setSavingFitExclusion(true);
+    try {
+      await fetch(`/api/projects/${project.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ excludeFromFitSuggestions: next }),
+      });
+      onFitExclusionSaved(next);
+    } catch { /* non-fatal */ }
+    finally { setSavingFitExclusion(false); }
   }
 
   async function toggleStatus() {
@@ -2185,6 +2204,23 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
           className="self-end rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {savingThreshold ? "Saving…" : "Save threshold"}
+        </button>
+      </div>
+
+      {/* Cross-Project Fit Suggestion opt-out — Vlad's ask, 2026-07-30:
+          "not try to find a better fit for this role" — when on, this
+          project is never checked/suggested when a candidate scores below
+          threshold on some OTHER project (app/api/cross-project-fit). */}
+      <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div>
+          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Exclude from fit suggestions</p>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Keep this role out of "better fit" suggestions for candidates screened elsewhere.
+          </p>
+        </div>
+        <button type="button" onClick={() => saveFitExclusion(!excludeFromFit)} disabled={savingFitExclusion}
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${excludeFromFit ? "bg-violet-600" : "bg-zinc-300 dark:bg-zinc-600"}`}>
+          <span className={`inline-block h-3.5 w-3.5 translate-x-0.5 rounded-full bg-white transition-transform ${excludeFromFit ? "translate-x-4" : ""}`} />
         </button>
       </div>
 
@@ -3184,6 +3220,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             onStatusToggled={(status) => setProject((p) => p ? { ...p, status } : p)}
             onDeleted={() => window.location.href = "/projects"}
             onThresholdSaved={(scoreThreshold) => setProject((p) => p ? { ...p, scoreThreshold } : p)}
+            onFitExclusionSaved={(excludeFromFitSuggestions) => setProject((p) => p ? { ...p, excludeFromFitSuggestions } : p)}
           />
         )}
       </main>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
-import { listProjects } from "@/lib/projects";
+import { getFitExclusionMap, listProjects } from "@/lib/projects";
 import { getUserTeamIds } from "@/lib/teams";
 import { getAuthUser } from "@/lib/auth";
 import { findProjectsWithCandidate } from "@/lib/screenings";
@@ -37,9 +37,16 @@ export async function GET(request: NextRequest) {
   if (teamIds.length === 0) return NextResponse.json({ count: 0 });
 
   const projects = await listProjects(teamIds);
-  const count = projects.filter(
+  const baseCandidates = projects.filter(
     (p) => p.id !== currentProjectId && p.status === "active" && p.jobDescription.trim().length > 0
-  ).length;
+  );
+  // Vlad's ask, 2026-07-30: a project can opt out of being suggested as a
+  // "better fit" target via Settings. Excluded the same way in both this
+  // preview count and POST's real check below, so the number shown here can
+  // never disagree with what POST would actually do — see that route's own
+  // comment for why that invariant matters.
+  const excluded = await getFitExclusionMap(baseCandidates.map((p) => p.id));
+  const count = baseCandidates.filter((p) => !excluded.has(p.id)).length;
 
   return NextResponse.json({ count });
 }
@@ -80,9 +87,13 @@ export async function POST(request: NextRequest) {
   }
 
   const projects = await listProjects(teamIds);
-  const candidates = projects.filter(
+  const baseCandidates = projects.filter(
     (p) => p.id !== currentProjectId && p.status === "active" && p.jobDescription.trim().length > 0
   );
+  // See GET's matching comment above — a project can opt out of being
+  // suggested at all via its own Settings toggle.
+  const excluded = await getFitExclusionMap(baseCandidates.map((p) => p.id));
+  const candidates = baseCandidates.filter((p) => !excluded.has(p.id));
 
   if (candidates.length === 0) {
     return NextResponse.json({ suggestion: null, alreadyIn: [] });
