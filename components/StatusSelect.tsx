@@ -78,28 +78,36 @@ export function StatusSelect({
   // is replaced entirely by Confirm/Cancel (mirrors StatusStageControl.tsx's
   // statusPending treatment) so the only visible thing is the action still
   // required.
+  // Width-preserving trick, Vlad's ask 2026-07-30 — see
+  // StatusStageControl.tsx's matching comment for the full reasoning: an
+  // invisible copy of the CURRENT status label reserves the same width that
+  // status's normal chip would take, so this pill doesn't visibly shrink to
+  // just the icons' width while pending.
   const statusSelect = showConfirmCancel ? (
-    <span className="flex shrink-0 items-center gap-1 py-1 pl-2.5 pr-1">
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); confirmPending(); }}
-        title="Confirm"
-        className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-          <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); cancelPending(); }}
-        title="Cancel"
-        className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-          <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
+    <span className="relative flex shrink-0 items-center py-1 pl-2.5 pr-1">
+      <span className="invisible whitespace-nowrap">{CANDIDATE_STATUS_LABELS[status]}</span>
+      <span className="absolute inset-0 flex items-center justify-center gap-1.5">
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); confirmPending(); }}
+          title="Confirm"
+          className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); cancelPending(); }}
+          title="Cancel"
+          className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </span>
     </span>
   ) : (
     <select

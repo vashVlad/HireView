@@ -140,27 +140,39 @@ export function StatusStageControl({
       onClick={(e) => e.stopPropagation()}
     >
       {statusPending ? (
-        <span className="flex shrink-0 items-center gap-1 py-1 pl-2.5 pr-1">
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); confirmPending(); }}
-            title="Confirm"
-            className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-              <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); cancelPending(); }}
-            title="Cancel"
-            className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+        // Width-preserving trick, Vlad's ask 2026-07-30: the confirm/cancel-
+        // only chip was shrinking down to just the icons' width, a visibly
+        // smaller/different-looking pill than every other status chip next
+        // to it. An invisible copy of the CURRENT (pre-pick) status label
+        // reserves the exact width that status's own chip would normally
+        // take — same font/padding, just `invisible` — while the actual
+        // Confirm/Cancel buttons render on top of it via absolute
+        // positioning, so the pill never visibly resizes when it enters the
+        // pending state.
+        <span className="relative flex shrink-0 items-center py-1 pl-2.5 pr-1">
+          <span className="invisible whitespace-nowrap">{CANDIDATE_STATUS_LABELS[status]}</span>
+          <span className="absolute inset-0 flex items-center justify-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); confirmPending(); }}
+              title="Confirm"
+              className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); cancelPending(); }}
+              title="Cancel"
+              className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </span>
         </span>
       ) : (
         <select
@@ -219,12 +231,19 @@ export function StatusStageControl({
           </select>
         </>
       )}
-      {/* Stage-only pending still gets its own trailing Confirm/Cancel here
-          (the stage select above keeps showing its picked value — Vlad's
-          ask was specifically about status, see statusPending above).
-          Status-pending already rendered its own Confirm/Cancel in place of
-          the select, so it's excluded here to avoid showing the pair twice. */}
-      {pendingStage !== null && !statusPending && (
+      {/* Stage always gets its own trailing Confirm/Cancel whenever it has a
+          pending pick — Vlad's ask, 2026-07-30: "make the user confirm the
+          stages as well." Previously suppressed when statusPending was also
+          true (to avoid a duplicate-looking pair), but that meant a stage
+          pick made while a status change was ALSO pending had no visible
+          confirmation gate of its own — it silently rode along on the
+          status segment's Confirm/Cancel with nothing next to the stage
+          value indicating it needed one too. Both rows call the same
+          confirmPending()/cancelPending(), so clicking either one commits
+          or discards everything pending together — showing both is about
+          making each segment's pending state visible, not adding a second
+          independent gate. */}
+      {pendingStage !== null && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
           <button
