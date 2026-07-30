@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
+import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening } from "@/lib/screenings";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import { getProject } from "@/lib/projects";
 import type { CandidateResult } from "@/lib/types";
 
-export const maxDuration = 30;
+// DO-NOT-TOUCH EXCEPTION (2026-07-30 — Vlad reported a real
+// FUNCTION_INVOCATION_TIMEOUT on this exact route, transferring a candidate
+// from a Cross-Project Fit Suggestion during screening). Same root-cause
+// class already fixed in app/api/screen-resumes/route.ts on 2026-07-29 (see
+// that file's own do-not-touch exception): saveScreening() calls
+// generateFingerprint(), a real Claude API call, and this route let it run
+// sequentially — after the project lookup, storage upload, insert, and
+// activity log write — instead of overlapping it with independent work.
+// Raised from 30 to 300 here too, matching screen-resumes/route.ts exactly
+// (that file's comment documents the Vercel plan caveat — 300 only deploys
+// cleanly on Pro/Enterprise or Hobby+Fluid Compute — already proven safe on
+// this project's plan since screen-resumes/route.ts deploys fine with the
+// same value). See the fingerprint-parallelization exception further down
+// for the other half of this fix.
+export const maxDuration = 300;
 
 const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
   pdf: "application/pdf",
@@ -83,9 +98,29 @@ export async function POST(request: NextRequest) {
   // score_threshold (same pattern as app/api/screen-resumes/route.ts,
   // do-not-touch, both already do this) and passing it through to
   // saveScreening so below-threshold candidates saved via this route also
-  // get auto-archived (lib/screenings.ts, 2026-07-15) — no other logic in
-  // this route was touched.
-  const project = projectId != null ? await getProject(projectId).catch(() => null) : null;
+  // get auto-archived (lib/screenings.ts, 2026-07-15).
+  //
+  // DO-NOT-TOUCH EXCEPTION (2026-07-30 — see this file's maxDuration comment
+  // above for the full timeout root-cause). generateFingerprint() only needs
+  // extractedResumeText, already resolved above — it doesn't depend on this
+  // project lookup at all, so there's no reason to make it wait. Run in
+  // parallel via Promise.all and pass the result through saveScreening's
+  // existing `fingerprint` param (already supports this — screen-resumes/
+  // route.ts does the exact same thing to overlap fingerprinting with its
+  // own scoreCandidate() call; this route has no scoring call to hide it
+  // under, so it overlaps with the project lookup instead). Zero changes to
+  // lib/screenings.ts itself. Explicit `null` on failure (not just omitting
+  // the field) tells saveScreening not to retry — same fail-open contract
+  // screen-resumes already relies on; a fingerprinting failure here still
+  // can never block the transfer from saving, it just skips duplicate/
+  // history matching for this one save.
+  const [project, fingerprint] = await Promise.all([
+    projectId != null ? getProject(projectId).catch(() => null) : Promise.resolve(null),
+    generateFingerprint(extractedResumeText).catch((err) => {
+      console.error("Fingerprint generation failed (screening still saved, duplicate/history matching skipped):", err);
+      return null;
+    }),
+  ]);
   const scoreThreshold = project?.scoreThreshold ?? 45;
 
   const { id } = await saveScreening({
@@ -94,6 +129,7 @@ export async function POST(request: NextRequest) {
     resumeFile: buffer,
     resumeMimeType: mimeType,
     resumeText: extractedResumeText,
+    fingerprint,
     linkedInMode,
     agencyName,
     projectId,
