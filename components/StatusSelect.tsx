@@ -141,7 +141,15 @@ export function StatusSelect({
   if (!showArchiveReason && !showConfirmCancel) return statusSelect;
 
   return (
-    <div className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}>
+    // Narrow-screen safety net, 2026-07-30 — mirrors StatusStageControl.tsx's
+    // matching change: scrolls internally instead of overflowing the card if
+    // the status + archive-reason segments together ever run wider than the
+    // space available, instead of clipping the trailing chevron.
+    // `overflow-y-hidden` alongside it — CSS2.1 §11.1.1 quirk (overflow-x
+    // non-visible + overflow-y left default computes overflow-y to auto
+    // too) could otherwise show an unwanted vertical scrollbar from
+    // sub-pixel height rounding alone. Caught 2026-07-30.
+    <div className={`inline-flex max-w-full shrink-0 items-center gap-0 overflow-x-auto overflow-y-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}>
       {statusSelect}
       {showArchiveReason && (
         <>
