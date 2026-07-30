@@ -67,3 +67,29 @@ body {
 .animate-pop-in {
   animation: pop-in 0.25s ease-out both;
 }
+
+/* Added 2026-07-30 for the "Multiple roles" collapsed-profile toggle
+   (app/projects/[id]/page.tsx's PipelineTab and app/candidates/page.tsx) —
+   plays when an older submission goes from `hidden` to visible after
+   clicking the toggle bar, so the reveal reads as an intentional unfold
+   instead of an instant snap. Toggling `display: none` on/off naturally
+   restarts a CSS animation each time (the element is unmounted from the
+   render tree while hidden), so this replays on every expand. Deliberately
+   slower than .animate-fade-in-up (0.4s) — Vlad's ask, 2026-07-30. */
+@keyframes reveal-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    /* Literal `none`, not translateY(0) — see fade-in-up's comment above for
+       why a non-`none` computed transform under animation-fill-mode: both
+       would create a permanent stacking context here too. */
+    transform: none;
+  }
+}
+
+.animate-reveal-down {
+  animation: reveal-down 0.6s ease-out both;
+}

@@ -155,7 +155,19 @@ export function StatusStageControl({
 
   return (
     <div
-      className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}
+      // Narrow-screen safety net, 2026-07-30: this pill can carry up to 4
+      // segments at once (status + stage + combined confirm/cancel + trailing
+      // chevron, or status + archive reason) with nothing sized in `ch`/`px`
+      // to shrink — `overflow-x-auto` (was `overflow-hidden`) means that if
+      // it ever does run wider than the space available on a small screen,
+      // it scrolls internally instead of clipping the trailing chevron or
+      // pushing the whole card wider than the viewport. No visible change
+      // whenever it already fits, which is the common case. Explicit
+      // `overflow-y-hidden` alongside it — CSS2.1 §11.1.1 quirk means
+      // overflow-x non-visible with overflow-y left at its default computes
+      // overflow-y to auto too, which can show an unwanted vertical
+      // scrollbar from sub-pixel height rounding alone. Caught 2026-07-30.
+      className={`inline-flex max-w-full shrink-0 items-center gap-0 overflow-x-auto overflow-y-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}
       onClick={(e) => e.stopPropagation()}
     >
       {statusPending ? (
