@@ -825,6 +825,11 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
                   fd.set("resumeFile", file);
                   fd.set("currentProjectId", String(project.id));
                   fd.set("candidateName", result.candidateName);
+                  // Vlad's ask, 2026-07-30: the suggestion is labeled
+                  // "stronger fit," so the server needs this project's own
+                  // score to actually enforce that — see cross-project-fit's
+                  // matching comment on the `best` filter.
+                  fd.set("currentScore", String(result.score));
                   const res = await fetch("/api/cross-project-fit", { method: "POST", body: fd });
                   if (!res.ok) {
                     const body = await res.json().catch(() => null);
