@@ -2515,6 +2515,12 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   const [selected, setSelected] = useState<ScreeningRecord | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  // Confirm/cancel gate for the drawer's "Move to stage" chip row — Vlad's
+  // ask, 2026-07-30: this was the one stage/status control left in the app
+  // that still committed instantly on click, unlike every other one
+  // (StatusStageControl.tsx's chips, both status and stage). Cleared
+  // whenever a different candidate is selected, below.
+  const [pendingDrawerStage, setPendingDrawerStage] = useState<TrackerStage | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>(() =>
     Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, `/api/history/${s.id}/photo`]))
   );
@@ -2542,6 +2548,13 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   useEffect(() => {
     if (selected) setSelected((prev) => screenings.find((s) => s.id === prev?.id) ?? null);
   }, [screenings, stagesMap]);
+
+  // Clear any unconfirmed stage pick when the drawer switches to a
+  // different candidate (or closes) — same reasoning as DrawerBody's own
+  // per-candidate reset effect.
+  useEffect(() => {
+    setPendingDrawerStage(null);
+  }, [selected?.id]);
 
   // "screening" status = actively in the Tracker (TA/L1/L2/In-Person/Offer
   // arc) — was "interview" before that status was removed 2026-07-15.
@@ -2822,17 +2835,22 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               </button>
             </div>
 
-            {/* Move stage */}
+            {/* Move stage — confirm/cancel gated, 2026-07-30 (Vlad's ask):
+                this used to commit the moment a chip was clicked, unlike
+                every other status/stage control. Clicking a chip now only
+                stages it as pendingDrawerStage; the actual onStageChange
+                call happens on Confirm. Re-clicking the candidate's actual
+                current stage clears the pending pick (nothing to confirm). */}
             <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
               <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Move to stage</p>
               <div className="flex flex-wrap gap-1.5">
                 {TRACKER_STAGES.map((st) => {
                   const sc = STAGE_COLORS[st];
-                  const active = drawerStage === st;
+                  const active = (pendingDrawerStage ?? drawerStage) === st;
                   const isReject = st === "Reject";
                   return (
                     <button key={st} type="button"
-                      onClick={() => onStageChange(selected.id, st)}
+                      onClick={() => setPendingDrawerStage(st === drawerStage ? null : st)}
                       className={`rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
                         active
                           ? `${sc.bg} ${sc.text} ${sc.border} shadow-sm`
@@ -2845,11 +2863,38 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                   );
                 })}
               </div>
+              {pendingDrawerStage && (
+                <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 py-1 pl-2 pr-1 dark:border-violet-500/30 dark:bg-violet-500/10">
+                  <span className="flex-1 text-[11px] font-medium text-violet-700 dark:text-violet-400">
+                    Move to {pendingDrawerStage}?
+                  </span>
+                  <button type="button"
+                    onClick={() => { onStageChange(selected.id, pendingDrawerStage); setPendingDrawerStage(null); }}
+                    className="rounded-md bg-violet-600 px-1.5 py-0.5 text-[11px] font-semibold text-white transition-colors hover:bg-violet-700">
+                    Confirm
+                  </button>
+                  <button type="button"
+                    onClick={() => setPendingDrawerStage(null)}
+                    className="rounded-md border border-zinc-200 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800">
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Rejection card — right beneath the "Move to stage" chip row per
-                Vlad's ask, 2026-07-29. See components/RejectionCard.tsx. */}
-            {drawerStage === "Reject" && (
+                Vlad's ask, 2026-07-29. See components/RejectionCard.tsx.
+                Keyed off the PENDING pick too (not just the confirmed
+                drawerStage), 2026-07-30 follow-up: now that picking "Reject"
+                requires its own Confirm click above, waiting for drawerStage
+                alone would hide this card until after that round-trip,
+                breaking the one-pass "pick Reject, fill in why, save" flow
+                this was built for. Showing it as soon as Reject is even
+                picked (confirmed or not) keeps that flow intact — saving the
+                reason here is already a separate action from confirming the
+                stage move (RejectionCard's own Save button only PATCHes
+                tracker.reject_reason, see onSaveReason below). */}
+            {(pendingDrawerStage ?? drawerStage) === "Reject" && (
               <RejectionCard
                 // Forces a fresh mount per candidate — RejectionCard owns its
                 // own local state (reason choice, fraud claims) rather than

@@ -105,13 +105,32 @@ export function StatusStageControl({
   // its name in the pill — that reads as "already changed" and it's easy to
   // walk away thinking the click alone was enough. While a status is
   // pending, the select is replaced entirely by Confirm/Cancel (below) so
-  // the ONLY thing visible is the explicit action still required. Scoped to
-  // status specifically, per Vlad's wording — stage-only pending keeps its
-  // existing inline label + trailing Confirm/Cancel.
-  const statusPending = pendingStatus !== null;
+  // the ONLY thing visible is the explicit action still required.
+  //
+  // Follow-up, same day: this excludes a pending pick of "screening"
+  // specifically. Picking "Screening" reveals the stage picker (showStage
+  // below), and if the recruiter also picks a stage in that same pass, the
+  // icon-only status treatment PLUS the stage's own grouped Confirm/Cancel
+  // meant two separate confirmation controls on screen for what is really
+  // one decision ("move this candidate into Screening at stage L1"). Vlad's
+  // ask: "let the recruiter do it only once... keep the one you have for
+  // stage confirmation but link it to the status as well." So when the
+  // pending status is "screening", the select stays visible (shows
+  // "Screening" plainly, same as an already-confirmed screening status
+  // would) and the ONE grouped confirm block below (showCombinedConfirm)
+  // covers both the status and stage pick together — see confirmPending(),
+  // unchanged, already commits both whenever they're set.
+  const statusPending = pendingStatus !== null && pendingStatus !== "screening";
   const gateOnReason = onArchiveReasonChange !== undefined;
   const displayStatus = pendingArchive ? "archived" : pendingStatus ?? status;
   const showStage = displayStatus === "screening" && !pendingArchive;
+  // Drives the single grouped Confirm/Cancel block after the stage select —
+  // fires whenever EITHER a pending "screening" status pick or a pending
+  // stage pick (or both) needs confirming, so only one control ever shows
+  // for this combined status+stage decision. Plain non-screening status
+  // picks keep their own separate icon-overlay confirm above instead (see
+  // statusPending) — this flag never overlaps with that one.
+  const showCombinedConfirm = showStage && (pendingStatus === "screening" || pendingStage !== null);
   const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
   const showTransferredLink = status === "transferred" && transferredToScreeningId != null;
 
@@ -248,8 +267,11 @@ export function StatusStageControl({
           "|" divider here made the stage value and its own Confirm/Cancel
           read as two unrelated segments; dropping it groups "L1  ✓ ✗" as
           one field, same idea as the status-pending overlay's icons sitting
-          directly where the label was. */}
-      {pendingStage !== null && (
+          directly where the label was. This is now the SINGLE confirm point
+          for the whole "screening + stage" decision — see showCombinedConfirm
+          above for why it also covers a pending "screening" status pick,
+          not just a pending stage pick. */}
+      {showCombinedConfirm && (
         <span className="flex shrink-0 items-center gap-2.5 py-1 pl-1 pr-1.5">
           <button
             type="button"
