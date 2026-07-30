@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
   const resumeFile = formData.get("resumeFile");
   const currentProjectIdField = formData.get("currentProjectId");
   const candidateNameField = formData.get("candidateName");
+  const currentScoreField = formData.get("currentScore");
 
   if (!(resumeFile instanceof File)) {
     return NextResponse.json({ error: "resumeFile is required" }, { status: 400 });
@@ -80,6 +81,15 @@ export async function POST(request: NextRequest) {
     ? parseInt(currentProjectIdField.trim(), 10) || undefined
     : undefined;
   const candidateName = typeof candidateNameField === "string" ? candidateNameField.trim() : "";
+  // Vlad's ask, 2026-07-30: a "stronger fit" has to actually score higher
+  // than what the candidate already scored on the role they were screened
+  // against — see the `best` filter below. Left undefined if the caller
+  // ever omits it, which the filter treats as "no floor" so a missing
+  // field degrades to the old behavior rather than silently suppressing
+  // every suggestion.
+  const currentScore = typeof currentScoreField === "string" && currentScoreField.trim()
+    ? parseInt(currentScoreField.trim(), 10)
+    : undefined;
 
   const teamIds = await getUserTeamIds(user.id);
   if (teamIds.length === 0) {
@@ -161,9 +171,14 @@ export async function POST(request: NextRequest) {
   }
 
   // Only surface a suggestion that would actually clear the other project's
-  // own bar — a "better fit" that still wouldn't pass isn't a real suggestion.
+  // own bar — a "better fit" that still wouldn't pass isn't a real
+  // suggestion. Also, 2026-07-30 (Vlad's ask): it has to actually score
+  // higher than the candidate's score on the project they were screened
+  // against — otherwise calling it a "stronger fit" is wrong even if it
+  // clears the other project's own threshold (e.g. scoring 54 on a 50-point
+  // bar here isn't "stronger" than the 60 they already scored elsewhere).
   const best = scored
-    .filter((s) => s.score >= s.threshold)
+    .filter((s) => s.score >= s.threshold && (currentScore == null || s.score > currentScore))
     .sort((a, b) => b.score - a.score)[0];
 
   return NextResponse.json({
