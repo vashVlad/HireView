@@ -53,6 +53,16 @@ const STAGE_TEXT_COLORS: Record<TrackerStage, string> = {
  * actual reason is picked from the second dropdown, at which point both the
  * status and the reason commit together in one step. Picking any other
  * status while this pending state is showing just cancels it normally.
+ *
+ * Every OTHER status/stage change is now gated the same conceptual way, as
+ * of 2026-07-29 (Vlad: status changes "can be accidental" and every one
+ * gets logged to Activity, which "we can avoid"). Picking a value shows it
+ * as pending — the select visually reflects the pick — but neither
+ * `onStatusChange` nor `onStageChange` fires, and nothing is logged, until
+ * an explicit Confirm click. Cancel (or picking a different value) discards
+ * the pending pick with zero side effects. Archived keeps its own existing
+ * gate above untouched (picking a reason already IS its confirm step,
+ * doubling that up with a second Confirm click would be redundant).
  */
 export function StatusStageControl({
   status,
@@ -84,11 +94,57 @@ export function StatusStageControl({
   transferredToScreeningId?: number;
 }) {
   const [pendingArchive, setPendingArchive] = useState(false);
+  // General confirm/cancel gate, 2026-07-29 — see doc comment above. Only
+  // one of these is ever meaningfully set at a time in normal use (a
+  // recruiter changes status OR stage, not both in the same click), but
+  // they're independent so a stray pending stage pick can't get silently
+  // dropped by an unrelated status change or vice versa.
+  const [pendingStatus, setPendingStatus] = useState<CandidateStatus | null>(null);
+  const [pendingStage, setPendingStage] = useState<TrackerStage | null>(null);
+  // Vlad's ask, 2026-07-30: once a new status is picked, don't keep showing
+  // its name in the pill — that reads as "already changed" and it's easy to
+  // walk away thinking the click alone was enough. While a status is
+  // pending, the select is replaced entirely by Confirm/Cancel (below) so
+  // the ONLY thing visible is the explicit action still required.
+  //
+  // Follow-up, same day: this excludes a pending pick of "screening"
+  // specifically. Picking "Screening" reveals the stage picker (showStage
+  // below), and if the recruiter also picks a stage in that same pass, the
+  // icon-only status treatment PLUS the stage's own grouped Confirm/Cancel
+  // meant two separate confirmation controls on screen for what is really
+  // one decision ("move this candidate into Screening at stage L1"). Vlad's
+  // ask: "let the recruiter do it only once... keep the one you have for
+  // stage confirmation but link it to the status as well." So when the
+  // pending status is "screening", the select stays visible (shows
+  // "Screening" plainly, same as an already-confirmed screening status
+  // would) and the ONE grouped confirm block below (showCombinedConfirm)
+  // covers both the status and stage pick together — see confirmPending(),
+  // unchanged, already commits both whenever they're set.
+  const statusPending = pendingStatus !== null && pendingStatus !== "screening";
   const gateOnReason = onArchiveReasonChange !== undefined;
-  const displayStatus = pendingArchive ? "archived" : status;
-  const showStage = status === "screening" && !pendingArchive;
+  const displayStatus = pendingArchive ? "archived" : pendingStatus ?? status;
+  const showStage = displayStatus === "screening" && !pendingArchive;
+  // Drives the single grouped Confirm/Cancel block after the stage select —
+  // fires whenever EITHER a pending "screening" status pick or a pending
+  // stage pick (or both) needs confirming, so only one control ever shows
+  // for this combined status+stage decision. Plain non-screening status
+  // picks keep their own separate icon-overlay confirm above instead (see
+  // statusPending) — this flag never overlaps with that one.
+  const showCombinedConfirm = showStage && (pendingStatus === "screening" || pendingStage !== null);
   const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
   const showTransferredLink = status === "transferred" && transferredToScreeningId != null;
+
+  function confirmPending() {
+    if (pendingStatus !== null) onStatusChange(pendingStatus);
+    if (pendingStage !== null) onStageChange(pendingStage);
+    setPendingStatus(null);
+    setPendingStage(null);
+  }
+
+  function cancelPending() {
+    setPendingStatus(null);
+    setPendingStage(null);
+  }
   // "Transferred" is never offered as something to pick FROM another
   // status — it only ever gets set by TransferControl's own commit flow —
   // but if a candidate already IS "transferred", it still needs to appear
@@ -102,25 +158,66 @@ export function StatusStageControl({
       className={`inline-flex shrink-0 items-center gap-0 overflow-hidden rounded-full border pr-2 text-xs font-medium ${STATUS_COLORS[displayStatus]}`}
       onClick={(e) => e.stopPropagation()}
     >
-      <select
-        value={displayStatus}
-        onChange={(e) => {
-          const next = e.target.value as CandidateStatus;
-          if (next === "archived" && gateOnReason) {
-            setPendingArchive(true);
-            return;
-          }
-          setPendingArchive(false);
-          onStatusChange(next);
-        }}
-        className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
-      >
-        {selectableStatuses.map((s) => (
-          <option key={s} value={s}>
-            {CANDIDATE_STATUS_LABELS[s]}
-          </option>
-        ))}
-      </select>
+      {statusPending ? (
+        // Width-preserving trick, Vlad's ask 2026-07-30: the confirm/cancel-
+        // only chip was shrinking down to just the icons' width, a visibly
+        // smaller/different-looking pill than every other status chip next
+        // to it. An invisible copy of the CURRENT (pre-pick) status label
+        // reserves the exact width that status's own chip would normally
+        // take — same font/padding, just `invisible` — while the actual
+        // Confirm/Cancel buttons render on top of it via absolute
+        // positioning, so the pill never visibly resizes when it enters the
+        // pending state.
+        <span className="relative flex shrink-0 items-center py-1 pl-2.5 pr-1">
+          <span className="invisible whitespace-nowrap">{CANDIDATE_STATUS_LABELS[status]}</span>
+          <span className="absolute inset-0 flex items-center justify-center gap-2.5">
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); confirmPending(); }}
+              title="Confirm"
+              className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); cancelPending(); }}
+              title="Cancel"
+              className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </span>
+        </span>
+      ) : (
+        <select
+          value={displayStatus}
+          onChange={(e) => {
+            const next = e.target.value as CandidateStatus;
+            if (next === status) { setPendingStatus(null); return; }
+            if (next === "archived" && gateOnReason) {
+              setPendingArchive(true);
+              setPendingStatus(null);
+              return;
+            }
+            setPendingArchive(false);
+            // Doesn't commit yet — replaces this select with Confirm/Cancel
+            // until one is clicked. See this component's doc comment.
+            setPendingStatus(next);
+          }}
+          className="cursor-pointer appearance-none bg-transparent py-1 pl-2.5 pr-1 outline-none"
+        >
+          {selectableStatuses.map((s) => (
+            <option key={s} value={s}>
+              {CANDIDATE_STATUS_LABELS[s]}
+            </option>
+          ))}
+        </select>
+      )}
       {showTransferredLink && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
@@ -138,9 +235,13 @@ export function StatusStageControl({
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
           <select
-            value={stage ?? ""}
-            onChange={(e) => { if (e.target.value) onStageChange(e.target.value as TrackerStage); }}
-            className={`cursor-pointer appearance-none bg-transparent py-1 pl-1.5 pr-1 outline-none ${stage ? STAGE_TEXT_COLORS[stage] : "opacity-60"}`}
+            value={pendingStage ?? stage ?? ""}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              const next = e.target.value as TrackerStage;
+              setPendingStage(next === stage ? null : next);
+            }}
+            className={`cursor-pointer appearance-none bg-transparent py-1 pl-1.5 pr-1 outline-none ${(pendingStage ?? stage) ? STAGE_TEXT_COLORS[pendingStage ?? stage!] : "opacity-60"}`}
           >
             <option value="" disabled>Stage</option>
             {TRACKER_STAGES.map((s) => (
@@ -148,6 +249,51 @@ export function StatusStageControl({
             ))}
           </select>
         </>
+      )}
+      {/* Stage always gets its own trailing Confirm/Cancel whenever it has a
+          pending pick — Vlad's ask, 2026-07-30: "make the user confirm the
+          stages as well." Previously suppressed when statusPending was also
+          true (to avoid a duplicate-looking pair), but that meant a stage
+          pick made while a status change was ALSO pending had no visible
+          confirmation gate of its own — it silently rode along on the
+          status segment's Confirm/Cancel with nothing next to the stage
+          value indicating it needed one too. Both rows call the same
+          confirmPending()/cancelPending(), so clicking either one commits
+          or discards everything pending together — showing both is about
+          making each segment's pending state visible, not adding a second
+          independent gate. */}
+      {/* No divider before this group — Vlad's ask, 2026-07-30: "show the
+          stage and the buttons on the same field to confirm the pick." A
+          "|" divider here made the stage value and its own Confirm/Cancel
+          read as two unrelated segments; dropping it groups "L1  ✓ ✗" as
+          one field, same idea as the status-pending overlay's icons sitting
+          directly where the label was. This is now the SINGLE confirm point
+          for the whole "screening + stage" decision — see showCombinedConfirm
+          above for why it also covers a pending "screening" status pick,
+          not just a pending stage pick. */}
+      {showCombinedConfirm && (
+        <span className="flex shrink-0 items-center gap-2.5 py-1 pl-1 pr-1.5">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); confirmPending(); }}
+            title="Confirm"
+            className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); cancelPending(); }}
+            title="Cancel"
+            className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </span>
       )}
       {showArchiveReason && (
         <>

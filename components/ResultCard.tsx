@@ -2,17 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, RejectionHistoryEntry } from "@/lib/types";
+import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, FraudRiskAssessment, RejectionHistoryEntry } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
+import { FraudRiskChecker } from "./FraudRiskChecker";
 import { InsightList } from "./InsightList";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { StatusSelect } from "./StatusSelect";
 import { TrajectoryRenderer } from "./TrajectoryRenderer";
+import { ActivityTimeline } from "./ActivityTimeline";
 import SourceIcon from "./SourceIcon";
 import { getSourceType } from "@/lib/sourceType";
 import type { JDAnalysis } from "@/lib/types";
+import type { ScreeningAction } from "@/lib/screeningActions";
 
 // ── Main ResultCard ─────────────────────────────────────────────────────────
 
@@ -108,6 +111,11 @@ export function ResultCard({
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
     result.credibility ?? null
   );
+  // Manual fraud risk check — added 2026-07-30, only ever offered at score
+  // >= 75 (see canShowFraudRisk below). See components/FraudRiskChecker.tsx.
+  const [fraudRisk, setFraudRisk] = useState<FraudRiskAssessment | null>(
+    result.fraudRisk ?? null
+  );
   const [archiveReason, setArchiveReason] = useState<string | undefined>(result.archiveReason);
   const [savedId] = useState<number | undefined>(result.id);
   // Notes field, added 2026-07-16 in place of the removed Generate Question
@@ -128,8 +136,30 @@ export function ResultCard({
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferredTo, setTransferredTo] = useState<{ projectId: number; projectName: string } | null>(null);
+  // Activity timeline — added 2026-07-29. Previously this only rendered on
+  // the Pipeline tab's own inline card markup; ResultCard (the batch-results
+  // page and candidate full page both render this) never fetched or showed
+  // it at all. Fetched once, the same GET /api/history/[id]/actions route
+  // the Pipeline tab already uses.
+  const [actions, setActions] = useState<ScreeningAction[] | "loading" | undefined>(undefined);
 
   const canCheck = savedId !== undefined;
+  // Vlad's ask, 2026-07-29: fraud risk checking only makes sense — and is
+  // only ever offered — for strong-looking candidates (score >= 75). A
+  // weaker resume's problems are already visible without this check.
+  // Already-run results stay visible even if a later rescore drops the
+  // score below 75, so a past check is never hidden retroactively.
+  const canShowFraudRisk = canCheck && (result.score >= 75 || fraudRisk !== null);
+
+  useEffect(() => {
+    if (savedId === undefined) return;
+    setActions("loading");
+    fetch(`/api/history/${savedId}/actions`)
+      .then((res) => res.json())
+      .then((data) => setActions(data.actions ?? []))
+      .catch(() => setActions([]));
+  }, [savedId]);
+
   const trajectoryText = result.careerTrajectory ?? result.summary;
 
   const hasOtherActiveProjects = otherActiveCount !== undefined && otherActiveCount > 0;
@@ -567,6 +597,28 @@ export function ResultCard({
           />
         )}
 
+        {canShowFraudRisk && (
+          <FraudRiskChecker
+            screeningId={savedId!}
+            roleContext={roleContext}
+            currentAssessment={fraudRisk ?? undefined}
+            onComplete={async (assessment) => {
+              try {
+                const res = await fetch(`/api/history/${savedId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ fraudRisk: assessment }),
+                });
+                if (!res.ok) return false;
+                setFraudRisk(assessment);
+                return true;
+              } catch {
+                return false;
+              }
+            }}
+          />
+        )}
+
         {canCheck && (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
@@ -580,6 +632,10 @@ export function ResultCard({
               className="w-full resize-none rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-violet-300 focus:bg-white focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-violet-500/50 dark:focus:bg-zinc-900" />
           </div>
         )}
+
+        {/* Activity — added 2026-07-29, bottom of card as an audit-trail
+            footer, after the interactive sections above it. */}
+        {canCheck && <ActivityTimeline actions={actions} candidateName={result.candidateName} />}
       </div>
     </li>
   );

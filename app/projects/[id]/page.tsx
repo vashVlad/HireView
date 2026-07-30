@@ -7,8 +7,10 @@ import { AlreadyScreenedCard } from "@/components/AlreadyScreenedCard";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
+import { FraudRiskChecker } from "@/components/FraudRiskChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
+import { RejectionCard } from "@/components/RejectionCard";
 import { ResultCard, type FitSuggestion, type AlreadyInProject } from "@/components/ResultCard";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
@@ -20,11 +22,11 @@ import { TransferControl } from "@/components/TransferControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
   CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
-  ExistingCandidateRef, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
+  ExistingCandidateRef, FraudRiskAssessment, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
-import { avatarColor, avatarInitial } from "@/lib/avatarColor";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
 import { getSourceType, type SourceType } from "@/lib/sourceType";
@@ -70,20 +72,6 @@ function formatStatusDate(iso: string) {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-function formatActionText(a: ScreeningAction, candidateName: string): string {
-  switch (a.actionType) {
-    case "created": return `screened ${candidateName}`;
-    case "status_change": return `moved ${candidateName} to ${CANDIDATE_STATUS_LABELS[a.toValue as CandidateStatus] ?? a.toValue}`;
-    case "stage_change": return `moved ${candidateName} to ${a.toValue} stage`;
-    case "flagged": return `flagged ${candidateName}`;
-    case "unflagged": return `removed the flag from ${candidateName}`;
-    case "note": return `added a note on ${candidateName}`;
-    case "credibility_check": return `ran a credibility check on ${candidateName}`;
-    case "rescreen": return `rescreened ${candidateName}`;
-    default: return `updated ${candidateName}`;
-  }
 }
 
 // ── Filters tab ────────────────────────────────────────────────────────────
@@ -1077,6 +1065,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [justArchivedIds, setJustArchivedIds] = useState<Set<number>>(new Set());
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
+  // Mirrors credibilityMap exactly — added 2026-07-30, same gap Activity
+  // Timeline had before it was extracted: this tab renders its own inline
+  // card markup, not ResultCard.tsx, so anything added to ResultCard doesn't
+  // automatically appear here too.
+  const [fraudRiskMap, setFraudRiskMap] = useState<Record<number, FraudRiskAssessment>>({});
   const [actionsMap, setActionsMap] = useState<Record<number, ScreeningAction[] | "loading">>({});
   // Transfer destination list, Vlad's ask 2026-07-29: projects this
   // recruiter/admin can transfer a candidate INTO, passed down to each
@@ -1121,10 +1114,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   useEffect(() => {
     setScreenings(initialScreenings);
     const saved: Record<number, CredibilityAssessment> = {};
+    const savedFraudRisk: Record<number, FraudRiskAssessment> = {};
     for (const s of initialScreenings) {
       if (s.credibility) saved[s.id] = s.credibility;
+      if (s.fraudRisk) savedFraudRisk[s.id] = s.fraudRisk;
     }
     setCredibilityMap(saved);
+    setFraudRiskMap(savedFraudRisk);
   }, [initialScreenings]);
 
   const handleStageChange = onStageChange;
@@ -1849,6 +1845,31 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   }}
                 />
 
+                {/* ── Fraud risk check ──────────────────────────────────── */}
+                {/* Same score >= 75 gate as ResultCard.tsx's canShowFraudRisk
+                    — added 2026-07-30, this tab was missing it entirely
+                    (same class of gap Activity Timeline had before). */}
+                {(s.score >= 75 || fraudRiskMap[s.id] !== undefined) && (
+                  <FraudRiskChecker
+                    screeningId={s.id}
+                    currentAssessment={fraudRiskMap[s.id]}
+                    onComplete={async (assessment) => {
+                      try {
+                        const res = await fetch(`/api/history/${s.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ fraudRisk: assessment }),
+                        });
+                        if (!res.ok) return false;
+                        setFraudRiskMap((prev) => ({ ...prev, [s.id]: assessment }));
+                        return true;
+                      } catch {
+                        return false;
+                      }
+                    }}
+                  />
+                )}
+
                 {/* ── Assessment ────────────────────────────────────────── */}
                 {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
                   <div className="flex items-center gap-1.5">
@@ -1880,28 +1901,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 </div>
 
                 {/* ── Attribution timeline ──────────────────────────────── */}
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Activity</p>
-                  {actionsMap[s.id] === undefined || actionsMap[s.id] === "loading" ? (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500">Loading…</p>
-                  ) : (actionsMap[s.id] as ScreeningAction[]).length === 0 ? (
-                    <p className="text-xs text-zinc-400 dark:text-zinc-500">No activity recorded yet.</p>
-                  ) : (
-                    <ul className="flex flex-col gap-1.5">
-                      {(actionsMap[s.id] as ScreeningAction[]).map((a) => (
-                        <li key={a.id} className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                          <span className={`mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${avatarColor(a.userEmail)}`}>
-                            {avatarInitial(a.userEmail)}
-                          </span>
-                          <span>
-                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">{a.userEmail}</span>{" "}
-                            {formatActionText(a, s.candidateName)} on {formatDate(a.createdAt)}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                {/* Extracted 2026-07-29 into components/ActivityTimeline.tsx
+                    so the batch-results page and candidate full page (both
+                    render ResultCard.tsx, neither showed activity before)
+                    get the exact same component, not a second copy. */}
+                <ActivityTimeline actions={actionsMap[s.id]} candidateName={s.candidateName} />
 
                 {/* Calibration feedback */}
                 <div className="flex items-center gap-2">
@@ -2232,10 +2236,6 @@ function DrawerBody({
   const [immigration, setImmigration] = useState(trackerEntry.immigration ?? "");
   const [onHold, setOnHold] = useState(trackerEntry.onHold ?? false);
   const [onHoldReason, setOnHoldReason] = useState(trackerEntry.onHoldReason ?? "");
-  // Teti's request, 2026-07-10 — captured when stage is "Reject" so a
-  // recruiter can see why later. reject_reason migration confirmed run and
-  // wired into getFullTrackerEntries' select same day.
-  const [rejectReason, setRejectReason] = useState(trackerEntry.rejectReason ?? "");
   const [scheduled, setScheduled] = useState(trackerEntry.scheduled ?? false);
   const [interviewDate, setInterviewDate] = useState(trackerEntry.interviewDate ?? "");
   const [saving, setSaving] = useState<string | null>(null);
@@ -2258,7 +2258,6 @@ function DrawerBody({
     setImmigration(trackerEntry.immigration ?? "");
     setOnHold(trackerEntry.onHold ?? false);
     setOnHoldReason(trackerEntry.onHoldReason ?? "");
-    setRejectReason(trackerEntry.rejectReason ?? "");
     setScheduled(trackerEntry.scheduled ?? false);
     setInterviewDate(trackerEntry.interviewDate ?? "");
   }, [selected.id]);
@@ -2450,17 +2449,6 @@ function DrawerBody({
           placeholder="New York, NY" className={inputCls} />
       </div>
 
-      {/* Rejection reason — only shown once this candidate is in the Reject stage */}
-      {trackerEntry.stage === "Reject" && (
-        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
-          <FieldLabel label="Rejection reason" fkey="rejectReason" />
-          <textarea rows={2} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
-            onBlur={(e) => saveTrackerField({ rejectReason: e.target.value }, "rejectReason")}
-            placeholder="Why this candidate was rejected — visible system-wide if they apply again"
-            className={`resize-none border-rose-200 bg-white dark:border-rose-500/30 dark:bg-zinc-900 ${inputCls}`} />
-        </div>
-      )}
-
       {/* Steps Completed */}
       <div>
         <FieldLabel label="Steps completed" fkey="stepsCompleted" />
@@ -2527,6 +2515,12 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   const [selected, setSelected] = useState<ScreeningRecord | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+  // Confirm/cancel gate for the drawer's "Move to stage" chip row — Vlad's
+  // ask, 2026-07-30: this was the one stage/status control left in the app
+  // that still committed instantly on click, unlike every other one
+  // (StatusStageControl.tsx's chips, both status and stage). Cleared
+  // whenever a different candidate is selected, below.
+  const [pendingDrawerStage, setPendingDrawerStage] = useState<TrackerStage | null>(null);
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>(() =>
     Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, `/api/history/${s.id}/photo`]))
   );
@@ -2554,6 +2548,13 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   useEffect(() => {
     if (selected) setSelected((prev) => screenings.find((s) => s.id === prev?.id) ?? null);
   }, [screenings, stagesMap]);
+
+  // Clear any unconfirmed stage pick when the drawer switches to a
+  // different candidate (or closes) — same reasoning as DrawerBody's own
+  // per-candidate reset effect.
+  useEffect(() => {
+    setPendingDrawerStage(null);
+  }, [selected?.id]);
 
   // "screening" status = actively in the Tracker (TA/L1/L2/In-Person/Offer
   // arc) — was "interview" before that status was removed 2026-07-15.
@@ -2834,17 +2835,22 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               </button>
             </div>
 
-            {/* Move stage */}
+            {/* Move stage — confirm/cancel gated, 2026-07-30 (Vlad's ask):
+                this used to commit the moment a chip was clicked, unlike
+                every other status/stage control. Clicking a chip now only
+                stages it as pendingDrawerStage; the actual onStageChange
+                call happens on Confirm. Re-clicking the candidate's actual
+                current stage clears the pending pick (nothing to confirm). */}
             <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
               <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Move to stage</p>
               <div className="flex flex-wrap gap-1.5">
                 {TRACKER_STAGES.map((st) => {
                   const sc = STAGE_COLORS[st];
-                  const active = drawerStage === st;
+                  const active = (pendingDrawerStage ?? drawerStage) === st;
                   const isReject = st === "Reject";
                   return (
                     <button key={st} type="button"
-                      onClick={() => onStageChange(selected.id, st)}
+                      onClick={() => setPendingDrawerStage(st === drawerStage ? null : st)}
                       className={`rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
                         active
                           ? `${sc.bg} ${sc.text} ${sc.border} shadow-sm`
@@ -2857,7 +2863,51 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                   );
                 })}
               </div>
+              {pendingDrawerStage && (
+                <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 py-1 pl-2 pr-1 dark:border-violet-500/30 dark:bg-violet-500/10">
+                  <span className="flex-1 text-[11px] font-medium text-violet-700 dark:text-violet-400">
+                    Move to {pendingDrawerStage}?
+                  </span>
+                  <button type="button"
+                    onClick={() => { onStageChange(selected.id, pendingDrawerStage); setPendingDrawerStage(null); }}
+                    className="rounded-md bg-violet-600 px-1.5 py-0.5 text-[11px] font-semibold text-white transition-colors hover:bg-violet-700">
+                    Confirm
+                  </button>
+                  <button type="button"
+                    onClick={() => setPendingDrawerStage(null)}
+                    className="rounded-md border border-zinc-200 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800">
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* Rejection card — right beneath the "Move to stage" chip row per
+                Vlad's ask, 2026-07-29. See components/RejectionCard.tsx.
+                Keyed off the PENDING pick too (not just the confirmed
+                drawerStage), 2026-07-30 follow-up: now that picking "Reject"
+                requires its own Confirm click above, waiting for drawerStage
+                alone would hide this card until after that round-trip,
+                breaking the one-pass "pick Reject, fill in why, save" flow
+                this was built for. Showing it as soon as Reject is even
+                picked (confirmed or not) keeps that flow intact — saving the
+                reason here is already a separate action from confirming the
+                stage move (RejectionCard's own Save button only PATCHes
+                tracker.reject_reason, see onSaveReason below). */}
+            {(pendingDrawerStage ?? drawerStage) === "Reject" && (
+              <RejectionCard
+                // Forces a fresh mount per candidate — RejectionCard owns its
+                // own local state (reason choice, fraud claims) rather than
+                // syncing via a useEffect like DrawerBody's fields do, so
+                // without this key, switching from one Reject-stage candidate
+                // to another would carry over the previous candidate's
+                // half-filled form.
+                key={selected.id}
+                screeningId={selected.id}
+                initialReason={trackerData[selected.id]?.rejectReason ?? ""}
+                onSaveReason={(reason) => onTrackerDataChange(selected.id, { rejectReason: reason })}
+              />
+            )}
 
             {/* Scrollable content */}
             <DrawerBody

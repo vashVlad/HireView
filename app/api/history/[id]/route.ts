@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteScreening, getScreeningsByIds, updateScreening, updateScreeningCredibility, updateScreeningFlag, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
+import { deleteScreening, getScreeningsByIds, updateScreening, updateScreeningCredibility, updateScreeningFlag, updateScreeningFraudRisk, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
 
@@ -65,6 +65,17 @@ export async function PATCH(
     }
     if (body.credibility !== undefined) {
       await updateScreeningCredibility(numId, body.credibility, actorUserId);
+    }
+    // fraud_risk requires supabase-migration-fraud-calibration.sql — NOT YET
+    // CONFIRMED RUN on every environment. updateScreeningFraudRisk's own
+    // write is conditional on that column existing (see updateScreening's
+    // fraudRisk field comment) but is NOT wrapped in .catch() here, same as
+    // credibility above — a genuine persistence failure should surface as a
+    // non-200 response so FraudRiskChecker's onComplete can show "not saved
+    // yet" instead of silently pretending it worked (this is the same bug
+    // class Vlad reported for credibility on 2026-07-15, fixed the same way).
+    if (body.fraudRisk !== undefined) {
+      await updateScreeningFraudRisk(numId, body.fraudRisk, actorUserId);
     }
     // Source edit, 2026-07-20 (Vlad's ask) — lets a recruiter correct/set
     // source (Applicant/LinkedIn/Agency) after the fact from the Pipeline
