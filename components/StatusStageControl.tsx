@@ -151,7 +151,7 @@ export function StatusStageControl({
         // pending state.
         <span className="relative flex shrink-0 items-center py-1 pl-2.5 pr-1">
           <span className="invisible whitespace-nowrap">{CANDIDATE_STATUS_LABELS[status]}</span>
-          <span className="absolute inset-0 flex items-center justify-center gap-1.5">
+          <span className="absolute inset-0 flex items-center justify-center gap-2.5">
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); confirmPending(); }}
@@ -243,14 +243,19 @@ export function StatusStageControl({
           or discards everything pending together — showing both is about
           making each segment's pending state visible, not adding a second
           independent gate. */}
+      {/* No divider before this group — Vlad's ask, 2026-07-30: "show the
+          stage and the buttons on the same field to confirm the pick." A
+          "|" divider here made the stage value and its own Confirm/Cancel
+          read as two unrelated segments; dropping it groups "L1  ✓ ✗" as
+          one field, same idea as the status-pending overlay's icons sitting
+          directly where the label was. */}
       {pendingStage !== null && (
-        <>
-          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
+        <span className="flex shrink-0 items-center gap-2.5 py-1 pl-1 pr-1.5">
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); confirmPending(); }}
             title="Confirm"
-            className="flex shrink-0 items-center justify-center py-1 pl-1 pr-0.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+            className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
               <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
@@ -260,13 +265,13 @@ export function StatusStageControl({
             type="button"
             onClick={(e) => { e.stopPropagation(); cancelPending(); }}
             title="Cancel"
-            className="flex shrink-0 items-center justify-center py-1 pl-0.5 pr-1 text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
+            className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
               <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-        </>
+        </span>
       )}
       {showArchiveReason && (
         <>

@@ -86,7 +86,7 @@ export function StatusSelect({
   const statusSelect = showConfirmCancel ? (
     <span className="relative flex shrink-0 items-center py-1 pl-2.5 pr-1">
       <span className="invisible whitespace-nowrap">{CANDIDATE_STATUS_LABELS[status]}</span>
-      <span className="absolute inset-0 flex items-center justify-center gap-1.5">
+      <span className="absolute inset-0 flex items-center justify-center gap-2.5">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); confirmPending(); }}
