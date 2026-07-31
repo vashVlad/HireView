@@ -2855,18 +2855,41 @@ function DrawerBody({
               {interviewDate ? "Interview scheduled" : "Schedule interview"}
             </p>
           </div>
-          <input
-            type="date"
-            value={interviewDate}
-            onChange={(e) => setInterviewDate(e.target.value)}
-            onBlur={(e) => {
-              const newDate = e.target.value;
-              const isScheduled = !!newDate;
-              setScheduled(isScheduled);
-              saveTrackerField({ interviewDate: newDate, scheduled: isScheduled }, "interviewDate");
-            }}
-            className="cursor-pointer bg-transparent text-xs font-medium text-emerald-700 outline-none [color-scheme:light] dark:text-emerald-400 dark:[color-scheme:dark]"
-          />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <input
+              type="date"
+              value={interviewDate}
+              onChange={(e) => setInterviewDate(e.target.value)}
+              onBlur={(e) => {
+                const newDate = e.target.value;
+                const isScheduled = !!newDate;
+                setScheduled(isScheduled);
+                saveTrackerField({ interviewDate: newDate, scheduled: isScheduled }, "interviewDate");
+              }}
+              className="cursor-pointer bg-transparent text-xs font-medium text-emerald-700 outline-none [color-scheme:light] dark:text-emerald-400 dark:[color-scheme:dark]"
+            />
+            {/* Clear, 2026-07-31 (Vlad's ask) — the native date input's own
+                clear affordance (the little "x" some browsers show) isn't
+                consistent across browsers and doesn't touch `scheduled`
+                anyway. This resets both fields together in one click, same
+                shape as every other saveTrackerField call here. */}
+            {interviewDate && (
+              <button
+                type="button"
+                onClick={() => {
+                  setInterviewDate("");
+                  setScheduled(false);
+                  saveTrackerField({ interviewDate: "", scheduled: false }, "interviewDate");
+                }}
+                title="Clear interview date"
+                className="rounded-full p-1 text-emerald-600 opacity-60 transition-opacity hover:opacity-100 dark:text-emerald-400"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

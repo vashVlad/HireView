@@ -95,7 +95,17 @@ CREATE TABLE IF NOT EXISTS tracker (
   company            text,
   role              text,
   expected_level    text,
-  steps_completed   text[] NOT NULL DEFAULT '{}',
+  -- Declared `text` (not `text[]`), corrected 2026-07-31 — a database audit
+  -- confirmed via a real write-then-read test against the live table that
+  -- this column is a plain string in production (the app has only ever
+  -- treated it as one, a single free-text "Steps completed" textarea), even
+  -- though this file previously declared `text[]`. Likely hand-altered in
+  -- the Supabase dashboard at some point, same "predates the migration-file
+  -- convention" story as this table's own origin — see this file's header.
+  -- Fixed here so a future fresh-DB bootstrap creates the column that
+  -- matches reality, not the stale array type. See
+  -- memory/database-audit-2026-07-31.md for the investigation.
+  steps_completed   text,
   comments          text,
   immigration       text,
   on_hold           boolean NOT NULL DEFAULT false,
