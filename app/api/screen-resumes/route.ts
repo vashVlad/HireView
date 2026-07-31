@@ -5,7 +5,6 @@ import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening } from "@/lib/screenings";
-import { saveScreeningBatch } from "@/lib/screeningBatches";
 import { getProject } from "@/lib/projects";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
@@ -291,33 +290,21 @@ export async function POST(request: NextRequest) {
     await Promise.all(parsed.slice(i, i + CONCURRENCY).map(score));
   }
 
-  // Save aggregate batch stats for analytics — includes ALL scores (even rejected ones).
-  // Fire-and-forget: a stats write failure should never block the response.
-  //
-  // DO-NOT-TOUCH EXCEPTION (2026-07-30, Vlad's explicit ask — reported after
-  // asking whether user_id was captured everywhere it should be): this used
-  // to pass `userId` (= userIdFilter(user), undefined for admin accounts —
-  // a helper built for QUERY scoping, "admin sees everything, no filter"),
-  // reused here as the actual attribution value. Same exact bug class as
-  // the 2026-07-20 screenings.user_id fix a few lines above this one (see
-  // lib/screenings.ts's saveScreening() comment) — an admin-run batch saved
-  // with screening_batches.user_id: null. Swapped to actingUserId (the
-  // already-resolved true session user, same value saveScreening() gets
-  // above), so both tables agree on who actually ran the batch. Confirmed
-  // this table isn't currently read by Analytics or FunnelView (both
-  // switched to live `screenings` queries 2026-07-17 — see their own
-  // comments), so this had no visible effect on the live app; fixed anyway
-  // for data-integrity going forward.
-  if (results.length > 0) {
-    const passedCount = results.filter((r) => r.score >= scoreThreshold).length;
-    saveScreeningBatch({
-      userId: actingUserId,
-      projectId,
-      scores: results.map((r) => r.score),
-      passedCount,
-    }).catch((err) => console.error("Failed to save screening batch:", err));
-  }
-
+  // DO-NOT-TOUCH EXCEPTION (2026-07-31, Vlad's explicit ask, after a full
+  // database audit): removed the screening_batches write entirely. That
+  // table was built 2026-07-07 so Analytics could report totals including
+  // rejected candidates without permanently storing every rejected resume
+  // (see decisions-log.md). It was fully obsoleted by the 2026-07-10
+  // Save-All change (every candidate is saved regardless of score now, so
+  // the individual records this table existed to avoid storing already
+  // exist in `screenings`) — confirmed via a full-repo grep that Analytics
+  // and FunnelView both switched to live `screenings`/`tracker` queries on
+  // 2026-07-17 and neither has read this table since. Live-confirmed via
+  // Claude Code: 284 historical rows, zero read paths anywhere in the app.
+  // Every screening batch was still paying for an insert + 3 index updates
+  // into a table nothing used — pure waste. See memory/database-audit-
+  // 2026-07-31.md and supabase-migration-drop-screening-batches.sql (run
+  // AFTER this deploys, not before).
   results.sort((a, b) => b.score - a.score);
 
   // DO-NOT-TOUCH EXCEPTION, same batchId — see the comment at the top of this route.

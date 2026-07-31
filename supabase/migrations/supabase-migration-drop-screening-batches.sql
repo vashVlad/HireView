@@ -1,0 +1,35 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Drop screening_batches (dead table)
+-- Run this in Supabase SQL editor → Run
+--
+-- Vlad's ask, 2026-07-31, after a full database audit (see
+-- memory/database-audit-2026-07-31.md): screening_batches was built
+-- 2026-07-07 so Analytics could report totals including below-threshold
+-- rejections without permanently storing every rejected resume as a real
+-- row. The 2026-07-10 Save-All change made that unnecessary (every
+-- candidate is saved regardless of score now, so the individual records
+-- this table existed to avoid storing already exist in `screenings`), and
+-- Analytics/FunnelView both switched to live `screenings`/`tracker` queries
+-- on 2026-07-17. Confirmed via a full-repo grep and a live query
+-- (Claude Code, 2026-07-31): zero read paths anywhere in the app, 284
+-- historical rows spanning 2026-06-23 to 2026-07-31 (the table's entire
+-- lifetime).
+--
+-- IMPORTANT — run this ONLY AFTER the code that used to write to this table
+-- has already deployed (the saveScreeningBatch() call in
+-- app/api/screen-resumes/route.ts was removed this same session). Running
+-- this migration before that code deploys would break every screening save
+-- with a "relation does not exist" error the moment a batch tries to write
+-- to a table that's already gone — the opposite ordering risk from every
+-- ADD COLUMN migration in this project (those must run BEFORE their code
+-- deploys; this one must run AFTER).
+--
+-- This is destructive and cannot be undone by re-running this file — the
+-- 284 historical rows (aggregate total/passed counts per screening run,
+-- 2026-06-23 through 2026-07-31) will be permanently gone. If there's any
+-- chance you'll want that history later, export it first, e.g.:
+--   COPY (SELECT * FROM screening_batches) TO STDOUT WITH CSV HEADER;
+-- (or download it via the Supabase Table Editor's export button).
+-- ─────────────────────────────────────────────────────────────────────────────
+
+DROP TABLE IF EXISTS screening_batches;
