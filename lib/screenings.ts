@@ -1294,6 +1294,41 @@ export async function getScreeningConcerns(id: number): Promise<string[]> {
   return data.concerns ?? [];
 }
 
+/**
+ * Archive Fits, 2026-07-30 — isolated read for lib/generateRoleFit.ts's
+ * input plus the current suggested_role_fits array. summary/strengths/
+ * career_trajectory are already in the shared SCREENING_COLUMNS select, but
+ * suggested_role_fits is NOT (see supabase-migration-archive-fits.sql —
+ * not yet confirmed run), so this fetches everything in one isolated query
+ * rather than mixing a SCREENING_COLUMNS read with a second deferred-column
+ * read. Same isolated-select pattern as getScreeningConcerns above.
+ */
+export async function getScreeningRoleFitContext(id: number): Promise<{
+  summary: string;
+  strengths: string[];
+  careerTrajectory?: string;
+  suggestedRoleFits: string[];
+} | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("summary, strengths, career_trajectory, suggested_role_fits")
+    .eq("id", id)
+    .maybeSingle<{
+      summary: string;
+      strengths: string[];
+      career_trajectory: string | null;
+      suggested_role_fits: string[] | null;
+    }>();
+  if (error || !data) return null;
+  return {
+    summary: data.summary,
+    strengths: data.strengths ?? [],
+    ...(data.career_trajectory != null ? { careerTrajectory: data.career_trajectory } : {}),
+    suggestedRoleFits: data.suggested_role_fits ?? [],
+  };
+}
+
 // ── Update ─────────────────────────────────────────────────────────────────
 
 export async function updateScreening(
@@ -1361,6 +1396,14 @@ export async function updateScreening(
     strengths?: string[];
     concerns?: string[];
     recommendation?: Recommendation;
+    /**
+     * Archive Fits, 2026-07-30 — full replacement array, not an append; the
+     * caller (PATCH /api/history/[id]) reads the current array via
+     * getScreeningRoleFitContext, appends, and writes the whole thing back.
+     * Requires supabase-migration-archive-fits.sql — NOT YET CONFIRMED RUN,
+     * same deferred-column pattern as fraudRisk/crossRefIsLinkedIn above.
+     */
+    suggestedRoleFits?: string[];
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1399,6 +1442,7 @@ export async function updateScreening(
   if (fields.strengths !== undefined) update.strengths = fields.strengths;
   if (fields.concerns !== undefined) update.concerns = fields.concerns;
   if (fields.recommendation !== undefined) update.recommendation = fields.recommendation;
+  if (fields.suggestedRoleFits !== undefined) update.suggested_role_fits = fields.suggestedRoleFits;
   if (Object.keys(update).length === 0) return;
 
   // Attribution needs the "before" value for status/flagged — everything else

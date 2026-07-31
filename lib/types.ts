@@ -381,6 +381,17 @@ export interface ScreeningRecord {
    * until that follow-up wiring lands post-migration.
    */
   archiveReason?: string;
+  /**
+   * Archive Fits, 2026-07-30 (Vlad's ask) — short role/title suggestions for
+   * where this candidate would actually fit, independent of any specific
+   * project's JD. Auto-generated at archive time for role-mismatch reasons
+   * (see lib/generateRoleFit.ts), plus anything a recruiter adds manually.
+   * Deliberately NOT in the shared SCREENING_COLUMNS select — same deferred
+   * pattern as archiveReason above, see supabase-migration-archive-fits.sql.
+   * Only ever read/written via the dedicated /api/history/[id]/role-fits and
+   * /api/projects/[id]/archive-fits routes.
+   */
+  suggestedRoleFits?: string[];
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;

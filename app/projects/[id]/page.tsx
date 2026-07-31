@@ -52,7 +52,16 @@ const SIGNAL_BADGE: Record<CredibilitySignal, { label: string; className: string
 
 type SearchMode = "wide" | "narrow";
 
-type Tab = "filters" | "screen" | "pipeline" | "tracker" | "settings";
+type Tab = "filters" | "screen" | "pipeline" | "tracker" | "settings" | "archiveFits";
+
+/** Archive Fits, 2026-07-30 — one row of the pending review queue, matches GET /api/projects/[id]/archive-fits's shape. */
+interface ArchiveFitCandidate {
+  id: number;
+  screeningId: number;
+  candidateName: string;
+  score: number;
+  suggestedRoleFit: string | null;
+}
 type ScreenView = "form" | "loading" | "results";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -2209,15 +2218,121 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   );
 }
 
+// ── Archive Fits tab ─────────────────────────────────────────────────────────
+//
+// Archive Fits, 2026-07-30 (Vlad's ask) — the review queue for archived
+// candidates a "Check archive for fits" pass (Settings tab) matched against
+// THIS project's JD. Per Vlad's spec: score from the past screening, static
+// (non-interactive) status, a resume-view link, a way to open the full card,
+// and two equal-height buttons — Screen for this project / Skip.
+
+function ArchiveFitCard({ projectId, candidate, onDecided, onScreened }: {
+  projectId: number;
+  candidate: ArchiveFitCandidate;
+  onDecided: (archiveFitId: number) => void;
+  onScreened: () => void;
+}) {
+  const [deciding, setDeciding] = useState<"screen" | "skip" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function decide(decision: "screen" | "skip") {
+    setDeciding(decision);
+    setError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/archive-fits/${candidate.screeningId}/decide`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Failed");
+        return;
+      }
+      onDecided(candidate.id);
+      if (decision === "screen") onScreened();
+    } catch {
+      setError("Network error — please try again");
+    } finally {
+      setDeciding(null);
+    }
+  }
+
+  return (
+    <li className="flex items-stretch gap-3 rounded-2xl border border-zinc-200 bg-white px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-medium text-zinc-800 dark:text-zinc-100">{candidate.candidateName}</p>
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+            Archived
+          </span>
+        </div>
+        {candidate.suggestedRoleFit && (
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            Suggested fit: <span className="font-medium text-violet-700 dark:text-violet-400">{candidate.suggestedRoleFit}</span>
+          </p>
+        )}
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+          Scored {candidate.score} on original role
+        </p>
+        <div className="mt-1 flex items-center gap-3 text-xs">
+          <a href={`/api/history/${candidate.screeningId}/resume`} target="_blank" rel="noopener noreferrer"
+            className="text-violet-600 underline underline-offset-2 hover:text-violet-700 dark:text-violet-400">
+            View resume
+          </a>
+          <Link href={`/candidates/${candidate.screeningId}`} target="_blank"
+            className="text-violet-600 underline underline-offset-2 hover:text-violet-700 dark:text-violet-400">
+            Open card
+          </Link>
+        </div>
+        {error && <p className="text-xs text-rose-500 dark:text-rose-400">{error}</p>}
+      </div>
+      <div className="flex w-40 shrink-0 flex-col gap-2">
+        <button type="button" onClick={() => decide("screen")} disabled={deciding !== null}
+          className="flex-1 rounded-xl bg-violet-600 px-3 text-sm font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40">
+          {deciding === "screen" ? "Screening..." : "Screen for this project"}
+        </button>
+        <button type="button" onClick={() => decide("skip")} disabled={deciding !== null}
+          className="flex-1 rounded-xl border border-zinc-200 px-3 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+          {deciding === "skip" ? "Skipping..." : "Skip"}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+function ArchiveFitsTab({ projectId, candidates, onDecided, onScreened }: {
+  projectId: number;
+  candidates: ArchiveFitCandidate[];
+  onDecided: (archiveFitId: number) => void;
+  onScreened: () => void;
+}) {
+  if (candidates.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-12 text-center">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">No pending archive fits to review.</p>
+      </div>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-3">
+      {candidates.map((c) => (
+        <ArchiveFitCard key={c.id} projectId={projectId} candidate={c} onDecided={onDecided} onScreened={onScreened} />
+      ))}
+    </ul>
+  );
+}
+
 // ── Settings tab ───────────────────────────────────────────────────────────
 
-function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThresholdSaved, onFitExclusionSaved }: {
+function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThresholdSaved, onFitExclusionSaved, onArchiveFitsChecked }: {
   project: Project;
   onNameSaved: (name: string) => void;
   onStatusToggled: (status: "active" | "archived") => void;
   onDeleted: () => void;
   onThresholdSaved: (threshold: number) => void;
   onFitExclusionSaved: (excludeFromFitSuggestions: boolean) => void;
+  /** Refreshes the parent's archiveFits list after a check finds matches, so the tab appears without a manual reload. */
+  onArchiveFitsChecked: () => void;
 }) {
   const router = useRouter();
   const [nameValue, setNameValue] = useState(project.name);
@@ -2233,6 +2348,11 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
   // wiring note; requires supabase-migration-exclude-from-fit-suggestions.sql.
   const [excludeFromFit, setExcludeFromFit] = useState(project.excludeFromFitSuggestions ?? false);
   const [savingFitExclusion, setSavingFitExclusion] = useState(false);
+  // Archive Fits, 2026-07-30 (Vlad's ask) — on-demand check only, triggered
+  // here or at role creation, never automatic/background. See
+  // app/api/projects/[id]/archive-fits/check/route.ts.
+  const [checkingArchive, setCheckingArchive] = useState(false);
+  const [archiveCheckResult, setArchiveCheckResult] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
   async function saveName() {
@@ -2271,6 +2391,29 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
       onFitExclusionSaved(next);
     } catch { /* non-fatal */ }
     finally { setSavingFitExclusion(false); }
+  }
+
+  async function checkArchiveFits() {
+    setCheckingArchive(true);
+    setArchiveCheckResult(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/archive-fits/check`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setArchiveCheckResult(data.error ?? "Check failed");
+        return;
+      }
+      setArchiveCheckResult(
+        data.matched > 0
+          ? `Found ${data.matched} possible fit${data.matched === 1 ? "" : "s"} — see the Archive Fits tab.`
+          : "No new matches found."
+      );
+      if (data.matched > 0) onArchiveFitsChecked();
+    } catch {
+      setArchiveCheckResult("Network error — please try again");
+    } finally {
+      setCheckingArchive(false);
+    }
   }
 
   async function toggleStatus() {
@@ -2369,6 +2512,24 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
         <button type="button" onClick={() => saveFitExclusion(!excludeFromFit)} disabled={savingFitExclusion}
           className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${excludeFromFit ? "bg-violet-600" : "bg-zinc-300 dark:bg-zinc-600"}`}>
           <span className={`inline-block h-3.5 w-3.5 translate-x-0.5 rounded-full bg-white transition-transform ${excludeFromFit ? "translate-x-4" : ""}`} />
+        </button>
+      </div>
+
+      {/* Archive Fits — Vlad's ask, 2026-07-30: reuse archived candidates
+          instead of losing track of them. Checks every archived candidate
+          across this recruiter's other roles that has a suggested role fit
+          attached, against THIS role's JD; matches show up on the Archive
+          Fits tab (only visible once there's at least one match). */}
+      <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div>
+          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Check archive for fits</p>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            {archiveCheckResult ?? "Look for archived candidates who'd be a better fit for this role."}
+          </p>
+        </div>
+        <button type="button" onClick={checkArchiveFits} disabled={checkingArchive}
+          className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+          {checkingArchive ? "Checking..." : "Check now"}
         </button>
       </div>
 
@@ -3166,6 +3327,11 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   const [tab, setTab] = useState<Tab>("filters");
   const [trackerData, setTrackerData] = useState<Record<number, FullTrackerData>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  // Archive Fits, 2026-07-30 — tab only shows when this is non-empty (Vlad's
+  // ask: hide it entirely rather than showing an empty tab), except while
+  // it's the active tab, so it doesn't vanish out from under the recruiter
+  // mid-review as they clear the last couple of rows.
+  const [archiveFits, setArchiveFits] = useState<ArchiveFitCandidate[]>([]);
 
   // Derived for PipelineTab
   const stagesMap: Record<number, TrackerStage> = {};
@@ -3182,8 +3348,18 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     { key: "screen", label: "Screen" },
     { key: "pipeline", label: `Pipeline${screenings.length > 0 ? ` (${screenings.length})` : ""}` },
     { key: "tracker", label: `Tracker${trackerCount > 0 ? ` (${trackerCount})` : ""}` },
+    ...(archiveFits.length > 0 || tab === "archiveFits"
+      ? [{ key: "archiveFits" as Tab, label: `Archive Fits (${archiveFits.length})` }]
+      : []),
     { key: "settings", label: "Settings" },
   ];
+
+  function loadArchiveFits() {
+    fetch(`/api/projects/${id}/archive-fits`)
+      .then((r) => r.json())
+      .then((d) => setArchiveFits(d.candidates ?? []))
+      .catch(() => {});
+  }
 
   function handleStageChange(id: number, stage: TrackerStage) {
     handleTrackerDataChange(id, { stage });
@@ -3207,8 +3383,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     Promise.all([
       fetch(`/api/projects/${id}`).then((r) => r.json()),
       fetch(`/api/history?projectId=${id}`).then((r) => r.json()),
+      fetch(`/api/projects/${id}/archive-fits`).then((r) => r.json()).catch(() => ({ candidates: [] })),
     ])
-      .then(([projectData, historyData]) => {
+      .then(([projectData, historyData, archiveFitsData]) => {
+        setArchiveFits(archiveFitsData.candidates ?? []);
         if (projectData.error) { setNotFound(true); return; }
         setProject(projectData.project);
         const allScreenings: ScreeningRecord[] = historyData.screenings ?? [];
@@ -3234,7 +3412,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         const urlParams = new URLSearchParams(window.location.search);
         const candidateParam = urlParams.get("candidate");
         const tabParam = urlParams.get("tab");
-        const validTabs: Tab[] = ["filters", "screen", "pipeline", "tracker", "settings"];
+        const validTabs: Tab[] = ["filters", "screen", "pipeline", "tracker", "settings", "archiveFits"];
         if (candidateParam) {
           const candidateId = Number(candidateParam);
           if (!Number.isNaN(candidateId) && allScreenings.some((s) => s.id === candidateId)) {
@@ -3372,6 +3550,14 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             projectName={project.name}
           />
         )}
+        {tab === "archiveFits" && (
+          <ArchiveFitsTab
+            projectId={project.id}
+            candidates={archiveFits}
+            onDecided={(archiveFitId) => setArchiveFits((prev) => prev.filter((c) => c.id !== archiveFitId))}
+            onScreened={loadScreenings}
+          />
+        )}
         {tab === "settings" && (
           <SettingsTab
             project={project}
@@ -3380,6 +3566,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             onDeleted={() => window.location.href = "/projects"}
             onThresholdSaved={(scoreThreshold) => setProject((p) => p ? { ...p, scoreThreshold } : p)}
             onFitExclusionSaved={(excludeFromFitSuggestions) => setProject((p) => p ? { ...p, excludeFromFitSuggestions } : p)}
+            onArchiveFitsChecked={loadArchiveFits}
           />
         )}
       </main>
