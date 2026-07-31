@@ -19,10 +19,20 @@ export function getSourceType(s: { linkedInMode?: boolean; agencyName?: string |
   return "applicant";
 }
 
-/** Short label — table cells, pills, exports. */
+/**
+ * Short label — table cells, pills, exports.
+ *
+ * "linkedin" renamed from "Sourced (LinkedIn)" to plain "Sourced",
+ * 2026-07-31 (Vlad's ask) — this label describes the CHANNEL (recruiter
+ * sourced the candidate, still set via the same toggle as before), not the
+ * file format. Whether the uploaded document is an actual LinkedIn export
+ * is now a separate, content-detected signal (see resumeIsLinkedIn /
+ * lib/assessCredibility.ts's detectLinkedIn()) that only drives the icon,
+ * not this label.
+ */
 export const SOURCE_LABELS: Record<SourceType, string> = {
   applicant: "Applicant",
-  linkedin: "Sourced (LinkedIn)",
+  linkedin: "Sourced",
   agency: "Agency",
 };
 

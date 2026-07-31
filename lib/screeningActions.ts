@@ -16,7 +16,12 @@ export type ActionType =
   // Added 2026-07-30 — a recruiter manually ran a fraud risk check (only
   // ever offered at score >= 75, see components/FraudRiskChecker.tsx). Same
   // "plain text column, no migration needed" reasoning as rescreen above.
-  | "fraud_risk_check";
+  | "fraud_risk_check"
+  // Added 2026-07-31 — a recruiter toggled the blacklist checkbox on the
+  // archive-reason picker (StatusStageControl.tsx). Same "plain text column,
+  // no migration needed" reasoning as rescreen/fraud_risk_check above.
+  | "blacklisted"
+  | "unblacklisted";
 
 export interface ScreeningAction {
   id: number;

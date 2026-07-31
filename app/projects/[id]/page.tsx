@@ -21,7 +21,7 @@ import { StatusStageControl } from "@/components/StatusStageControl";
 import { TransferControl } from "@/components/TransferControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
-  CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
+  BlacklistEntry, CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
   ExistingCandidateRef, FraudRiskAssessment, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
@@ -285,6 +285,8 @@ interface PersistedBatch {
   nameMatches: [string, ExistingCandidateRef][];
   rejectionHistoryBaseline: RejectionHistoryEntry[];
   rejectionMatches: [string, RejectionHistoryEntry][];
+  blacklistBaseline: BlacklistEntry[];
+  blacklistMatches: [string, BlacklistEntry][];
   fileErrors: ScreenResumesError[];
   /** See the currentBatchId state below and app/projects/[id]/batches/[batchId]/page.tsx. */
   batchId?: string;
@@ -303,7 +305,7 @@ function readPersistedBatch(projectId: number): PersistedBatch | null {
   }
 }
 
-function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
+function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMap, onStageChange }: {
   project: Project;
   onScreeningsSaved: () => void;
   /**
@@ -319,6 +321,16 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
    * refetch (e.g. screening another batch).
    */
   onScreeningFieldSaved?: (id: number, fields: Partial<ScreeningRecord>) => void;
+  /**
+   * Same stagesMap/onStageChange the parent already threads into
+   * PipelineTab/TrackerTab — passed through as-is so ResultCard's stage
+   * picker (2026-07-31, Vlad's ask: "let the recruiter choose a screening
+   * stage right after post-screening") writes to the exact same tracker
+   * row/route (`PATCH /api/tracker/[screeningId]`) those tabs already use,
+   * rather than a second parallel stage concept scoped to just this tab.
+   */
+  stagesMap: Record<number, TrackerStage>;
+  onStageChange: (id: number, stage: TrackerStage) => void;
 }) {
   // Read once per mount — see the block comment above this component for
   // why this exists. `initialBatch` is resolved before any of the state
@@ -389,6 +401,13 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
   const [rejectionMatches, setRejectionMatches] = useState<Map<string, RejectionHistoryEntry>>(
     () => new Map(initialBatch?.rejectionMatches ?? [])
   );
+  // System-wide blacklist, 2026-07-31 (Vlad's ask) — identical pattern to
+  // rejectionHistoryBaseline/rejectionMatches above, just sourced from
+  // checkData.blacklist instead.
+  const [blacklistBaseline, setBlacklistBaseline] = useState<BlacklistEntry[]>(() => initialBatch?.blacklistBaseline ?? []);
+  const [blacklistMatches, setBlacklistMatches] = useState<Map<string, BlacklistEntry>>(
+    () => new Map(initialBatch?.blacklistMatches ?? [])
+  );
   // Source picker, 2026-07-20 (Vlad's ask): three mutually-exclusive types —
   // Applicant (default), LinkedIn (existing linkedin_mode, unchanged scoring
   // behavior via isLinkedInMode below), Agency (new, carries a free-text
@@ -440,6 +459,8 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       nameMatches: [...nameMatches.entries()],
       rejectionHistoryBaseline,
       rejectionMatches: [...rejectionMatches.entries()],
+      blacklistBaseline,
+      blacklistMatches: [...blacklistMatches.entries()],
       fileErrors,
       batchId: currentBatchId,
     };
@@ -448,7 +469,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     } catch {
       // Storage full/unavailable — non-fatal, just means Back won't restore this time.
     }
-  }, [screenView, results, existingMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, fileErrors, currentBatchId, project.id]);
+  }, [screenView, results, existingMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, blacklistBaseline, blacklistMatches, fileErrors, currentBatchId, project.id]);
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -486,6 +507,20 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ archiveReason }),
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  // Blacklist, 2026-07-31 (Vlad's ask) — mirrors handleArchiveReasonChange
+  // exactly, same optimistic-update + PATCH /api/history/[id] shape.
+  async function handleBlacklistChange(id: number, blacklisted: boolean, blacklistReason: string | null) {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, blacklisted, blacklistReason: blacklistReason ?? undefined } : r)));
+    onScreeningFieldSaved?.(id, { blacklisted, blacklistReason: blacklistReason ?? undefined });
+    try {
+      await fetch(`/api/history/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blacklisted, blacklistReason }),
       });
     } catch { /* non-fatal */ }
   }
@@ -534,6 +569,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       let classifications: CheckExistingResult[] = [];
       let candidates: ExistingCandidateRef[] = [];
       let rejections: RejectionHistoryEntry[] = [];
+      let blacklistEntries: BlacklistEntry[] = [];
       try {
         const checkRes = await fetch("/api/screen-resumes/check-existing", { method: "POST", body: checkFormData, signal: controller.signal });
         if (checkRes.ok) {
@@ -541,6 +577,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
           classifications = Array.isArray(checkData.results) ? checkData.results : [];
           candidates = Array.isArray(checkData.existingCandidates) ? checkData.existingCandidates : [];
           rejections = Array.isArray(checkData.rejectionHistory) ? checkData.rejectionHistory : [];
+          blacklistEntries = Array.isArray(checkData.blacklist) ? checkData.blacklist : [];
         }
       } catch (err) {
         // Re-throw an abort so the outer catch handles it as a cancel, not a
@@ -583,6 +620,8 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       setNameMatches(findNameMatches(scored, candidates));
       setRejectionHistoryBaseline(rejections);
       setRejectionMatches(findRejectionMatches(scored, rejections, hashByFileName));
+      setBlacklistBaseline(blacklistEntries);
+      setBlacklistMatches(findBlacklistMatches(scored, blacklistEntries, hashByFileName));
       // Durable "come back to this batch" link — only set when this call
       // actually scored something new (batchId is undefined when every file
       // in the upload was a duplicate skip, matching newFiles.length > 0
@@ -673,6 +712,28 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
     return matches;
   }
 
+  // Blacklist, 2026-07-31 (Vlad's ask) — identical shape/reasoning to
+  // findRejectionMatches above, just matched against blacklistBaseline.
+  function findBlacklistMatches(
+    scored: CandidateResult[],
+    baseline: BlacklistEntry[],
+    hashByFileName: Map<string, string> = new Map()
+  ): Map<string, BlacklistEntry> {
+    const byNormalizedName = new Map(baseline.map((b) => [normalizeCandidateName(b.candidateName), b]));
+    const matches = new Map<string, BlacklistEntry>();
+    for (const r of scored) {
+      const hit = byNormalizedName.get(normalizeCandidateName(r.candidateName));
+      if (!hit) continue;
+      const uploadedHash = hashByFileName.get(r.fileName);
+      const confidence: BlacklistEntry["confidence"] =
+        hit.contentHash != null && uploadedHash != null && hit.contentHash === uploadedHash
+          ? "name_and_resume"
+          : "name_only";
+      matches.set(r.fileName, { ...hit, confidence });
+    }
+    return matches;
+  }
+
   // A recruiter overriding a "duplicate" card — forces a real score for
   // that one file and folds it into the normal results list.
   async function handleForceRescore(file: File) {
@@ -690,6 +751,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
       setResults(merged);
       setNameMatches(findNameMatches(merged, existingCandidates));
       setRejectionMatches(findRejectionMatches(merged, rejectionHistoryBaseline, hashByFileName));
+      setBlacklistMatches(findBlacklistMatches(merged, blacklistBaseline, hashByFileName));
       if (errors.length > 0) setFileErrors((prev) => [...prev, ...errors]);
       if (scored.length > 0) onScreeningsSaved();
     } catch (err) {
@@ -799,9 +861,13 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
               jdAnalysis={project.jdAnalysis}
               onStatusChange={handleStatusChange}
               onArchiveReasonChange={handleArchiveReasonChange}
+              onBlacklistChange={handleBlacklistChange}
+              stage={result.id != null ? stagesMap[result.id] ?? null : null}
+              onStageChange={onStageChange}
               nameMatch={nameMatches.get(result.fileName)}
               roleContext={project.name}
               rejectionHistory={rejectionMatches.get(result.fileName)}
+              blacklistMatch={blacklistMatches.get(result.fileName)}
               eligibleForFitCheck={eligibleForFitCheck}
               otherActiveCount={otherActiveCount}
               onCheckCrossProjectPromise={eligibleForFitCheck ? () => {
@@ -938,7 +1004,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved }: {
                 : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
             }`}>
             <SourceIcon type="linkedin" size={14} />
-            Sourced (LinkedIn)
+            Sourced
           </button>
           <button type="button" onClick={() => setSourceType("agency")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
@@ -1361,6 +1427,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, archiveReason } : s));
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveReason }) });
+    } catch { /* non-fatal */ }
+  }
+
+  // Blacklist, 2026-07-31 (Vlad's ask) — mirrors handleArchiveReasonChange above.
+  async function handleBlacklistChange(id: number, blacklisted: boolean, blacklistReason: string | null) {
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, blacklisted, blacklistReason: blacklistReason ?? undefined } : s));
+    try {
+      await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blacklisted, blacklistReason }) });
     } catch { /* non-fatal */ }
   }
 
@@ -1811,7 +1885,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     }}
                     title="Click to set source"
                     className="shrink-0 rounded-full transition-opacity hover:opacity-70">
-                    <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} showApplicant />
+                    <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} contentIsLinkedIn={s.resumeIsLinkedIn} showApplicant />
                   </button>
                   {/* Visible agency name, added 2026-07-27 (Vlad's ask) —
                       matches the same addition on ResultCard.tsx and
@@ -1834,7 +1908,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                         </button>
                       )}
                       {getSourceType(s) !== "linkedin" && (
-                        <button type="button" title="Sourced (LinkedIn)"
+                        <button type="button" title="Sourced"
                           onClick={() => handleSourceChange(s.id, "linkedin", "")}
                           className="rounded-full p-0.5 opacity-40 transition-opacity hover:opacity-100">
                           <SourceIcon type="linkedin" size={13} />
@@ -1889,6 +1963,9 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     onStageChange={(stage) => handleStageChange(s.id, stage)}
                     archiveReason={s.archiveReason}
                     onArchiveReasonChange={(reason) => handleArchiveReasonChange(s.id, reason)}
+                    blacklisted={s.blacklisted}
+                    blacklistReason={s.blacklistReason}
+                    onBlacklistChange={(next, reason) => handleBlacklistChange(s.id, next, reason)}
                     transferredToProjectName={s.transferredToProjectName}
                     transferredToScreeningId={s.transferredToScreeningId}
                   />
@@ -3544,6 +3621,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             project={project}
             onScreeningsSaved={loadScreenings}
             onScreeningFieldSaved={(id, fields) => setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s))}
+            stagesMap={stagesMap}
+            onStageChange={handleStageChange}
           />
         )}
         {tab === "pipeline" && (

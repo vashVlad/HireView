@@ -118,6 +118,19 @@ export async function PATCH(
         ...(body.agencyName !== undefined ? { agencyName: String(body.agencyName) } : {}),
       });
     }
+    // Blacklist, 2026-07-31 (Vlad's ask) — set from the archive-reason
+    // picker's checkbox (StatusStageControl.tsx). Wrapped in .catch() since
+    // supabase-migration-blacklist.sql is not yet confirmed run everywhere —
+    // a missing column here should never fail the surrounding status/reason
+    // save this usually rides alongside.
+    if (body.blacklisted !== undefined || body.blacklistReason !== undefined) {
+      await updateScreening(numId, {
+        ...(body.blacklisted !== undefined ? { blacklisted: Boolean(body.blacklisted) } : {}),
+        ...(body.blacklistReason !== undefined ? { blacklistReason: body.blacklistReason } : {}),
+      }, actorUserId).catch((err) => {
+        console.error("blacklist write failed (non-fatal):", err);
+      });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Failed" }, { status: 500 });

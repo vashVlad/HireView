@@ -67,6 +67,7 @@ function CandidateCard({
   onStatusChange,
   onStageChange,
   onArchiveReasonChange,
+  onBlacklistChange,
   onFlagToggle,
   onDelete,
   onSaveNotes,
@@ -115,6 +116,7 @@ function CandidateCard({
   onStatusChange: (id: number, status: CandidateStatus) => void;
   onStageChange: (id: number, stage: TrackerStage) => void;
   onArchiveReasonChange: (id: number, reason: string) => void;
+  onBlacklistChange: (id: number, blacklisted: boolean, reason: string | null) => void;
   onFlagToggle: (id: number, current: boolean, note?: string) => void;
   onDelete: (id: number) => void;
   onSaveNotes: (id: number, text: string) => void;
@@ -242,6 +244,18 @@ function CandidateCard({
           {/* Name row */}
           <div className="flex items-center gap-2">
             <span className="font-semibold text-zinc-900 dark:text-zinc-50">{s.candidateName}</span>
+            {/* Blacklist badge, 2026-07-31 (Vlad's ask) — deliberately
+                styled to "pop" harder than every other badge on this row
+                (solid black fill vs. the rose/amber/zinc tints below),
+                shown first since it's the strongest signal. */}
+            {s.blacklisted && (
+              <span
+                title={s.blacklistReason ? `Blacklisted — ${s.blacklistReason}` : "Blacklisted"}
+                className="shrink-0 rounded-full bg-zinc-950 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white dark:bg-white dark:text-zinc-950"
+              >
+                Blacklisted
+              </span>
+            )}
             {s.duplicateFlag && (
               <span
                 title="Duplicate detected — matches another candidate's content fingerprint"
@@ -291,7 +305,7 @@ function CandidateCard({
               }}
               title="Click to set source"
               className="shrink-0 rounded-full transition-opacity hover:opacity-70">
-              <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} showApplicant />
+              <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} contentIsLinkedIn={s.resumeIsLinkedIn} showApplicant />
             </button>
             {/* Visible agency name, added 2026-07-27 (Vlad's ask) — matches
                 the same addition on ResultCard.tsx and the Pipeline tab
@@ -312,7 +326,7 @@ function CandidateCard({
                   </button>
                 )}
                 {getSourceType(s) !== "linkedin" && (
-                  <button type="button" title="Sourced (LinkedIn)"
+                  <button type="button" title="Sourced"
                     onClick={() => { setPendingSource(false); onSourceChange(s.id, true, ""); }}
                     className="rounded-full p-0.5 opacity-40 transition-opacity hover:opacity-100">
                     <SourceIcon type="linkedin" size={13} />
@@ -376,6 +390,9 @@ function CandidateCard({
               onStageChange={(stage) => onStageChange(s.id, stage)}
               archiveReason={s.archiveReason}
               onArchiveReasonChange={(reason) => onArchiveReasonChange(s.id, reason)}
+              blacklisted={s.blacklisted}
+              blacklistReason={s.blacklistReason}
+              onBlacklistChange={(next, reason) => onBlacklistChange(s.id, next, reason)}
             />
           </div>
         </div>
@@ -614,6 +631,9 @@ export default function CandidatesPage() {
   // Fraud signals toggle — matches any of the same three signals the badges
   // in CandidateCard render (duplicateFlag, historyAlertType, nameMatchId).
   const [fraudOnly, setFraudOnly] = useState(false);
+  // Blacklist filter, 2026-07-31 (Vlad's ask) — sits next to the Archived
+  // status chip since that's where a candidate gets blacklisted from.
+  const [blacklistOnly, setBlacklistOnly] = useState(false);
   const [scoreMin, setScoreMin] = useState("");
   const [scoreMax, setScoreMax] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -736,6 +756,7 @@ export default function CandidatesPage() {
       // definition so this filter and the banner/toggle agree on what
       // counts as "fraud."
       if (fraudOnly && !(s.duplicateFlag || s.historyAlertType === "known_fraud_pattern")) return false;
+      if (blacklistOnly && !s.blacklisted) return false;
       if (scoreMin !== "" && s.score < Number(scoreMin)) return false;
       if (scoreMax !== "" && s.score > Number(scoreMax)) return false;
       if (dateFrom && new Date(s.createdAt) < new Date(dateFrom)) return false;
@@ -755,6 +776,7 @@ export default function CandidatesPage() {
     .flat();
 
   const flaggedCount = screenings.filter((s) => s.flagged).length;
+  const blacklistCount = screenings.filter((s) => s.blacklisted).length;
 
   function handleStatusChange(id: number, status: CandidateStatus) {
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: new Date().toISOString() } : s));
@@ -769,6 +791,12 @@ export default function CandidatesPage() {
   function handleArchiveReasonChange(id: number, archiveReason: string) {
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, archiveReason } : s));
     fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveReason }) }).catch(() => {});
+  }
+
+  // Blacklist, 2026-07-31 (Vlad's ask) — mirrors handleArchiveReasonChange above.
+  function handleBlacklistChange(id: number, blacklisted: boolean, blacklistReason: string | null) {
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, blacklisted, blacklistReason: blacklistReason ?? undefined } : s));
+    fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blacklisted, blacklistReason }) }).catch(() => {});
   }
 
   function handleFlagToggle(id: number, current: boolean, note?: string) {
@@ -900,15 +928,32 @@ export default function CandidatesPage() {
 
             {/* Status filters — multi-select */}
             {CANDIDATE_STATUSES.map((status) => (
-              <button key={status} type="button"
-                onClick={() => setStatusFilter((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(status)) next.delete(status); else next.add(status);
-                  return next;
-                })}
-                className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${statusFilter.has(status) ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
-                {CANDIDATE_STATUS_LABELS[status]}
-              </button>
+              <Fragment key={status}>
+                <button type="button"
+                  onClick={() => setStatusFilter((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(status)) next.delete(status); else next.add(status);
+                    return next;
+                  })}
+                  className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${statusFilter.has(status) ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+                  {CANDIDATE_STATUS_LABELS[status]}
+                </button>
+                {/* Blacklist, 2026-07-31 (Vlad's ask) — sits right next to
+                    Archived (that's where a candidate gets blacklisted from)
+                    but deliberately styled to "pop" much harder than every
+                    other chip here, matching the solid black ResultCard
+                    banner this same signal renders as during screening. */}
+                {status === "archived" && (
+                  <button type="button" onClick={() => setBlacklistOnly((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-bold uppercase tracking-wide transition-colors ${blacklistOnly ? "border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950" : "border-zinc-950 bg-white text-zinc-950 hover:bg-zinc-950 hover:text-white dark:border-white dark:bg-zinc-900 dark:text-white dark:hover:bg-white dark:hover:text-zinc-950"}`}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <circle cx="12" cy="12" r="9" strokeLinecap="round" />
+                      <path d="M5.5 5.5 18.5 18.5" strokeLinecap="round" />
+                    </svg>
+                    Blacklist{blacklistCount > 0 && ` (${blacklistCount})`}
+                  </button>
+                )}
+              </Fragment>
             ))}
           </div>
 
@@ -935,10 +980,10 @@ export default function CandidatesPage() {
           </div>
 
           {/* Active filter summary */}
-          {(statusFilter.size > 0 || projectFilter || flaggedOnly || fraudOnly || query || scoreMin !== "" || scoreMax !== "" || dateFrom || dateTo) && (
+          {(statusFilter.size > 0 || projectFilter || flaggedOnly || fraudOnly || blacklistOnly || query || scoreMin !== "" || scoreMax !== "" || dateFrom || dateTo) && (
             <button type="button"
               onClick={() => {
-                setStatusFilter(new Set()); setProjectFilter(null); setFlaggedOnly(false); setFraudOnly(false);
+                setStatusFilter(new Set()); setProjectFilter(null); setFlaggedOnly(false); setFraudOnly(false); setBlacklistOnly(false);
                 setQuery(""); setScoreMin(""); setScoreMax(""); setDateFrom(""); setDateTo("");
               }}
               className="self-start text-xs text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300">
@@ -1051,6 +1096,7 @@ export default function CandidatesPage() {
                     onStatusChange={handleStatusChange}
                     onStageChange={handleStageChange}
                     onArchiveReasonChange={handleArchiveReasonChange}
+                    onBlacklistChange={handleBlacklistChange}
                     onFlagToggle={handleFlagToggle}
                     onDelete={handleDelete}
                     onSaveNotes={handleSaveNotes}
