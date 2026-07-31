@@ -3,8 +3,8 @@ import { extractResumeText } from "@/lib/parseResume";
 import { hashResumeText, normalizeCandidateName } from "@/lib/resumeContentHash";
 import { getSupabaseClient } from "@/lib/supabase";
 import { canAccessProject, getAuthUser } from "@/lib/auth";
-import { listRejectionHistory } from "@/lib/screenings";
-import type { CandidateStatus, CheckExistingResult, ExistingCandidateRef, Recommendation, RejectionHistoryEntry } from "@/lib/types";
+import { listBlacklist, listRejectionHistory } from "@/lib/screenings";
+import type { BlacklistEntry, CandidateStatus, CheckExistingResult, ExistingCandidateRef, Recommendation, RejectionHistoryEntry } from "@/lib/types";
 
 export const maxDuration = 30;
 
@@ -81,6 +81,9 @@ export async function POST(request: NextRequest) {
   // fetched even in the no-project-context branch below. Fails closed to []
   // if reject_reason's migration hasn't run yet; never throws.
   const rejectionHistory: RejectionHistoryEntry[] = await listRejectionHistory().catch(() => []);
+  // Blacklist, 2026-07-31 (Vlad's ask) — same system-wide, fail-closed
+  // treatment as rejectionHistory above. See lib/screenings.ts's listBlacklist().
+  const blacklist: BlacklistEntry[] = await listBlacklist().catch(() => []);
 
   if (projectId == null) {
     // No project context (e.g. ad-hoc screening) — nothing project-scoped to check against.
@@ -90,6 +93,7 @@ export async function POST(request: NextRequest) {
         .map((f) => ({ fileName: f.name, status: "new" as const })),
       existingCandidates: [],
       rejectionHistory,
+      blacklist,
     });
   }
 
@@ -160,5 +164,5 @@ export async function POST(request: NextRequest) {
     })
   );
 
-  return NextResponse.json({ results, existingCandidates, rejectionHistory });
+  return NextResponse.json({ results, existingCandidates, rejectionHistory, blacklist });
 }

@@ -18,8 +18,9 @@ import { getProject } from "./projects";
 import { getPrimaryTeamId } from "./teams";
 import { getAuthUser } from "./auth";
 import { getRecruiterEmailMap } from "./recruiters";
+import { detectLinkedIn } from "./assessCredibility";
 import type {
-  CandidateResult, CandidateStatus, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
+  BlacklistEntry, CandidateResult, CandidateStatus, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
   Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage,
 } from "./types";
 import { DEFAULT_AUTO_ARCHIVE_REASON } from "./types";
@@ -654,6 +655,49 @@ export async function listRejectionHistory(): Promise<RejectionHistoryEntry[]> {
   }));
 }
 
+// ── Blacklist (system-wide, any recruiter) ───────────────────────────────────
+//
+// Vlad's ask, 2026-07-31: when a candidate is archived, let the recruiter
+// blacklist them; surface it during any future screening, for any recruiter,
+// regardless of team. Same "system-wide, not team-scoped" precedent as
+// listRejectionHistory above — own isolated query, never touches
+// SCREENING_COLUMNS.
+//
+// Requires blacklisted/blacklist_reason (supabase-migration-blacklist.sql).
+// Safe to call before that migration runs — the select below will error, but
+// this function fails closed to [], so nothing breaks until it's wired in.
+
+export async function listBlacklist(): Promise<BlacklistEntry[]> {
+  const supabase = getSupabaseClient();
+
+  const { data: rows, error } = await supabase
+    .from("screenings")
+    .select("candidate_name, project_id, blacklist_reason, resume_content_hash")
+    .eq("blacklisted", true)
+    .returns<{ candidate_name: string; project_id: number | null; blacklist_reason: string | null; resume_content_hash: string | null }[]>();
+  if (error || !rows || rows.length === 0) return [];
+
+  const projectIds = [...new Set(
+    rows.map((r) => r.project_id).filter((id): id is number => id != null)
+  )];
+  let projectNameById = new Map<number, string>();
+  if (projectIds.length > 0) {
+    const { data: projectRows } = await supabase
+      .from("projects")
+      .select("id, name")
+      .in("id", projectIds)
+      .returns<{ id: number; name: string }[]>();
+    projectNameById = new Map((projectRows ?? []).map((p) => [p.id, p.name]));
+  }
+
+  return rows.map((row) => ({
+    candidateName: row.candidate_name,
+    reason: row.blacklist_reason ?? null,
+    projectName: row.project_id != null ? (projectNameById.get(row.project_id) ?? null) : null,
+    contentHash: row.resume_content_hash ?? null,
+  }));
+}
+
 // Supabase Storage keys only allow \w / ! - . * ' ( ) space & $ @ = ; : + , ?
 // — a raw candidate-uploaded filename (accents, %, ~ from 8.3-short-name
 // exports, etc.) can easily fall outside that set and fail the upload with
@@ -951,6 +995,32 @@ export async function saveScreening(params: {
   // for a reload. Added 2026-07-16.
   result.linkedInMode = linkedInMode ?? false;
   if (agencyName) result.agencyName = agencyName;
+
+  // resume_is_linkedin, 2026-07-31 (Vlad's ask) — real-content LinkedIn
+  // detection, independent of linkedin_mode (the recruiter's manual
+  // "Sourced" channel toggle). Reuses detectLinkedIn() as-is (the same
+  // 2-of-3-signal heuristic already tuned against false positives on
+  // ordinary resumes, see lib/assessCredibility.ts), against the same
+  // resumeText already resolved above — no extra extraction. Best-effort,
+  // separate UPDATE (not folded into the insert above) because
+  // supabase-migration-resume-is-linkedin.sql is NOT YET CONFIRMED RUN as of
+  // this comment — a missing column here must never block the save itself,
+  // same deferred-column discipline as duplicate_flag/history_alert_type
+  // below. Mutates result in place so the immediate ResultCard gets the
+  // right icon without waiting for a reload (same pattern as
+  // result.linkedInMode above).
+  try {
+    if (resumeText == null) resumeText = await extractResumeText(result.fileName, resumeFile);
+    const resumeIsLinkedIn = detectLinkedIn(resumeText);
+    result.resumeIsLinkedIn = resumeIsLinkedIn;
+    const { error: linkedInDetectError } = await supabase
+      .from("screenings")
+      .update({ resume_is_linkedin: resumeIsLinkedIn })
+      .eq("id", screeningId);
+    if (linkedInDetectError) throw linkedInDetectError;
+  } catch (err) {
+    console.error("resume_is_linkedin detection/write failed (screening still saved):", err);
+  }
 
   // Best-effort, non-throwing (logAction swallows its own errors). Reuses
   // the same acting-user id resolved at the top of this function (now also
@@ -1404,6 +1474,16 @@ export async function updateScreening(
      * same deferred-column pattern as fraudRisk/crossRefIsLinkedIn above.
      */
     suggestedRoleFits?: string[];
+    /**
+     * Blacklist, 2026-07-31 (Vlad's ask) — set from the archive-reason
+     * picker's own checkbox (StatusStageControl.tsx). Requires
+     * supabase-migration-blacklist.sql — NOT YET CONFIRMED RUN, same
+     * deferred-column pattern as suggestedRoleFits/fraudRisk above. Every
+     * caller wraps this in .catch(() => {}) so a missing column can't fail
+     * the surrounding request.
+     */
+    blacklisted?: boolean;
+    blacklistReason?: string | null;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1443,6 +1523,11 @@ export async function updateScreening(
   if (fields.concerns !== undefined) update.concerns = fields.concerns;
   if (fields.recommendation !== undefined) update.recommendation = fields.recommendation;
   if (fields.suggestedRoleFits !== undefined) update.suggested_role_fits = fields.suggestedRoleFits;
+  // blacklisted/blacklist_reason require supabase-migration-blacklist.sql —
+  // NOT YET CONFIRMED RUN. Same deferred-wiring pattern as suggested_role_fits
+  // above.
+  if (fields.blacklisted !== undefined) update.blacklisted = fields.blacklisted;
+  if (fields.blacklistReason !== undefined) update.blacklist_reason = fields.blacklistReason;
   if (Object.keys(update).length === 0) return;
 
   // Attribution needs the "before" value for status/flagged — everything else
@@ -1485,6 +1570,13 @@ export async function updateScreening(
     }
     if (fields.score !== undefined) {
       await logAction({ screeningId: id, userId: actorUserId, actionType: "rescreen" });
+    }
+    if (fields.blacklisted !== undefined) {
+      await logAction({
+        screeningId: id,
+        userId: actorUserId,
+        actionType: fields.blacklisted ? "blacklisted" : "unblacklisted",
+      });
     }
   }
 }

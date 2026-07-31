@@ -1,0 +1,35 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: resume_is_linkedin (real-content LinkedIn detection, independent
+-- of the recruiter's "Sourced" toggle)
+-- Run this in Supabase SQL editor → Run
+--
+-- Vlad's ask, 2026-07-31: the "Sourced" source label/toggle describes HOW a
+-- candidate was found (recruiter went and sourced them, often via LinkedIn
+-- outreach) — a channel classification the recruiter sets manually and
+-- KEEPS setting manually, unchanged by this migration. But the ICON shown
+-- next to that label should reflect WHAT FILE was actually uploaded: a
+-- genuine LinkedIn profile PDF export vs. an ordinary resume. A recruiter
+-- can source someone via LinkedIn and still upload their regular resume —
+-- that should show a generic "sourced" icon, not the LinkedIn brand mark.
+--
+-- Computed once per screening via lib/assessCredibility.ts's existing,
+-- already-tuned detectLinkedIn(text) heuristic (2-of-3 signal check: a
+-- linkedin.com/in/ URL, a "N connections" count, and a "Skills &
+-- Endorsements" heading — reused as-is, not reimplemented, so this doesn't
+-- risk drifting from the fix already made there 2026-07-20 for false
+-- positives on ordinary resumes that just list a LinkedIn URL).
+--
+-- Nullable, no default — NULL means "not yet computed" (every existing row,
+-- until reprocessed), which the UI treats the same as "assume LinkedIn" so
+-- existing Sourced badges don't visually change until real data exists.
+--
+-- IMPORTANT — same sequencing rule as every other migration here (see
+-- feedback_migration_sequencing in the memory vault): this column is NOT
+-- wired into the shared SCREENING_COLUMNS select every Pipeline/All
+-- Candidates load uses. Written via its own isolated best-effort UPDATE
+-- (lib/screenings.ts's saveScreening, same pattern as duplicate_flag/
+-- history_alert_type/resume_content_hash) and read via its own isolated
+-- select, until this migration is confirmed run.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE screenings ADD COLUMN IF NOT EXISTS resume_is_linkedin boolean;
