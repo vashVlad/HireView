@@ -348,6 +348,44 @@ export async function transferScreeningToProject(params: {
     newScreeningId = saved.id;
   }
 
+  // Vlad's ask, 2026-07-30: a transfer is a CERTAIN "same candidate, now in
+  // a different project" — deterministically link source and destination
+  // via the same historyAlertMatchId/historyAlertType edge matchClusters.ts
+  // unions on, so the two screenings render merged ("Multiple roles")
+  // instead of as two unrelated cards with no indication they're the same
+  // person. Always "previously_seen" (never "known_fraud_pattern") — this
+  // is an intentional recruiter action, not a suspicious duplicate.
+  // Best-effort: a transfer that already succeeded shouldn't fail just
+  // because this cosmetic link couldn't be written (e.g. the "existing"
+  // mode's destination screening's own matching fields are untouched
+  // either way, only this pair-link).
+  //
+  // For "copy"/"rescore" mode specifically, this also supersedes whatever
+  // saveScreening()'s own findCrossProjectMatch call may or may not have
+  // already found — that path only links two screenings when their
+  // (freshly-regenerated) fingerprints happen to clear a similarity
+  // threshold, which is unreliable for something we already know for
+  // certain. Overwriting it here with the guaranteed source link is
+  // strictly more correct, not a regression.
+  try {
+    // Guard: don't clobber a genuine known_fraud_pattern edge either side
+    // might already carry from an unrelated match (rare, but that pointer
+    // is load-bearing for a real fraud cluster elsewhere — this transfer
+    // link should never downgrade it to a benign "previously_seen").
+    const [sourceSignals, destSignals] = await Promise.all([
+      getScreeningFraudSignals(params.screeningId),
+      getScreeningFraudSignals(newScreeningId),
+    ]);
+    if (sourceSignals.historyAlertType !== "known_fraud_pattern" && destSignals.historyAlertType !== "known_fraud_pattern") {
+      await markHistoryAlertPair(params.screeningId, newScreeningId, "previously_seen");
+    }
+  } catch (err) {
+    // Non-fatal — see comment above. Logged (temporarily verbose,
+    // 2026-07-30) so a silent failure here is actually diagnosable instead
+    // of just quietly not clustering.
+    console.error("Transfer history-alert linking failed (non-fatal):", err);
+  }
+
   // Two-step update, split deliberately — round-43's first version did this
   // as one combined update and Vlad hit exactly the failure this avoids:
   // the destination screening got created successfully, but the single
@@ -1256,6 +1294,41 @@ export async function getScreeningConcerns(id: number): Promise<string[]> {
   return data.concerns ?? [];
 }
 
+/**
+ * Archive Fits, 2026-07-30 — isolated read for lib/generateRoleFit.ts's
+ * input plus the current suggested_role_fits array. summary/strengths/
+ * career_trajectory are already in the shared SCREENING_COLUMNS select, but
+ * suggested_role_fits is NOT (see supabase-migration-archive-fits.sql —
+ * not yet confirmed run), so this fetches everything in one isolated query
+ * rather than mixing a SCREENING_COLUMNS read with a second deferred-column
+ * read. Same isolated-select pattern as getScreeningConcerns above.
+ */
+export async function getScreeningRoleFitContext(id: number): Promise<{
+  summary: string;
+  strengths: string[];
+  careerTrajectory?: string;
+  suggestedRoleFits: string[];
+} | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("summary, strengths, career_trajectory, suggested_role_fits")
+    .eq("id", id)
+    .maybeSingle<{
+      summary: string;
+      strengths: string[];
+      career_trajectory: string | null;
+      suggested_role_fits: string[] | null;
+    }>();
+  if (error || !data) return null;
+  return {
+    summary: data.summary,
+    strengths: data.strengths ?? [],
+    ...(data.career_trajectory != null ? { careerTrajectory: data.career_trajectory } : {}),
+    suggestedRoleFits: data.suggested_role_fits ?? [],
+  };
+}
+
 // ── Update ─────────────────────────────────────────────────────────────────
 
 export async function updateScreening(
@@ -1323,6 +1396,14 @@ export async function updateScreening(
     strengths?: string[];
     concerns?: string[];
     recommendation?: Recommendation;
+    /**
+     * Archive Fits, 2026-07-30 — full replacement array, not an append; the
+     * caller (PATCH /api/history/[id]) reads the current array via
+     * getScreeningRoleFitContext, appends, and writes the whole thing back.
+     * Requires supabase-migration-archive-fits.sql — NOT YET CONFIRMED RUN,
+     * same deferred-column pattern as fraudRisk/crossRefIsLinkedIn above.
+     */
+    suggestedRoleFits?: string[];
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1361,6 +1442,7 @@ export async function updateScreening(
   if (fields.strengths !== undefined) update.strengths = fields.strengths;
   if (fields.concerns !== undefined) update.concerns = fields.concerns;
   if (fields.recommendation !== undefined) update.recommendation = fields.recommendation;
+  if (fields.suggestedRoleFits !== undefined) update.suggested_role_fits = fields.suggestedRoleFits;
   if (Object.keys(update).length === 0) return;
 
   // Attribution needs the "before" value for status/flagged — everything else

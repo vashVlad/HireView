@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteScreening, getScreeningsByIds, updateScreening, updateScreeningCredibility, updateScreeningFlag, updateScreeningFraudRisk, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
+import { deleteScreening, getScreeningRoleFitContext, getScreeningsByIds, updateScreening, updateScreeningCredibility, updateScreeningFlag, updateScreeningFraudRisk, updateScreeningNotes, updateScreeningStatus } from "@/lib/screenings";
+import { generateRoleFit } from "@/lib/generateRoleFit";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import { CANDIDATE_STATUSES, type CandidateStatus } from "@/lib/types";
+
+// Archive Fits, 2026-07-30 — only these archive reasons imply the candidate
+// just wasn't right for THIS role (as opposed to declining, or a fraud/
+// cross-reference failure), so only these auto-trigger a role-fit suggestion.
+const ROLE_MISMATCH_ARCHIVE_REASONS = ["Tech skills", "Domain knowledge", "Role alignment"];
 
 export async function GET(
   _req: NextRequest,
@@ -62,6 +68,31 @@ export async function PATCH(
     }
     if (body.archiveReason !== undefined) {
       await updateScreening(numId, { archiveReason: body.archiveReason });
+      // Best-effort — a role-fit suggestion is a nice-to-have, never worth
+      // failing the archive-reason save itself over (e.g. Claude call error).
+      if (ROLE_MISMATCH_ARCHIVE_REASONS.includes(body.archiveReason)) {
+        try {
+          const context = await getScreeningRoleFitContext(numId);
+          if (context) {
+            const roleFit = await generateRoleFit(context);
+            if (!context.suggestedRoleFits.includes(roleFit)) {
+              await updateScreening(numId, { suggestedRoleFits: [...context.suggestedRoleFits, roleFit] });
+            }
+          }
+        } catch (err) {
+          console.error("Auto role-fit generation failed (non-fatal):", err);
+        }
+      }
+    }
+    // Manual add, 2026-07-30 (Vlad's ask: recruiter can add their own
+    // suggestion, or another one alongside the auto-generated one) — plain
+    // text, deduped against whatever's already in the array.
+    if (typeof body.suggestedRoleFit === "string" && body.suggestedRoleFit.trim()) {
+      const manual = body.suggestedRoleFit.trim();
+      const context = await getScreeningRoleFitContext(numId);
+      if (context && !context.suggestedRoleFits.includes(manual)) {
+        await updateScreening(numId, { suggestedRoleFits: [...context.suggestedRoleFits, manual] });
+      }
     }
     if (body.credibility !== undefined) {
       await updateScreeningCredibility(numId, body.credibility, actorUserId);

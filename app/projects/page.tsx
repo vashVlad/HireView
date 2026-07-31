@@ -100,6 +100,13 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [roleName, setRoleName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
+  // Archive Fits, 2026-07-30 (Vlad's ask — the checkbox on this exact card,
+  // per his spec: "that check is allowed only during the new role creation
+  // or project settings"). Defaults on — it's one cheap batched Claude call,
+  // and the whole point of the feature is reusing archived candidates
+  // without the recruiter having to remember to go check for them.
+  const [checkArchiveFits, setCheckArchiveFits] = useState(true);
+  const [checkingArchive, setCheckingArchive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -182,6 +189,15 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
       });
       if (!res.ok) throw new Error("Failed to create role");
       const data = await res.json();
+      if (checkArchiveFits) {
+        setCheckingArchive(true);
+        // Best-effort, awaited so it actually runs before the hard
+        // navigation in onCreated (a fire-and-forget fetch would likely get
+        // aborted by that navigation) — failure here should never block
+        // role creation itself, which already succeeded above.
+        await fetch(`/api/projects/${data.project.id}/archive-fits/check`, { method: "POST" }).catch(() => {});
+        setCheckingArchive(false);
+      }
       onCreated(data.project.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -204,7 +220,7 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
               {step === "input" && "Paste the job description to get started."}
               {step === "analyzing" && "Analyzing the role..."}
               {step === "naming" && "Analysis complete. Give the role a name."}
-              {step === "saving" && "Creating your role..."}
+              {step === "saving" && (checkingArchive ? "Checking the archive for fits..." : "Creating your role...")}
             </p>
           </div>
           <button type="button" onClick={onClose}
@@ -307,6 +323,18 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 placeholder="e.g. Senior Software Engineer"
                 className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-800 outline-none transition-colors focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100" />
             </div>
+
+            {/* Archive Fits, 2026-07-30 (Vlad's ask) — check the archive for
+                a fit against this exact role as soon as it's created,
+                instead of only via the Settings tab afterward. */}
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50/60 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-800/40">
+              <input type="checkbox" checked={checkArchiveFits} onChange={(e) => setCheckArchiveFits(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-violet-600 focus:ring-violet-400 dark:border-zinc-600 dark:bg-zinc-900" />
+              <span className="text-sm text-zinc-600 dark:text-zinc-300">
+                Check the archive for candidates who'd fit this role
+                <span className="block text-xs text-zinc-400 dark:text-zinc-500">Matches show up on this role's Archive Fits tab for you to review.</span>
+              </span>
+            </label>
 
             {error && <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">{error}</p>}
 

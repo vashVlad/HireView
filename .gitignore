@@ -37,6 +37,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Obsidian (memory/ is opened as a vault for browsing/backlinks — this is
+# purely local workspace state, not part of the memory content itself)
+.obsidian/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
