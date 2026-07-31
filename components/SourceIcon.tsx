@@ -7,7 +7,7 @@ import { sourceLabelWithDetail } from "@/lib/sourceType";
  * app/projects/[id]/page.tsx (three separate hand-maintained copies), and
  * adds a matching Agency icon so all three surfaces get it "for free" by
  * switching to this component. Vlad's ask, 2026-07-20 — three source types
- * now: Applicant, Sourced (LinkedIn), Agency.
+ * now: Applicant, Sourced, Agency.
  *
  * Applicant deliberately renders nothing by default (`showApplicant` off) —
  * matches the pre-existing convention on ResultCard/candidates/Pipeline
@@ -33,15 +33,45 @@ export default function SourceIcon({
   agencyName,
   size = 14,
   showApplicant = false,
+  contentIsLinkedIn,
 }: {
   type: SourceType;
   agencyName?: string | null;
   size?: number;
   showApplicant?: boolean;
+  /**
+   * Real-content LinkedIn detection (ScreeningRecord/CandidateResult's
+   * resumeIsLinkedIn), 2026-07-31 (Vlad's ask) — independent of `type`
+   * itself. `type === "linkedin"` ("Sourced") describes the CHANNEL the
+   * recruiter classified this candidate under, still set manually via the
+   * Screen tab toggle; a recruiter can source someone via LinkedIn outreach
+   * and still upload their ordinary resume file, not a LinkedIn export. This
+   * prop decides which icon a "Sourced" candidate actually gets: the
+   * LinkedIn brand mark only when the uploaded document was actually
+   * detected as a genuine LinkedIn profile export (see
+   * lib/assessCredibility.ts's detectLinkedIn()); a generic "sourced" icon
+   * otherwise. `undefined` (not yet computed — older rows, or the
+   * migration not yet confirmed run) is treated the same as `true`, so
+   * existing Sourced badges don't visually change until real data exists.
+   * Irrelevant for `type !== "linkedin"`.
+   */
+  contentIsLinkedIn?: boolean;
 }) {
   if (type === "applicant" && !showApplicant) return null;
 
   const title = sourceLabelWithDetail(type, agencyName);
+
+  if (type === "linkedin" && contentIsLinkedIn === false) {
+    return (
+      <span title={title} className="shrink-0">
+        <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Sourced" className="shrink-0">
+          <rect width="24" height="24" rx="4" fill="#7C3AED" />
+          <circle cx="10.5" cy="10.5" r="4.5" fill="none" stroke="#fff" strokeWidth="1.6" />
+          <path d="M14 14l4 4" fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      </span>
+    );
+  }
 
   if (type === "linkedin") {
     return (

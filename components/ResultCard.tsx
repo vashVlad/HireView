@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, FraudRiskAssessment, RejectionHistoryEntry } from "@/lib/types";
+import type { BlacklistEntry, CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, FraudRiskAssessment, RejectionHistoryEntry, TrackerStage } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
 import { FraudRiskChecker } from "./FraudRiskChecker";
 import { InsightList } from "./InsightList";
 import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
-import { StatusSelect } from "./StatusSelect";
+import { StatusStageControl } from "./StatusStageControl";
 import { TrajectoryRenderer } from "./TrajectoryRenderer";
 import { ActivityTimeline } from "./ActivityTimeline";
 import SourceIcon from "./SourceIcon";
@@ -53,7 +53,10 @@ export function ResultCard({
   roleContext,
   jdAnalysis,
   onStatusChange,
+  stage,
+  onStageChange,
   onArchiveReasonChange,
+  onBlacklistChange,
   eligibleForFitCheck = false,
   onFindBetterFit,
   onCheckCrossProjectPromise,
@@ -61,6 +64,7 @@ export function ResultCard({
   otherActiveCount,
   nameMatch,
   rejectionHistory,
+  blacklistMatch,
   solo = false,
 }: {
   result: CandidateResult;
@@ -69,6 +73,19 @@ export function ResultCard({
   jdAnalysis?: JDAnalysis | null;
   onStatusChange?: (id: number, status: CandidateStatus) => void;
   /**
+   * Tracker stage (TA/L1/L2/In-Person/Offer/Reject), 2026-07-31 (Vlad's
+   * ask) — lets a recruiter pick a stage directly on this post-screening
+   * card, in the same motion as picking "Screening" for status, instead of
+   * having to separately open the Pipeline/Tracker tab afterward. Reuses
+   * StatusStageControl exactly as-is (see that component's own doc comment
+   * for how a combined status="screening" + stage pick already collapses
+   * into one Confirm) — this card just needs to supply the current value
+   * and a place to save it. `null`/undefined until a screening actually has
+   * a tracker entry yet, same as the Pipeline tab's own `stagesMap` lookup.
+   */
+  stage?: TrackerStage | null;
+  onStageChange?: (id: number, stage: TrackerStage) => void;
+  /**
    * Archive-reason picker shown on the status pill once status is
    * "archived" — mirrors StatusStageControl's reason segment used on
    * Pipeline/All Candidates cards. Vlad's ask, 2026-07-15: this post-
@@ -76,6 +93,11 @@ export function ResultCard({
    * capture why a candidate was archived right after scoring.
    */
   onArchiveReasonChange?: (id: number, archiveReason: string) => void;
+  /**
+   * Blacklist checkbox on the same archive-reason picker, 2026-07-31 (Vlad's
+   * ask). Mirrors onArchiveReasonChange's mirror-and-forward shape exactly.
+   */
+  onBlacklistChange?: (id: number, blacklisted: boolean, reason: string | null) => void;
   /**
    * Every screened candidate is saved regardless of score — this just
    * decides whether to surface the cross-project fit suggestion. Renamed
@@ -113,6 +135,16 @@ export function ResultCard({
    * duplicateFlag, or historyAlertType — any recruiter should see this.
    */
   rejectionHistory?: RejectionHistoryEntry;
+  /**
+   * System-wide (any project, any team) blacklist warning — Vlad's ask,
+   * 2026-07-31: "When a person is archived, let the recruiter blacklist the
+   * person if needed, which will be shown during the screening if the same
+   * person is applying for a different role." Same name-match pattern and
+   * caveats as rejectionHistory above, deliberately styled to stand out much
+   * more (Vlad: "must pop") — this is a stronger signal than a plain past
+   * rejection.
+   */
+  blacklistMatch?: BlacklistEntry;
   solo?: boolean;
 }) {
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
@@ -124,6 +156,8 @@ export function ResultCard({
     result.fraudRisk ?? null
   );
   const [archiveReason, setArchiveReason] = useState<string | undefined>(result.archiveReason);
+  const [blacklisted, setBlacklisted] = useState<boolean>(result.blacklisted ?? false);
+  const [blacklistReason, setBlacklistReason] = useState<string | null>(result.blacklistReason ?? null);
   const [savedId] = useState<number | undefined>(result.id);
   // Notes field, added 2026-07-16 in place of the removed Generate Question
   // tool — same pattern as CandidateCard's notes textarea on the All
@@ -322,7 +356,7 @@ export function ResultCard({
                 {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
-            <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} />
+            <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} contentIsLinkedIn={result.resumeIsLinkedIn} />
             {/* Visible agency name, added 2026-07-27 (Vlad's ask: "also show
                 agency name when it's given") — previously only surfaced as a
                 hover tooltip via SourceIcon's title (sourceLabelWithDetail),
@@ -337,13 +371,22 @@ export function ResultCard({
           </div>
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
-              <StatusSelect
+              <StatusStageControl
                 status={result.status}
-                onChange={(status) => onStatusChange(savedId, status)}
+                stage={stage ?? null}
+                onStatusChange={(status) => onStatusChange(savedId, status)}
+                onStageChange={(newStage) => onStageChange?.(savedId, newStage)}
                 archiveReason={archiveReason}
                 onArchiveReasonChange={(reason) => {
                   setArchiveReason(reason);
                   onArchiveReasonChange?.(savedId, reason);
+                }}
+                blacklisted={blacklisted}
+                blacklistReason={blacklistReason}
+                onBlacklistChange={(next, reason) => {
+                  setBlacklisted(next);
+                  setBlacklistReason(reason);
+                  onBlacklistChange?.(savedId, next, reason);
                 }}
               />
             </div>
@@ -450,6 +493,30 @@ export function ResultCard({
               />
             </div>
           )}
+        </div>
+      )}
+      {/* Blacklist warning — deliberately styled to "pop" much harder than
+          rejectionHistory below it (Vlad's explicit ask): solid near-black
+          fill, white bold text, a warning glyph, shown ABOVE the plain
+          rejection banner since it's the stronger signal of the two. Same
+          confidence-tier caveat as rejectionHistory (loose name match unless
+          corroborated by an exact content-hash match). */}
+      {blacklistMatch && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-950 bg-zinc-950 px-3 py-2.5 text-white dark:border-white dark:bg-white dark:text-zinc-950">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="mt-0.5 shrink-0">
+            <circle cx="12" cy="12" r="9" strokeLinecap="round" />
+            <path d="M5.5 5.5 18.5 18.5" strokeLinecap="round" />
+          </svg>
+          <p className="text-left text-xs leading-snug">
+            <span className="font-bold uppercase tracking-wide">Blacklisted</span>
+            {blacklistMatch.projectName ? <> — archived from <strong>{blacklistMatch.projectName}</strong></> : null}
+            {blacklistMatch.reason ? <> — &#x201C;{blacklistMatch.reason}&#x201D;</> : " — no reason recorded"}.{" "}
+            {blacklistMatch.confidence === "name_and_resume" ? (
+              <span className="font-medium">Same resume on file — high-confidence match.</span>
+            ) : (
+              <span className="italic opacity-80">Name match only — could be a different person with the same name.</span>
+            )}
+          </p>
         </div>
       )}
       {rejectionHistory && (

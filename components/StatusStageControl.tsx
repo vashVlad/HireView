@@ -63,6 +63,16 @@ const STAGE_TEXT_COLORS: Record<TrackerStage, string> = {
  * the pending pick with zero side effects. Archived keeps its own existing
  * gate above untouched (picking a reason already IS its confirm step,
  * doubling that up with a second Confirm click would be redundant).
+ *
+ * Blacklist, added 2026-07-31 (Vlad's ask) — a small checkbox + optional
+ * free-text reason, shown alongside the archive-reason segment whenever the
+ * candidate is (or is being) archived. Deliberately lightweight/reversible
+ * (fires `onBlacklistChange` immediately on toggle, no Confirm/Cancel gate
+ * like status/stage above) — this is meant to be freely flippable "if
+ * needed," not a heavyweight decision, and it never changes `status`/moves
+ * the card. See lib/screenings.ts's listBlacklist() for how this then
+ * surfaces system-wide during a future screening. Optional props/callback,
+ * same as archiveReason — callers that don't wire it up simply don't show it.
  */
 export function StatusStageControl({
   status,
@@ -71,6 +81,9 @@ export function StatusStageControl({
   onStageChange,
   archiveReason,
   onArchiveReasonChange,
+  blacklisted,
+  blacklistReason,
+  onBlacklistChange,
   transferredToProjectName,
   transferredToScreeningId,
 }: {
@@ -80,6 +93,9 @@ export function StatusStageControl({
   onStageChange: (stage: TrackerStage) => void;
   archiveReason?: string | null;
   onArchiveReasonChange?: (reason: string) => void;
+  blacklisted?: boolean;
+  blacklistReason?: string | null;
+  onBlacklistChange?: (blacklisted: boolean, reason: string | null) => void;
   /**
    * Read-only display only — Vlad's ask, 2026-07-29, redesigned same day:
    * "Transferred" is no longer something you pick from this dropdown (that
@@ -336,6 +352,37 @@ export function StatusStageControl({
               <option key={r} value={r}>{r}</option>
             ))}
           </select>
+        </>
+      )}
+      {showArchiveReason && onBlacklistChange && (
+        <>
+          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
+          <label
+            className="flex shrink-0 cursor-pointer items-center gap-1 py-1 pl-1.5 pr-1"
+            title="Blacklist — flagged for every recruiter if this person applies again"
+          >
+            <input
+              type="checkbox"
+              checked={blacklisted ?? false}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                onBlacklistChange(checked, checked ? (blacklistReason ?? null) : null);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="h-3 w-3 shrink-0 cursor-pointer accent-rose-600"
+            />
+            <span className="text-[10px] font-semibold uppercase tracking-wide">Blacklist</span>
+          </label>
+          {blacklisted && (
+            <input
+              type="text"
+              defaultValue={blacklistReason ?? ""}
+              placeholder="Reason (optional)"
+              onBlur={(e) => onBlacklistChange(true, e.target.value.trim() || null)}
+              onClick={(e) => e.stopPropagation()}
+              className="w-24 shrink-0 bg-transparent py-1 pl-0.5 pr-1.5 text-[10px] outline-none placeholder:opacity-50"
+            />
+          )}
         </>
       )}
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"

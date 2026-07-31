@@ -109,7 +109,7 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
                     </div>
                     <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
                       <span className="flex items-center gap-1.5">
-                        <span className="h-2 w-2 shrink-0 rounded-full bg-[#0A66C2]" /> Sourced (LinkedIn)
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-[#0A66C2]" /> Sourced
                       </span>
                       <span className="tabular-nums">
                         {s.bySource.outbound.toLocaleString()} ({Math.round(outboundPct)}%)
@@ -150,7 +150,7 @@ function SourceLegend() {
         <span className="h-2.5 w-2.5 rounded-full bg-zinc-400 dark:bg-zinc-500" /> Applied
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="h-2.5 w-2.5 rounded-full bg-[#0A66C2]" /> Sourced (LinkedIn)
+        <span className="h-2.5 w-2.5 rounded-full bg-[#0A66C2]" /> Sourced
       </span>
       <span className="flex items-center gap-1.5">
         <span className="h-2.5 w-2.5 rounded-full bg-orange-500" /> Agency
@@ -262,7 +262,7 @@ export default function FunnelViewPage() {
       "% of Previous Stage": s.conversionFromPrevious != null ? `${s.conversionFromPrevious}%` : "—",
     }));
     summaryRows.push({ Stage: "Archived/Rejected", Count: activeArchivedOrRejected, "% of Previous Stage": "—" });
-    summaryRows.push({ Stage: "Sourced (LinkedIn)", Count: activeSourceSplit.outbound, "% of Previous Stage": "—" });
+    summaryRows.push({ Stage: "Sourced", Count: activeSourceSplit.outbound, "% of Previous Stage": "—" });
     summaryRows.push({ Stage: "Agency", Count: activeSourceSplit.agency, "% of Previous Stage": "—" });
     summaryRows.push({ Stage: "Applied", Count: activeSourceSplit.inbound, "% of Previous Stage": "—" });
     const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
@@ -273,7 +273,7 @@ export default function FunnelViewPage() {
       return {
         Name: c.candidateName,
         Role: c.projectName,
-        Source: c.source === "outbound" ? "Sourced (LinkedIn)" : c.source === "agency" ? `Agency (${c.agencyName ?? "—"})` : "Applied",
+        Source: c.source === "outbound" ? "Sourced" : c.source === "agency" ? `Agency (${c.agencyName ?? "—"})` : "Applied",
         Score: c.score,
         "Current Stage": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
         // Past Stage stays in the Excel export only — Vlad's ask, 2026-07-20:

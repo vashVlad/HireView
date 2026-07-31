@@ -231,6 +231,17 @@ export interface CandidateResult {
   notes?: string;
   /** Mirrors ScreeningRecord.linkedInMode — lets the post-screening card show the LinkedIn icon without waiting for a reload. Added 2026-07-16. */
   linkedInMode?: boolean;
+  /**
+   * Real-content LinkedIn detection, independent of linkedInMode (which is
+   * the recruiter's manual "Sourced" channel toggle, not a file-format
+   * check). True/false once computed via lib/assessCredibility.ts's
+   * detectLinkedIn() against the actual extracted resume text; undefined
+   * when not yet computed (older rows, or migration not yet run) — the icon
+   * treats undefined the same as true so it doesn't visually change until
+   * real data exists. Added 2026-07-31 (Vlad's ask). See
+   * supabase-migration-resume-is-linkedin.sql.
+   */
+  resumeIsLinkedIn?: boolean;
   /** Mirrors ScreeningRecord.agencyName — same reload-avoidance reason as linkedInMode above. Added 2026-07-20. */
   agencyName?: string;
   /**
@@ -263,6 +274,23 @@ export interface CandidateResult {
   crossProjectNameMatchProjectName?: string;
   /** The matched screening's own score — added 2026-07-27 (Vlad's ask: show a score alongside "Also screened in [project]"), same ephemeral/not-persisted treatment as the three fields above it. */
   crossProjectNameMatchScore?: number;
+  /**
+   * Mirrors ScreeningRecord.blacklisted/blacklistReason — needed here too so
+   * the checkbox on StatusStageControl (rendered via the post-screening
+   * ResultCard) reflects state immediately without a reload, same reason
+   * archiveReason is mirrored above. Added 2026-07-31.
+   */
+  blacklisted?: boolean;
+  blacklistReason?: string | null;
+  /**
+   * System-wide blacklist warning surfaced during screening (before this
+   * candidate is even saved) — a name match against lib/screenings.ts's
+   * listBlacklist(), computed client-side in ScreenTab the same way
+   * rejectionHistory/crossProjectNameMatch are. Deliberately ephemeral, same
+   * as crossProjectNameMatch* above: never persisted, only ever set on the
+   * live screening response. Added 2026-07-31.
+   */
+  blacklistMatch?: BlacklistEntry;
 }
 
 export interface ScreenResumesResponse {
@@ -359,6 +387,27 @@ export interface RejectionHistoryEntry {
   confidence?: "name_only" | "name_and_resume";
 }
 
+/**
+ * System-wide (any project, any team) blacklist — Vlad's ask, 2026-07-31:
+ * "When a person is archived, let the recruiter blacklist the person if
+ * needed, which will be shown during the screening if the same person is
+ * applying for a different role." Deliberately not team-scoped, same
+ * precedent as RejectionHistoryEntry above — a blacklisted candidate is
+ * flagged for every recruiter, not just the one who blacklisted them.
+ * Compared client-side after scoring, same name-match pattern as
+ * RejectionHistoryEntry (see findBlacklistMatches, app/projects/[id]/page.tsx).
+ */
+export interface BlacklistEntry {
+  candidateName: string;
+  reason: string | null;
+  /** The blacklisted screening's own project, for context in the warning banner. */
+  projectName: string | null;
+  /** Same corroboration idea as RejectionHistoryEntry.contentHash — lets a match be upgraded from a name coincidence to "this is the same document." */
+  contentHash: string | null;
+  /** Set only once matched against a freshly scored candidate — see RejectionHistoryEntry.confidence for the identical reasoning. */
+  confidence?: "name_only" | "name_and_resume";
+}
+
 export interface ScreeningRecord {
   id: number;
   candidateName: string;
@@ -381,6 +430,16 @@ export interface ScreeningRecord {
    * until that follow-up wiring lands post-migration.
    */
   archiveReason?: string;
+  /**
+   * Blacklist, 2026-07-31 (Vlad's ask) — set via a checkbox alongside the
+   * archive-reason picker (StatusStageControl.tsx). Meaningful regardless of
+   * current status (a blacklisted candidate stays blacklisted even if their
+   * status is later changed off "archived"). Deliberately NOT in the shared
+   * SCREENING_COLUMNS select yet — same deferred pattern as archiveReason
+   * above, see supabase-migration-blacklist.sql.
+   */
+  blacklisted?: boolean;
+  blacklistReason?: string | null;
   /**
    * Archive Fits, 2026-07-30 (Vlad's ask) — short role/title suggestions for
    * where this candidate would actually fit, independent of any specific
@@ -409,6 +468,13 @@ export interface ScreeningRecord {
    * deploys, full stop — see that file's header.
    */
   agencyName?: string;
+  /**
+   * Real-content LinkedIn detection — see CandidateResult.resumeIsLinkedIn
+   * for the full explanation (this is the same field, mirrored here for the
+   * read-back-from-DB shape). Deferred/isolated, same pattern as
+   * archiveReason above — see supabase-migration-resume-is-linkedin.sql.
+   */
+  resumeIsLinkedIn?: boolean;
   flagged: boolean;
   flagNote?: string;
   notes?: string;
