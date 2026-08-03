@@ -271,7 +271,27 @@ ${resumeText}${crossRefSection}`;
   }
 
   const assessment = toolUse.input as CredibilityAssessment;
-  const deduction = computeCredibilityScoreDelta(assessment.rows ?? []);
+
+  // Real bug found 2026-08-03 (Vlad: "it said minor-concerns but nothing is
+  // shown" — the header pill read "Minor concerns" while both the Flags and
+  // Matches tabs were empty). Root cause: overallSignal is model-decided
+  // (the tool schema tells Claude to "derive this from the rows, don't judge
+  // independently") but nothing on this side ever enforced that — if Claude's
+  // own output is internally inconsistent (declares minor_concerns/
+  // significant_concerns without an actual matching discrepancy row, which
+  // happens most often when crossRefText came back empty/near-empty and the
+  // model still hedges toward a non-clean signal instead of "clean"), the UI
+  // just renders whatever contradiction it was given. Same "deterministic,
+  // not model-decided" principle already applied to scoreDelta below —
+  // overallSignal is now always recomputed from the actual rows array, so it
+  // can never disagree with what the recruiter sees in the Flags/Matches
+  // tabs, regardless of what Claude put in that field.
+  const rows = assessment.rows ?? [];
+  const hasMaterial = rows.some((r) => r.status === "discrepancy" && r.severity === "material");
+  const hasDiscrepancy = rows.some((r) => r.status === "discrepancy");
+  assessment.overallSignal = hasMaterial ? "significant_concerns" : hasDiscrepancy ? "minor_concerns" : "clean";
+
+  const deduction = computeCredibilityScoreDelta(rows);
   const bonus = computeCredibilityScoreBonus(assessment.resolvedConcerns ?? []);
   assessment.scoreDeduction = deduction;
   assessment.scoreBonus = bonus;

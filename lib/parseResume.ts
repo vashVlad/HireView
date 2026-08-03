@@ -122,7 +122,30 @@ export async function extractResumeText(
   }
 
   if (extension === "docx") {
+    // DO-NOT-TOUCH EXCEPTION (2026-08-03 — see memory/decisions-log.md): same
+    // failure class as the PDF branch's 2026-07-23 exception above, just
+    // never ported to .docx. mammoth.extractRawText() has no length/emptiness
+    // check of its own — an image-only, SmartArt-based, or otherwise
+    // non-text-run resume silently comes back as "" or a few stray
+    // characters, with no error thrown. Downstream, an empty crossRefText
+    // makes assessCredibility() treat it as "no cross-reference provided"
+    // (rows forced to []), but Claude can still hedge toward a non-"clean"
+    // overallSignal — Vlad's report, 2026-08-03: "it said minor-concerns but
+    // nothing is shown." There's no PDF-style vision fallback available here
+    // (Claude has no native "read this .docx visually" mode the way it does
+    // for a PDF's rendered page), so this fails loudly instead: below the
+    // same MIN_MEANINGFUL_TEXT_LENGTH threshold used for PDFs, throw a clear,
+    // actionable error rather than silently completing with near-empty text.
+    // This surfaces exactly the same way an unsupported file type already
+    // does (loadMainResume/loadCrossRef in assess-credibility/route.ts and
+    // the equivalent screen-resumes path already catch and report thrown
+    // errors as a real, visible error message instead of a silent bad result).
     const result = await mammoth.extractRawText({ buffer });
+    if (result.value.trim().length < MIN_MEANINGFUL_TEXT_LENGTH) {
+      throw new Error(
+        `Could not extract readable text from "${fileName}" — it came back with little to no text (this happens with image-only or heavily graphic-design/text-box-based resumes). Try a plain-text-based .docx or a PDF instead.`
+      );
+    }
     return result.value;
   }
 
