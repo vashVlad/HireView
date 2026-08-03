@@ -1118,6 +1118,15 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   }, [expandedId]);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Share link, 2026-08-02 (Vlad's ask) — copies this candidate's durable
+  // /candidates/[id] page URL, same idea as the existing shareable batch
+  // page (/projects/[id]/batches/[batchId]), just per candidate.
+  const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
+  async function handleCopyLink(id: number) {
+    await navigator.clipboard.writeText(`${window.location.origin}/candidates/${id}`);
+    setCopiedLinkId(id);
+    setTimeout(() => setCopiedLinkId((cur) => (cur === id ? null : cur)), 1500);
+  }
   // Rescreen, added 2026-07-27 (Vlad's ask) — re-runs scoring for an
   // already-saved candidate in place. rescreenErrorId is cleared on the next
   // attempt (success or failure) rather than ever building up a list, since
@@ -1444,6 +1453,11 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   // component's own doc comment for the full flow. TransferControl now owns
   // every fetch call itself (precheck/preview/commit); this just merges the
   // final result into local state once it reports success.
+  //
+  // CHANGED 2026-08-02 (Vlad's ask, see lib/types.ts's CandidateStatus
+  // comment): local state now mirrors the archived-not-transferred status
+  // the server actually writes (transferScreeningToProject in
+  // lib/screenings.ts), instead of optimistically setting "transferred".
   function handleTransferred(id: number, result: { newScreeningId: number; transferredToProjectId: number; transferredToProjectName: string }) {
     const now = new Date().toISOString();
     setScreenings((prev) =>
@@ -1451,7 +1465,8 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         s.id === id
           ? {
               ...s,
-              status: "transferred",
+              status: "archived",
+              archiveReason: "Transferred",
               statusUpdatedAt: now,
               transferredToProjectId: result.transferredToProjectId,
               transferredToProjectName: result.transferredToProjectName,
@@ -1460,7 +1475,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
           : s
       )
     );
-    onStatusChange?.(id, "transferred");
+    onStatusChange?.(id, "archived");
   }
 
   async function handleToggleFlag(id: number, current: boolean, note?: string) {
@@ -1830,9 +1845,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       status chip already reads "Transferred to X"; showing
                       both was just noise pointing at largely the same idea.
                       Originally gated on the old "Moved to X" badge
-                      (betterFitMatches), now keyed off the real
-                      status === "transferred" now that Transfer is an
-                      explicit action instead of a passive guess.
+                      (betterFitMatches), then keyed off status ===
+                      "transferred" now that Transfer is an explicit action
+                      instead of a passive guess. CHANGED 2026-08-02: keyed
+                      off transferredToScreeningId directly instead, since a
+                      transfer now archives the original screening rather
+                      than setting status to "transferred" (see
+                      lib/types.ts's CandidateStatus comment) — the pointer
+                      column is the reliable signal either way.
                       "known_fraud_pattern" is a distinct, more serious
                       signal (not just "also seen elsewhere") and stays
                       regardless. Also suppressed on every non-latest member
@@ -1842,7 +1862,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       "previously_seen" match here, never known_fraud_
                       pattern — see clusterHasFraudSignal), superseded by
                       the "Multiple roles" toggle bar above the card instead. */}
-                  {s.historyAlertType && !suppressedHistoryAlertIds.has(s.id) && !isNonFraudCluster && (s.historyAlertType === "known_fraud_pattern" || s.status !== "transferred") && (
+                  {s.historyAlertType && !suppressedHistoryAlertIds.has(s.id) && !isNonFraudCluster && (s.historyAlertType === "known_fraud_pattern" || s.transferredToScreeningId == null) && (
                     <Link
                       href={s.historyAlertMatchProjectId != null ? `/projects/${s.historyAlertMatchProjectId}?tab=pipeline` : "#"}
                       onClick={(e) => e.stopPropagation()}
@@ -2255,13 +2275,43 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                         screeningId={s.id}
                         transferProjects={transferProjects}
                         alreadyTransferred={
-                          s.status === "transferred"
+                          // Was gated on `s.status === "transferred"` — a
+                          // transfer now archives the original screening
+                          // instead (2026-08-02), so status alone can no
+                          // longer tell "already transferred" apart from any
+                          // other archived candidate. The pointer column is
+                          // set only by a real transfer, so it's the
+                          // reliable signal for both old and new rows.
+                          s.transferredToScreeningId != null
                             ? { projectName: s.transferredToProjectName, screeningId: s.transferredToScreeningId }
                             : null
                         }
                         onTransferred={(result) => handleTransferred(s.id, result)}
                       />
                     )}
+                    {/* Share link, 2026-08-02 (Vlad's ask) — copies a direct
+                        link to this candidate's own /candidates/[id] page,
+                        same idea as the existing durable/shareable batch-
+                        results page. */}
+                    <button type="button" onClick={() => handleCopyLink(s.id)}
+                      className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700">
+                      {copiedLinkId === s.id ? (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="9" y="9" width="11" height="11" rx="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </svg>
+                          Share link
+                        </>
+                      )}
+                    </button>
                   </div>
                   {confirmDeleteId === s.id ? (
                     <div className="flex items-center gap-2">
@@ -2775,7 +2825,11 @@ function DrawerBody({
     .join("");
 
   return (
-    <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
+    // No longer its own scroll container, 2026-08-02 — the parent now wraps
+    // this together with the "Move to stage" block and RejectionCard in one
+    // shared scrollable region (see the call site's comment). Still owns its
+    // own flex-col layout/spacing/padding, just doesn't scroll on its own.
+    <div className="flex flex-col gap-4 px-6 py-5">
       {/* Profile photo */}
       <label className="group relative mx-auto block h-24 w-24 cursor-pointer">
         <div className="h-24 w-24 overflow-hidden rounded-full border-2 border-zinc-200 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800">
@@ -3324,66 +3378,104 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               </button>
             </div>
 
+            {/* Single scrollable region for everything below the header,
+                2026-08-02 — fixes a real bug Vlad reported: the "Move to
+                stage" block and RejectionCard used to render OUTSIDE
+                DrawerBody's own scroll container (which was the only
+                scrollable region in the drawer), so once RejectionCard's
+                fraud-claims form grew tall enough to push the drawer's total
+                content past the viewport height, the overflow had nowhere
+                to scroll to — it just clipped, with no way to reach the
+                Save button. Now everything from here down (stage picker,
+                RejectionCard, DrawerBody's own fields) shares one scroll
+                container; DrawerBody's own wrapper no longer scrolls
+                independently (see its own className, changed to match). */}
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             {/* Move stage — confirm/cancel gated, 2026-07-30 (Vlad's ask):
                 this used to commit the moment a chip was clicked, unlike
                 every other status/stage control. Clicking a chip now only
                 stages it as pendingDrawerStage; the actual onStageChange
                 call happens on Confirm. Re-clicking the candidate's actual
-                current stage clears the pending pick (nothing to confirm). */}
+                current stage clears the pending pick (nothing to confirm).
+                Redesigned 2026-08-02 (Vlad, two asks):
+                (1) "add those confirmation button exactly under the status
+                that wants to be switched to" — the Confirm/Cancel used to
+                render as one generic bar below the WHOLE chip row,
+                regardless of which chip was picked. Now each chip carries
+                its own inline Confirm/Cancel, rendered immediately next to
+                it (in the same flex-wrap flow, so it appears directly under/
+                beside that specific chip, not a separate detached block).
+                (2) "remove the confirmation button from reject status since
+                the reason has to be mentioned regardless" — Reject skips
+                the pending/confirm step entirely and commits immediately on
+                click; RejectionCard's own mandatory reason + Save already
+                serves as the real confirmation for this one stage. */}
             <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
               <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Move to stage</p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap items-start gap-1.5">
                 {TRACKER_STAGES.map((st) => {
                   const sc = STAGE_COLORS[st];
                   const active = (pendingDrawerStage ?? drawerStage) === st;
                   const isReject = st === "Reject";
                   return (
-                    <button key={st} type="button"
-                      onClick={() => setPendingDrawerStage(st === drawerStage ? null : st)}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
-                        active
-                          ? `${sc.bg} ${sc.text} ${sc.border} shadow-sm`
-                          : isReject
-                          ? "border-zinc-200 text-zinc-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-rose-500/30 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
-                          : "border-zinc-200 text-zinc-400 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
-                      }`}>
-                      {st}
-                    </button>
+                    // Vertical stack, 2026-08-02 (Vlad: "show it under the
+                    // actual status chip") — was a horizontal pair (chip,
+                    // then Confirm/Cancel beside it); now Confirm/Cancel
+                    // renders directly BELOW the specific chip it belongs to.
+                    <span key={st} className="flex flex-col items-start gap-1">
+                      <button type="button"
+                        onClick={() => {
+                          // Minor correctness fix, 2026-08-02: don't re-fire
+                          // onStageChange (a real PATCH call) when Reject is
+                          // clicked while it's already the active stage —
+                          // matches every other stage's own no-op-when-
+                          // already-active behavior below.
+                          if (isReject) { if (st !== drawerStage) onStageChange(selected.id, "Reject"); return; }
+                          setPendingDrawerStage(st === drawerStage ? null : st);
+                        }}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
+                          active
+                            ? `${sc.bg} ${sc.text} ${sc.border} shadow-sm`
+                            : isReject
+                            ? "border-zinc-200 text-zinc-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-rose-500/30 dark:hover:bg-rose-500/10 dark:hover:text-rose-400"
+                            : "border-zinc-200 text-zinc-400 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
+                        }`}>
+                        {st}
+                      </button>
+                      {pendingDrawerStage === st && !isReject && (
+                        <span className="flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 py-1 pl-1.5 pr-1 dark:border-violet-500/30 dark:bg-violet-500/10">
+                          <button type="button"
+                            onClick={() => { onStageChange(selected.id, pendingDrawerStage); setPendingDrawerStage(null); }}
+                            title="Confirm"
+                            className="flex shrink-0 items-center justify-center text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                              <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          <button type="button"
+                            onClick={() => setPendingDrawerStage(null)}
+                            title="Cancel"
+                            className="flex shrink-0 items-center justify-center text-zinc-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                              <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        </span>
+                      )}
+                    </span>
                   );
                 })}
               </div>
-              {pendingDrawerStage && (
-                <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 py-1 pl-2 pr-1 dark:border-violet-500/30 dark:bg-violet-500/10">
-                  <span className="flex-1 text-[11px] font-medium text-violet-700 dark:text-violet-400">
-                    Move to {pendingDrawerStage}?
-                  </span>
-                  <button type="button"
-                    onClick={() => { onStageChange(selected.id, pendingDrawerStage); setPendingDrawerStage(null); }}
-                    className="rounded-md bg-violet-600 px-1.5 py-0.5 text-[11px] font-semibold text-white transition-colors hover:bg-violet-700">
-                    Confirm
-                  </button>
-                  <button type="button"
-                    onClick={() => setPendingDrawerStage(null)}
-                    className="rounded-md border border-zinc-200 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800">
-                    Cancel
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Rejection card — right beneath the "Move to stage" chip row per
                 Vlad's ask, 2026-07-29. See components/RejectionCard.tsx.
-                Keyed off the PENDING pick too (not just the confirmed
-                drawerStage), 2026-07-30 follow-up: now that picking "Reject"
-                requires its own Confirm click above, waiting for drawerStage
-                alone would hide this card until after that round-trip,
-                breaking the one-pass "pick Reject, fill in why, save" flow
-                this was built for. Showing it as soon as Reject is even
-                picked (confirmed or not) keeps that flow intact — saving the
-                reason here is already a separate action from confirming the
-                stage move (RejectionCard's own Save button only PATCHes
-                tracker.reject_reason, see onSaveReason below). */}
-            {(pendingDrawerStage ?? drawerStage) === "Reject" && (
+                Simplified 2026-08-02: Reject now commits immediately on
+                click (no pending/confirm step, see the chip row above), so
+                this only ever needs to check the real drawerStage — the
+                `pendingDrawerStage` fallback that used to matter here (back
+                when Reject also needed its own Confirm click) is gone. */}
+            {drawerStage === "Reject" && (
               <RejectionCard
                 // Forces a fresh mount per candidate — RejectionCard owns its
                 // own local state (reason choice, fraud claims) rather than
@@ -3409,6 +3501,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
               onPhotoUpload={(file) => handlePhotoUpload(selected.id, file)}
               projectName={projectName}
             />
+            </div>
           </div>
         </>
       )}

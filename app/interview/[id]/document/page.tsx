@@ -49,6 +49,14 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
   // credibility check itself. null = unknown (pre-migration row, or the
   // header wasn't present) — treated as "don't assume LinkedIn."
   const [crossRefIsLinkedIn, setCrossRefIsLinkedIn] = useState<boolean | null>(null);
+  // File extension of the stored cross-reference doc, 2026-08-02 — needed to
+  // route docx/doc through the HTML preview endpoint instead of the raw file
+  // endpoint, same fix already applied to the resume tab on 2026-07-16. A
+  // real LinkedIn PDF is always "pdf" (the credibility-check upload only
+  // ever produces one for that case), so this only actually matters for the
+  // "second resume" cross-reference case, but it's read unconditionally so
+  // an unknown/pre-migration row still degrades safely to "assume pdf."
+  const [crossRefExt, setCrossRefExt] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/history/${id}/linkedin`, { method: "HEAD" })
@@ -56,6 +64,8 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
         setHasLinkedIn(r.ok);
         const header = r.headers.get("X-Cross-Ref-Is-Linkedin");
         setCrossRefIsLinkedIn(header === "true" ? true : header === "false" ? false : null);
+        const extHeader = r.headers.get("X-Cross-Ref-Ext");
+        setCrossRefExt(extHeader && extHeader !== "unknown" ? extHeader : null);
       })
       .catch(() => setHasLinkedIn(false))
       .finally(() => setChecking(false));
@@ -94,10 +104,17 @@ function InterviewDocumentPageInner({ params }: { params: Promise<{ id: string }
     || resumeExt === "docx"
   );
 
+  // Same idea as isOfficeDoc above, for the cross-reference tab — fixes the
+  // "black screen" bug Vlad reported: a docx cross-reference upload was
+  // always pointed at the raw file endpoint, which browsers can't render
+  // inline regardless of Content-Type (only PDF renders natively in an
+  // iframe). See linkedin/preview/route.ts for the actual HTML conversion.
+  const isOfficeCrossRef = activeDoc === "linkedin" && (crossRefExt === "doc" || crossRefExt === "docx");
+
   const rawResumeUrl = `/api/history/${id}/resume`;
   const docUrl = activeDoc === "resume"
     ? (isOfficeDoc ? `/api/history/${id}/resume/preview` : rawResumeUrl)
-    : `/api/history/${id}/linkedin`;
+    : (isOfficeCrossRef ? `/api/history/${id}/linkedin/preview` : `/api/history/${id}/linkedin`);
 
   const canPreview = activeDoc === "linkedin"
     || isOfficeDoc

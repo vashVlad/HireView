@@ -73,6 +73,13 @@ const STAGE_TEXT_COLORS: Record<TrackerStage, string> = {
  * the card. See lib/screenings.ts's listBlacklist() for how this then
  * surfaces system-wide during a future screening. Optional props/callback,
  * same as archiveReason — callers that don't wire it up simply don't show it.
+ *
+ * Narrowed 2026-08-02 (Vlad's ask: "Allow adding a candidate to the
+ * blacklist only if the archive reason is 'Not Interested'") — the checkbox
+ * only renders once `archiveReason` is actually "Not interested" specifically,
+ * not for any other reason. A candidate blacklisted under that reason stays
+ * blacklistable/un-blacklistable only while the reason remains "Not
+ * interested" — switching the reason away hides the control again.
  */
 export function StatusStageControl({
   status,
@@ -147,8 +154,24 @@ export function StatusStageControl({
   // picks keep their own separate icon-overlay confirm above instead (see
   // statusPending) — this flag never overlaps with that one.
   const showCombinedConfirm = showStage && (pendingStatus === "screening" || pendingStage !== null);
-  const showArchiveReason = (status === "archived" || pendingArchive) && gateOnReason;
-  const showTransferredLink = status === "transferred" && transferredToScreeningId != null;
+  // Fixed 2026-08-02 — real bug Vlad hit: this used to check `status ===
+  // "archived"` (the CONFIRMED, already-persisted status), not the
+  // pending/displayed one. Moving an already-archived candidate to
+  // "Screening" sets pendingStatus to "screening" (so showStage correctly
+  // turns on), but `status` itself doesn't change until Confirm is clicked
+  // — so the archive-reason picker stayed visible too, showing BOTH the
+  // stage picker AND a stale "Role alignment"-style reason dropdown at the
+  // same time, which reads as "pick a reason" for an action that has
+  // nothing to do with archiving. Keying off `displayStatus` (which already
+  // folds in pendingArchive/pendingStatus) fixes this: it's only ever
+  // "archived" when the candidate genuinely is, or is about to become, archived.
+  const showArchiveReason = displayStatus === "archived" && gateOnReason;
+  // Was gated on `status === "transferred"` — no longer reliable now that a
+  // successful transfer archives the original screening instead (2026-08-02,
+  // see lib/screenings.ts's transferScreeningToProject). The pointer column
+  // alone is now sufficient and correct for both old ("transferred" status)
+  // and new ("archived" status) rows.
+  const showTransferredLink = transferredToScreeningId != null;
 
   function confirmPending() {
     if (pendingStatus !== null) onStatusChange(pendingStatus);
@@ -250,19 +273,6 @@ export function StatusStageControl({
           ))}
         </select>
       )}
-      {showTransferredLink && (
-        <>
-          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
-          <Link
-            href={`/candidates/${transferredToScreeningId}`}
-            onClick={(e) => e.stopPropagation()}
-            title={`View the result card in "${transferredToProjectName ?? "that project"}"`}
-            className="max-w-20 truncate py-1 pl-1.5 pr-1 text-[10px] underline decoration-dotted underline-offset-2 opacity-80 hover:opacity-100"
-          >
-            {transferredToProjectName ?? "View"}
-          </Link>
-        </>
-      )}
       {showStage && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
@@ -345,7 +355,7 @@ export function StatusStageControl({
               }
             }}
             title={archiveReason || "Reason"}
-            className={`w-16 max-w-16 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason && !pendingArchive ? "" : "opacity-60"}`}
+            className={`w-20 max-w-20 cursor-pointer appearance-none truncate bg-transparent py-1 pl-1.5 pr-1 outline-none ${archiveReason && !pendingArchive ? "" : "opacity-60"}`}
           >
             <option value="" disabled>Reason</option>
             {ARCHIVE_REASONS.map((r) => (
@@ -354,7 +364,34 @@ export function StatusStageControl({
           </select>
         </>
       )}
-      {showArchiveReason && onBlacklistChange && (
+      {/* Moved to render right after the reason segment, 2026-08-02 (Vlad:
+          "Show: status | transfered | project") — used to render right
+          after the status select, before the reason, which read oddly for
+          a transferred-and-archived candidate ("Archived → [project link] →
+          Transferred"). Now reads in the order requested: status, reason
+          ("Transferred"), destination project. */}
+      {showTransferredLink && (
+        <>
+          <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
+          <Link
+            href={`/candidates/${transferredToScreeningId}`}
+            onClick={(e) => e.stopPropagation()}
+            title={`View the result card in "${transferredToProjectName ?? "that project"}"`}
+            className="max-w-20 truncate py-1 pl-1.5 pr-1 text-[10px] underline decoration-dotted underline-offset-2 opacity-80 hover:opacity-100"
+          >
+            {transferredToProjectName ?? "View"}
+          </Link>
+        </>
+      )}
+      {/* Added `!pendingArchive` 2026-08-02 — real bug Vlad caught live: while
+          a fresh archive is pending (reason not picked yet, select shows
+          blank "Reason"), `archiveReason` still held whatever reason was
+          saved from a PREVIOUS archive of this same candidate. If that old
+          value happened to be "Not interested," the Blacklist checkbox kept
+          showing even though the reason picker itself was visibly blank/
+          unconfirmed. Now it only shows once a reason is genuinely
+          confirmed as "Not interested" for THIS transition. */}
+      {showArchiveReason && onBlacklistChange && !pendingArchive && archiveReason === "Not interested" && (
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
           <label

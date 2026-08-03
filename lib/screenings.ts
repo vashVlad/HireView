@@ -404,10 +404,16 @@ export async function transferScreeningToProject(params: {
   // repo's migration-file convention) restricts status to a fixed value
   // list independently of the column type — a live test hit "violates
   // check constraint" until supabase-migration-status-transferred-check.sql
-  // added 'transferred' to that list. Both migrations are now required
-  // before this line succeeds; see CandidateStatus's own comment in
-  // lib/types.ts for the full story.
-  await updateScreeningStatus(params.screeningId, "transferred", params.actingUserId);
+  // added 'transferred' to that list. See CandidateStatus's own comment in
+  // lib/types.ts for the full story — and for why, as of 2026-08-02, the
+  // original screening is archived (not flipped to "transferred") below.
+  //
+  // CHANGED 2026-08-02 (Vlad's ask — see lib/types.ts's CandidateStatus
+  // comment): the original screening now becomes "archived" with
+  // archiveReason "Transferred" instead of status "transferred". The
+  // pointer-column update right below is unchanged — those columns are
+  // independent of status and still power the "view destination" link.
+  await updateScreening(params.screeningId, { status: "archived", archiveReason: "Transferred" }, params.actingUserId);
   try {
     const { error: pointerErr } = await supabase
       .from("screenings")
@@ -418,8 +424,8 @@ export async function transferScreeningToProject(params: {
       .eq("id", params.screeningId);
     if (pointerErr) throw pointerErr;
   } catch {
-    // Best-effort — see comment above. Status is already correctly
-    // "transferred" regardless; only the destination link is missing until
+    // Best-effort — see comment above. Status/archiveReason are already
+    // correctly set regardless; only the destination link is missing until
     // the migration runs, same graceful-degradation contract as
     // enrichTransferInfo() below.
   }
@@ -458,8 +464,17 @@ export async function findCandidateInProject(
 // means transferred candidates show their bare "Transferred" pill with no
 // destination name/link yet — the read never fails, never affects any
 // other candidate.
+//
+// Widened 2026-08-02 to also include "archived" records, not just historical
+// "transferred" ones — transferScreeningToProject() now archives the
+// original screening instead of flipping it to "transferred" (see this
+// file's own comment on that call), so a freshly-transferred candidate's
+// pointer columns would otherwise never get enriched/read. Slightly more
+// records checked per call (every archived candidate, not just transferred
+// ones), but still a single batched query — the vast majority will simply
+// come back with null pointer columns, which is harmless.
 async function enrichTransferInfo(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
-  const ids = records.filter((r) => r.status === "transferred").map((r) => r.id);
+  const ids = records.filter((r) => r.status === "transferred" || r.status === "archived").map((r) => r.id);
   if (ids.length === 0) return records;
 
   const supabase = getSupabaseClient();
