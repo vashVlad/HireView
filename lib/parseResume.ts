@@ -151,10 +151,28 @@ export async function extractResumeText(
 
   // Legacy OLE-based Word format. mammoth only reads the modern .docx
   // (ECMA-376/zip) format, so old .doc files need a separate parser.
+  //
+  // DO-NOT-TOUCH EXCEPTION (2026-08-04 — see memory/decisions-log.md): same
+  // gap as the .docx branch above, just never ported here either — Vlad
+  // reported the credibility check "still gives an empty output" after the
+  // .docx fix shipped. Reproduced directly: an empty crossRefText makes
+  // assessCredibility() treat it as "no cross-reference provided" (hasCrossRef
+  // = Boolean("") = false), so rows comes back [] and overallSignal "clean"
+  // with zero indication anything went wrong — the exact "empty output"
+  // symptom, just via .doc instead of .docx. word-extractor's getBody() has
+  // no length/emptiness check of its own, same as mammoth.extractRawText().
+  // Same fix, same threshold, no vision fallback available for this format
+  // either (Claude has no native .doc reader the way it does for a PDF page).
   if (extension === "doc") {
     const extractor = new WordExtractor();
     const doc = await extractor.extract(buffer);
-    return doc.getBody();
+    const text = doc.getBody();
+    if (text.trim().length < MIN_MEANINGFUL_TEXT_LENGTH) {
+      throw new Error(
+        `Could not extract readable text from "${fileName}" — it came back with little to no text (this happens with image-only or heavily graphic-design/text-box-based resumes). Try a plain-text-based .doc/.docx or a PDF instead.`
+      );
+    }
+    return text;
   }
 
   if (extension === "txt") {
