@@ -148,6 +148,16 @@ function CandidateCard({
   const [fraudRisk, setFraudRisk] = useState<FraudRiskAssessment | undefined>(s.fraudRisk);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Share link, 2026-08-02 (Vlad's ask) — copies this candidate's durable
+  // /candidates/[id] page URL (the same "shareable, bookmarkable" page a
+  // batch already has at /projects/[id]/batches/[batchId], just per
+  // candidate instead of per batch).
+  const [linkCopied, setLinkCopied] = useState(false);
+  async function handleCopyLink() {
+    await navigator.clipboard.writeText(`${window.location.origin}/candidates/${s.id}`);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 1500);
+  }
   const [actions, setActions] = useState<ScreeningAction[] | "loading" | undefined>(undefined);
   // 2026-07-30 follow-up (Vlad's ask): the "Multiple roles" toggle moved
   // from an inline chip into a full-width bar sitting on top of the card
@@ -397,6 +407,43 @@ function CandidateCard({
           </div>
         </div>
 
+        {/* Resume + Notes buttons, 2026-08-02 (Vlad's ask: "There are no
+            View Resume nor Notes buttons on those cards") — the collapsed
+            row here had neither, unlike the Pipeline tab's collapsed row
+            (which shows both directly, no expand needed). Same popup-window
+            behavior/positioning as Pipeline's own Resume+Notes buttons. */}
+        <button type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const sw = window.screen.availWidth;
+            const sh = window.screen.availHeight;
+            const halfW = Math.floor(sw / 2);
+            window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+          }}
+          aria-label="Open resume" title="Open resume"
+          className="shrink-0 rounded-full p-1.5 text-zinc-300 transition-colors hover:bg-violet-50 hover:text-violet-600 dark:text-zinc-600 dark:hover:bg-violet-500/10 dark:hover:text-violet-400">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+        <button type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const sw = window.screen.availWidth;
+            const sh = window.screen.availHeight;
+            const halfW = Math.floor(sw / 2);
+            const halfH = Math.floor(sh / 2);
+            window.open(`/interview/${s.id}`, `iv_notes_${s.id}`, `width=${halfW},height=${halfH},left=${sw - halfW},top=0,menubar=no,toolbar=no,location=no,status=no`);
+          }}
+          aria-label="Open interview notes" title="Open interview notes"
+          className="shrink-0 rounded-full p-1.5 text-zinc-300 transition-colors hover:bg-violet-50 hover:text-violet-600 dark:text-zinc-600 dark:hover:bg-violet-500/10 dark:hover:text-violet-400">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+
         <div className="mx-0.5 h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-700" />
 
         <button type="button"
@@ -534,7 +581,29 @@ function CandidateCard({
           {/* Notes */}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Notes</span>
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Notes</span>
+                {/* View Resume, 2026-08-02 (Vlad's ask) — same popup-window
+                    behavior as the "View resume" button in the Actions row
+                    below, just placed right next to Notes too (matching the
+                    Pipeline tab, where Resume and Notes buttons sit side by
+                    side) so a recruiter can glance at the resume while
+                    writing notes without hunting for the button lower down. */}
+                <button type="button"
+                  onClick={() => {
+                    const sw = window.screen.availWidth;
+                    const sh = window.screen.availHeight;
+                    const halfW = Math.floor(sw / 2);
+                    window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+                  }}
+                  aria-label="Open resume" title="Open resume"
+                  className="rounded-full p-1 text-zinc-300 transition-colors hover:bg-violet-50 hover:text-violet-600 dark:text-zinc-600 dark:hover:bg-violet-500/10 dark:hover:text-violet-400">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              </div>
               {noteSaveState === "saving" && <span className="text-xs text-zinc-400">Saving...</span>}
               {noteSaveState === "saved" && <span className="text-xs text-emerald-500">Saved</span>}
             </div>
@@ -564,20 +633,44 @@ function CandidateCard({
 
           {/* Actions */}
           <div className="flex items-center justify-between">
-            <button type="button"
-              onClick={() => {
-                const sw = window.screen.availWidth;
-                const sh = window.screen.availHeight;
-                const halfW = Math.floor(sw / 2);
-                window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              View resume
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button"
+                onClick={() => {
+                  const sw = window.screen.availWidth;
+                  const sh = window.screen.availHeight;
+                  const halfW = Math.floor(sw / 2);
+                  window.open(`/interview/${s.id}/document?mime=${encodeURIComponent(s.resumeMimeType)}&name=${encodeURIComponent(s.fileName)}`, `iv_doc_${s.id}`, `width=${sw - halfW},height=${sh},left=0,top=0,menubar=no,toolbar=no,location=no,status=no`);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3.5 py-1.5 text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-400 dark:hover:bg-violet-500/20">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                View resume
+              </button>
+              {/* Share link, 2026-08-02 (Vlad's ask) — copies a direct link
+                  to this candidate's own /candidates/[id] page, same idea as
+                  the existing durable/shareable batch-results page. */}
+              <button type="button" onClick={handleCopyLink}
+                className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700">
+                {linkCopied ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="9" y="9" width="11" height="11" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                    Share link
+                  </>
+                )}
+              </button>
+            </div>
             {confirmDelete ? (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-zinc-500">Delete?</span>
@@ -634,6 +727,13 @@ export default function CandidatesPage() {
   // Blacklist filter, 2026-07-31 (Vlad's ask) — sits next to the Archived
   // status chip since that's where a candidate gets blacklisted from.
   const [blacklistOnly, setBlacklistOnly] = useState(false);
+  // Safety net for the checkbox above being hidden whenever Archived isn't
+  // an active status filter, 2026-08-02 — without this, unchecking Archived
+  // while Blacklisted-only was on would leave the list silently filtered
+  // with no visible control left to turn it back off.
+  useEffect(() => {
+    if (!statusFilter.has("archived") && blacklistOnly) setBlacklistOnly(false);
+  }, [statusFilter, blacklistOnly]);
   const [scoreMin, setScoreMin] = useState("");
   const [scoreMax, setScoreMax] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -928,32 +1028,15 @@ export default function CandidatesPage() {
 
             {/* Status filters — multi-select */}
             {CANDIDATE_STATUSES.map((status) => (
-              <Fragment key={status}>
-                <button type="button"
-                  onClick={() => setStatusFilter((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(status)) next.delete(status); else next.add(status);
-                    return next;
-                  })}
-                  className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${statusFilter.has(status) ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
-                  {CANDIDATE_STATUS_LABELS[status]}
-                </button>
-                {/* Blacklist, 2026-07-31 (Vlad's ask) — sits right next to
-                    Archived (that's where a candidate gets blacklisted from)
-                    but deliberately styled to "pop" much harder than every
-                    other chip here, matching the solid black ResultCard
-                    banner this same signal renders as during screening. */}
-                {status === "archived" && (
-                  <button type="button" onClick={() => setBlacklistOnly((v) => !v)}
-                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-bold uppercase tracking-wide transition-colors ${blacklistOnly ? "border-zinc-950 bg-zinc-950 text-white dark:border-white dark:bg-white dark:text-zinc-950" : "border-zinc-950 bg-white text-zinc-950 hover:bg-zinc-950 hover:text-white dark:border-white dark:bg-zinc-900 dark:text-white dark:hover:bg-white dark:hover:text-zinc-950"}`}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <circle cx="12" cy="12" r="9" strokeLinecap="round" />
-                      <path d="M5.5 5.5 18.5 18.5" strokeLinecap="round" />
-                    </svg>
-                    Blacklist{blacklistCount > 0 && ` (${blacklistCount})`}
-                  </button>
-                )}
-              </Fragment>
+              <button key={status} type="button"
+                onClick={() => setStatusFilter((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(status)) next.delete(status); else next.add(status);
+                  return next;
+                })}
+                className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${statusFilter.has(status) ? "border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/50 dark:bg-violet-500/10 dark:text-violet-400" : "border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"}`}>
+                {CANDIDATE_STATUS_LABELS[status]}
+              </button>
             ))}
           </div>
 
@@ -989,6 +1072,27 @@ export default function CandidatesPage() {
               className="self-start text-xs text-violet-500 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300">
               Clear filters · {filtered.length} of {screenings.length} shown
             </button>
+          )}
+
+          {/* Blacklist filter, redesigned 2026-08-02 (Vlad's ask) — a
+              checkbox above the result cards instead of a filter chip in the
+              row above, shown only while the Archived status filter is
+              active (that's the only context a blacklist is relevant in).
+              A useEffect below resets this back to false the moment
+              Archived is turned off, so it can never silently keep
+              filtering the list from a now-hidden control. */}
+          {statusFilter.has("archived") && (
+            // Toned down 2026-08-02 (Vlad: "it's too dark and obvious; it
+            // doesn't have to be that way") — was a solid black-bordered
+            // box mirroring the ResultCard "must pop" banner treatment,
+            // which reads as over-designed for a plain filter checkbox.
+            // Now a plain checkbox + label, same weight as any other filter
+            // control on this page.
+            <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+              <input type="checkbox" checked={blacklistOnly} onChange={(e) => setBlacklistOnly(e.target.checked)}
+                className="h-3.5 w-3.5 cursor-pointer rounded border-zinc-300 accent-rose-600 dark:border-zinc-600" />
+              Blacklisted only{blacklistCount > 0 && ` (${blacklistCount})`}
+            </label>
           )}
         </div>
 

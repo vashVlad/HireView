@@ -48,10 +48,21 @@ export async function HEAD(
     linkedinPdfPath = fallback.data?.linkedin_pdf_path ?? null;
   }
 
+  // File extension, added 2026-08-02 — the document popup (app/interview/
+  // [id]/document/page.tsx) needs this to know whether to route the cross-
+  // reference tab through the docx/doc HTML preview endpoint
+  // (linkedin/preview/route.ts) instead of the raw file endpoint, the same
+  // way it already does for the resume tab. Without this, a docx cross-
+  // reference upload rendered blank ("black screen") — browsers can't
+  // preview a raw non-PDF file inline in an iframe regardless of Content-
+  // Type; only a real LinkedIn PDF happened to work by coincidence.
+  const ext = linkedinPdfPath?.split(".").pop()?.toLowerCase() ?? null;
+
   return new NextResponse(null, {
     status: linkedinPdfPath ? 200 : 404,
     headers: {
       "X-Cross-Ref-Is-Linkedin": crossRefIsLinkedIn === null ? "unknown" : String(crossRefIsLinkedIn),
+      "X-Cross-Ref-Ext": ext ?? "unknown",
     },
   });
 }

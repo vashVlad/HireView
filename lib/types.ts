@@ -23,6 +23,20 @@ export type Recommendation = "proceed" | "decline";
 // Supersedes the earlier, purely-informational "Moved to X" Pipeline badge
 // (findBetterFitMatches, removed same day) — Vlad: once a real Transfer
 // action exists, showing that passive guess alongside it is redundant.
+//
+// "transferred" is no longer WRITTEN as of 2026-08-02 (Vlad's ask: "I don't
+// want to show the transferred status of the candidate in the status
+// dropdown since i want to archive the candidate of that project that was
+// transferred") — transferScreeningToProject() (lib/screenings.ts) now sets
+// the original screening's status to "archived" with archiveReason
+// "Transferred" instead. The transferred_to_project_id/
+// transferred_to_screening_id pointer columns are unchanged and still power
+// the "view destination" link (StatusStageControl's showTransferredLink,
+// now keyed off those columns directly rather than this status value). The
+// "transferred" value itself stays in the type/array only so any row
+// written before this date (or a database that hasn't run
+// one-off-backfill-transferred-status-to-archived.sql yet) still renders
+// without breaking — never pick it as a new value.
 export type CandidateStatus = "new_applicant" | "recruiter_screen" | "contacted" | "screening" | "archived" | "transferred";
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
@@ -59,6 +73,14 @@ export const ARCHIVE_REASONS = [
   "Failed cross-reference check",
   "Not interested",
   "Role alignment",
+  // Added 2026-08-02 — set automatically (never picked manually in the
+  // normal flow) when transferScreeningToProject() archives the ORIGINAL
+  // screening on a successful transfer, replacing what used to be a
+  // separate "transferred" status value (see CandidateStatus's own comment
+  // below for why). Still a real, pickable option here rather than free
+  // text so it renders correctly selected — same precedent as
+  // DEFAULT_AUTO_ARCHIVE_REASON below.
+  "Transferred",
 ] as const;
 
 /**

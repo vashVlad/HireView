@@ -36,6 +36,14 @@ const OTHER = "__other__";
  * deliberately best-effort and silent on failure (mirrors that route's own
  * fail-open design) — a fraud-calibration save failure must never block
  * saving the rejection reason itself.
+ *
+ * Collapses to a compact "Rejection submitted" confirmation after a
+ * successful save, 2026-08-02 (Vlad's ask: "I want the tab to close up and
+ * say reject submitted... instead of staying open as if nothing happened").
+ * An "Edit" link reopens the full form. Also starts collapsed on mount
+ * whenever a reason was already saved previously (reopening the drawer for
+ * an already-rejected candidate) — the full form re-appearing every time
+ * read as "nothing was saved" even when it was.
  */
 export function RejectionCard({
   screeningId,
@@ -62,7 +70,7 @@ export function RejectionCard({
   const [patternType, setPatternType] = useState<FraudPatternType>("fabricated_experience");
   const [claims, setClaims] = useState<ClaimDraft[]>([{ claimText: "", explanation: "" }]);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [submitted, setSubmitted] = useState(!!initialReason);
 
   const finalReason = reasonChoice === OTHER ? otherText.trim() : reasonChoice;
 
@@ -80,7 +88,6 @@ export function RejectionCard({
 
   async function handleSave() {
     setSaving(true);
-    setSaved(false);
     try {
       onSaveReason(finalReason);
 
@@ -94,8 +101,7 @@ export function RejectionCard({
           }).catch(() => {});
         }
       }
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      setSubmitted(true);
     } finally {
       setSaving(false);
     }
@@ -104,13 +110,36 @@ export function RejectionCard({
   const inputCls = "w-full rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm text-zinc-700 placeholder-zinc-400 focus:border-rose-400 focus:outline-none dark:border-rose-500/30 dark:bg-zinc-900 dark:text-zinc-200 dark:placeholder-zinc-500";
   const labelCls = "text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500";
 
+  if (submitted) {
+    return (
+      <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+          <div className="flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0 text-emerald-600 dark:text-emerald-400">
+              <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+              {isFraud ? "Rejection submitted — fraud flagged" : "Rejection submitted"}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSubmitted(false)}
+            className="shrink-0 text-xs font-medium text-zinc-500 underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+          >
+            Edit
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
       <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
         <div className="mb-1.5 flex items-center justify-between">
           <p className={labelCls}>Rejection reason</p>
           {saving && <span className="text-[10px] text-zinc-400">Saving…</span>}
-          {!saving && saved && <span className="text-[10px] text-emerald-500">Saved</span>}
         </div>
 
         <select
