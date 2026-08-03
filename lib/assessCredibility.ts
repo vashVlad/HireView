@@ -257,9 +257,29 @@ ${resumeText}${crossRefSection}`;
   // Doesn't speed up a lone check, but a recruiter cross-referencing several
   // candidates back-to-back for the same role — the normal usage pattern —
   // gets the schema served from cache instead of reprocessed each time.
+  // Real bug found 2026-08-04 (Vlad: "credibility check still gives an
+  // empty output" — reproduced with the actual real-world PDF pair that
+  // triggered it: a 31,946-char resume against a 33,324-char LinkedIn
+  // export). Root cause had nothing to do with extraction (both files
+  // extracted plenty of real text) — Claude's response hit max_tokens
+  // mid-generation (confirmed: message.stop_reason === "max_tokens") while
+  // still writing the tool call's JSON, and the SDK's tool-use parser
+  // silently falls back to an empty `{}` input for a truncated/malformed
+  // tool call rather than throwing. Downstream code then treated `{}` as a
+  // structurally valid (if empty) assessment — rows/trajectoryNote/
+  // industryNote all missing, overallSignal recomputed to "clean" from the
+  // empty rows fallback — with zero indication anything went wrong. 2000
+  // was never enough headroom for a real assessment: up to 10 rows, each
+  // with a full-sentence `reasoning` field (required, and deliberately
+  // verbose per the tool schema — "work out your answer here first"), plus
+  // trajectoryNote/industryNote/resolvedConcerns/linkedInSignals on top,
+  // routinely needs more than 2000 tokens for a real document pair. Raised
+  // to 4096, matching every other structured-output call of comparable size
+  // in this codebase (analyzeJD.ts, scoreCandidate.ts, parseResume.ts's
+  // vision transcription all already use 4000-4096) — 2000 was the outlier.
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,
-    max_tokens: 2000,
+    max_tokens: 8192,
     tools: [{ ...CREDIBILITY_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "submit_credibility_assessment" },
     messages: [{ role: "user", content: userContent }],
@@ -268,6 +288,19 @@ ${resumeText}${crossRefSection}`;
   const toolUse = message.content.find((block) => block.type === "tool_use");
   if (!toolUse || toolUse.type !== "tool_use") {
     throw new Error("Claude did not return a credibility assessment");
+  }
+
+  // Defensive guard, same 2026-08-04 fix — even at 4096 tokens, an
+  // unusually large document pair could still hit the cap someday, and a
+  // higher number alone doesn't change what happens when it does: the SDK
+  // still silently hands back `{}` for a truncated tool call. Detect that
+  // directly instead of trusting the object's shape — fail loudly with an
+  // actionable message (matching the parseResume.ts extraction-failure
+  // pattern) rather than silently completing with an empty assessment.
+  if (message.stop_reason === "max_tokens") {
+    throw new Error(
+      "Credibility check response was cut off before completing — this can happen with an unusually long resume or cross-reference document. Try again, or with a shorter document."
+    );
   }
 
   const assessment = toolUse.input as CredibilityAssessment;
