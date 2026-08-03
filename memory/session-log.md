@@ -12,6 +12,24 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-08-03 (round 61) — Tracker board: each stage row now has its own faint background wash
+- **Ask (Vlad):** "Change the background color for each stage row so it's easier to tell them apart." Previously only the narrow label column on the left carried a stage tint (`STAGE_COLORS`); the much wider chip area next to it was always plain white/zinc, so adjacent rows barely differed.
+- **New `rowBg` field on `STAGE_COLORS`** — same hue as each stage's existing label color, applied to the whole chip area at a much lower opacity (a wash, not a fill): deliberately faint so (1) the dragover highlight (a soft violet tint on the same area) still reads as clearly different, and (2) it doesn't compete with the per-chip status colors from round 60 (rose/gray/emerald/amber) sitting on top — In-Person's row uses an even fainter amber than the others specifically because its label color is amber, same hue as the "Not scheduled" chip tone, so it got the most conservative treatment of the six to avoid the two blending together.
+- **Verified:** `npx tsc --noEmit -p .` clean. Do-not-touch files confirmed zero diff.
+- **Not yet live-tested — worth a specific look at the In-Person row** (amber-on-amber risk) and dark mode contrast. **Left uncommitted, per standing instruction.**
+
+---
+
+## 2026-08-03 (round 60) — Tracker board: whole-chip status color (green/yellow/red/gray), blinking removed, interview date clears on real stage move
+- **Ask (Vlad):** "Make the whole user chip Green (if scheduled), Yellow (if not scheduled), Red (if rejected). remove the blinking. Remove the schedule date if the candidate was moved from one stage to another. Use transparent colors so it doesn't hurt the eye" — then, mid-turn: "and if it's on hold also do something to it."
+- **Whole-chip tone, `TrackerTab`'s candidate chips:** replaced the old small scheduled/not-scheduled dot (green solid vs. blinking amber) with a soft, low-opacity background+border tint on the entire chip. Priority when a candidate matches more than one condition: Reject (rose) > On Hold (zinc/gray, new) > Scheduled (emerald) > Not scheduled (amber) — Reject wins because it's terminal, On Hold wins over scheduled because it's the more exceptional state worth flagging. Unplaced ("New" row) candidates keep the original neutral zinc look — scheduling status doesn't apply yet. All tones use the same soft `*-50`/`*-500/10` opacity level already established by this file's `STAGE_COLORS` palette, per "use transparent colors so it doesn't hurt the eye." Selected/open-in-drawer state no longer overrides the tone — it now layers a violet ring on top instead, so you can see both "what status is this" and "which one's open" at once. Added a small "HOLD" text badge next to the name for on-hold chips (gray tint alone read too similar to "just not scheduled" without it) and a `title` tooltip spelling out the status on hover.
+- **Blinking removed, two spots:** the chip's own `animate-ping` (superseded by the whole-chip tint above) and the drawer's separate "Interview scheduling" widget, which had its own independent ping overlay while unscheduled.
+- **Interview date clears on a real stage move:** `handleStageChange()` (the one function every stage-change path funnels through — drag-and-drop, the drawer's stage picker, ScreenTab/PipelineTab's pickers) now also clears `interviewDate`/`scheduled` whenever the candidate's stage actually changes, comparing against `stagesMap[id]` first so re-confirming the same current stage is still a no-op. Reasoning: a date scheduled for the stage someone's leaving shouldn't keep showing (as "Scheduled"/green) once they've moved somewhere that hasn't had its own interview set yet.
+- **Verified:** `npx tsc --noEmit -p .` clean. Do-not-touch files confirmed zero diff.
+- **Not yet live-tested. Left uncommitted, per standing instruction.**
+
+---
+
 ## 2026-08-03 (round 59) — Self-initiated bottom-up audit of rounds 54-58 (2 minor fixes), then a real production bug: credibility check's docx text-extraction had no safety net
 - **Ask (Vlad):** "run through code space and check it for bugs and confirm the working logic." Full bottom-up pass: `lib/screenings.ts`'s transfer/enrich functions, the API layer (`PATCH /api/history/[id]`, the new linkedin/preview route), the UI layer (blacklist wiring across all 3 call sites, share-link destinations), and schema/migrations. Found clean except 2 minor issues already fixed in the prior round's own pass (Reject-chip re-fire guard, missing `min-h-0` on the drawer scroll wrapper).
 - **Then a real, higher-severity bug reported live:** "cross reference check didn't give me any output besides the table with no information" → "it said minor-concerns but nothing is shown." The Credibility header pill showed "Minor concerns" while the Flags/Matches tabs were both empty — an internally-contradictory result.
