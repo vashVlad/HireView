@@ -1573,6 +1573,15 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       const data = await res.json();
       if (data.screening) {
         setScreenings((prev) => prev.map((s) => (s.id === id ? { ...s, ...data.screening } : s)));
+        // Propagate to the parent's own `screenings` state too — see
+        // onScreeningFieldSaved's doc comment above (round 63 fix). Without
+        // this, a rescore only ever updated PipelineTab's own local state:
+        // it looked right in the moment, but switching tabs (which unmounts
+        // PipelineTab entirely) and back reverted to the old pre-rescreen
+        // score/summary, since remounting re-seeds from the parent's still-
+        // stale copy. Vlad's ask, 2026-08-03: "after rescreening the card I
+        // want it to be updated in the pipeline right away."
+        onScreeningFieldSaved?.(id, data.screening);
       }
     } catch {
       setRescreenErrorId(id);
