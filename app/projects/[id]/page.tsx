@@ -1070,12 +1070,33 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
 
 // ── Pipeline tab ───────────────────────────────────────────────────────────
 
-function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onStageChange, onStatusChange, onDeleted, expandedId: externalExpandedId, onExpandedChange }: {
+function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onStageChange, onScreeningFieldSaved, onDeleted, expandedId: externalExpandedId, onExpandedChange }: {
   screenings: ScreeningRecord[];
   projectId: number;
   stagesMap: Record<number, TrackerStage>;
   onStageChange: (id: number, stage: TrackerStage) => void;
-  onStatusChange?: (id: number, status: CandidateStatus) => void;
+  /**
+   * Patches the parent's own `screenings` state directly by id, mirroring
+   * ScreenTab's/TrackerTab's prop of the same name/shape. Fixed 2026-08-03 —
+   * real bug Vlad hit: a candidate could need its archive reason picked
+   * TWICE before it actually sank to the Archived section. Root cause: this
+   * used to be a narrower `onStatusChange?: (id, status) => void` prop, and
+   * the parent's handler reconstructed each row from its OWN stale copy of
+   * `s` (`{ ...s, status, statusUpdatedAt }`) — which never had `archiveReason`
+   * on it, since `handleArchiveReasonChange` below only ever updated this
+   * component's LOCAL `screenings` state, never the parent's. The first
+   * status change (picking a reason fires both together, see
+   * StatusStageControl.tsx) round-tripped through the parent and back down
+   * via the `useEffect` that resyncs local state from the `screenings` prop,
+   * stomping the just-picked `archiveReason` back to blank — so the card
+   * looked like it needed a reason again, and the SECOND pick worked only
+   * because by then no accompanying status change fired to trigger another
+   * resync. Passing whole field patches instead of a single reconstructed
+   * value means the parent always merges onto its own current row instead
+   * of overwriting it, so this can't recur for any field this component
+   * saves through it (status, archiveReason, blacklist, transfer).
+   */
+  onScreeningFieldSaved?: (id: number, fields: Partial<ScreeningRecord>) => void;
   /** Propagates a delete up to the parent's own screenings state — this component's `screenings` is a local fork seeded from the initial prop, so without this the parent's tab-count and header-count badges (both derived from its own `screenings.length`) stay stale until a full reload. */
   onDeleted?: (id: number) => void;
   expandedId?: number | null;
@@ -1416,7 +1437,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   async function handleStatusChange(id: number, status: CandidateStatus) {
     const now = new Date().toISOString();
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: now } : s));
-    onStatusChange?.(id, status);
+    onScreeningFieldSaved?.(id, { status, statusUpdatedAt: now });
     if (status === "archived") {
       setJustArchivedIds((prev) => new Set(prev).add(id));
     } else {
@@ -1434,6 +1455,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
 
   async function handleArchiveReasonChange(id: number, archiveReason: string) {
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, archiveReason } : s));
+    onScreeningFieldSaved?.(id, { archiveReason });
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archiveReason }) });
     } catch { /* non-fatal */ }
@@ -1442,6 +1464,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   // Blacklist, 2026-07-31 (Vlad's ask) — mirrors handleArchiveReasonChange above.
   async function handleBlacklistChange(id: number, blacklisted: boolean, blacklistReason: string | null) {
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, blacklisted, blacklistReason: blacklistReason ?? undefined } : s));
+    onScreeningFieldSaved?.(id, { blacklisted, blacklistReason: blacklistReason ?? undefined });
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blacklisted, blacklistReason }) });
     } catch { /* non-fatal */ }
@@ -1475,7 +1498,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
           : s
       )
     );
-    onStatusChange?.(id, "archived");
+    onScreeningFieldSaved?.(id, {
+      status: "archived",
+      archiveReason: "Transferred",
+      statusUpdatedAt: now,
+      transferredToProjectId: result.transferredToProjectId,
+      transferredToProjectName: result.transferredToProjectName,
+      transferredToScreeningId: result.newScreeningId,
+    });
   }
 
   async function handleToggleFlag(id: number, current: boolean, note?: string) {
@@ -3774,10 +3804,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             projectId={project.id}
             stagesMap={stagesMap}
             onStageChange={handleStageChange}
-            onStatusChange={(id, status) => {
-              const now = new Date().toISOString();
-              setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: now } : s));
-            }}
+            onScreeningFieldSaved={(id, fields) => setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, ...fields } : s))}
             onDeleted={(id) => setScreenings((prev) => prev.filter((s) => s.id !== id))}
             expandedId={expandedId}
             onExpandedChange={setExpandedId}
