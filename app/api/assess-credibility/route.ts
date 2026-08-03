@@ -77,8 +77,14 @@ export async function POST(request: NextRequest) {
     }
     try {
       return await extractResumeText(resumeData.fileName, resumeData.data);
-    } catch {
-      throw new RouteError(NextResponse.json({ error: "Could not extract text from original resume" }, { status: 500 }));
+    } catch (err) {
+      // 2026-08-03 — surface the underlying reason (e.g. parseResume.ts's new
+      // "little to no text" .docx message) instead of a generic string, so a
+      // real extraction failure reads as an actionable error in the UI rather
+      // than a vague one. Falls back to the old generic message if the
+      // thrown error has none.
+      const message = err instanceof Error && err.message ? err.message : "Could not extract text from original resume";
+      throw new RouteError(NextResponse.json({ error: message }, { status: 500 }));
     }
   }
 
@@ -101,8 +107,11 @@ export async function POST(request: NextRequest) {
       }
       try {
         return { crossRefText: await extractResumeText(crossRefData.fileName, crossRefData.data) };
-      } catch {
-        throw new RouteError(NextResponse.json({ error: "Could not extract text from the cross-reference candidate's resume" }, { status: 500 }));
+      } catch (err) {
+        const message = err instanceof Error && err.message
+          ? err.message
+          : "Could not extract text from the cross-reference candidate's resume";
+        throw new RouteError(NextResponse.json({ error: message }, { status: 500 }));
       }
     }
 
@@ -130,8 +139,11 @@ export async function POST(request: NextRequest) {
       // View with no visible error anywhere. Log it so this is diagnosable.
       console.error("Failed to store cross-reference doc for Interview View:", uploadErr);
       return { crossRefText };
-    } catch {
-      throw new RouteError(NextResponse.json({ error: "Could not extract text from cross-reference document" }, { status: 400 }));
+    } catch (err) {
+      const message = err instanceof Error && err.message
+        ? err.message
+        : "Could not extract text from cross-reference document";
+      throw new RouteError(NextResponse.json({ error: message }, { status: 400 }));
     }
   }
 
