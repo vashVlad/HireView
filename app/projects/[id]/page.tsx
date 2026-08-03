@@ -2709,13 +2709,31 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
 
 // ── Tracker tab ───────────────────────────────────────────────────────────
 
-const STAGE_COLORS: Record<string, { bg: string; text: string; dot: string; border: string }> = {
-  TA:         { bg: "bg-blue-50 dark:bg-blue-500/10",    text: "text-blue-700 dark:text-blue-400",    dot: "bg-blue-400",    border: "border-blue-200 dark:border-blue-500/30" },
-  L1:         { bg: "bg-violet-50 dark:bg-violet-500/10", text: "text-violet-700 dark:text-violet-400", dot: "bg-violet-400",  border: "border-violet-200 dark:border-violet-500/30" },
-  L2:         { bg: "bg-indigo-50 dark:bg-indigo-500/10", text: "text-indigo-700 dark:text-indigo-400", dot: "bg-indigo-400",  border: "border-indigo-200 dark:border-indigo-500/30" },
-  "In-Person":{ bg: "bg-amber-50 dark:bg-amber-500/10",   text: "text-amber-700 dark:text-amber-400",   dot: "bg-amber-400",   border: "border-amber-200 dark:border-amber-500/30" },
-  Offer:      { bg: "bg-emerald-50 dark:bg-emerald-500/10",text: "text-emerald-700 dark:text-emerald-400",dot: "bg-emerald-400",border: "border-emerald-200 dark:border-emerald-500/30" },
-  Reject:     { bg: "bg-rose-50 dark:bg-rose-500/10",     text: "text-rose-700 dark:text-rose-400",     dot: "bg-rose-400",    border: "border-rose-200 dark:border-rose-500/30" },
+// `rowBg`, added 2026-08-03 (Vlad's ask: "Change the background color for
+// each stage row so it's easier to tell them apart") — until now only the
+// narrow label column on the left carried a stage tint; the much larger chip
+// area next to it was always plain white/zinc regardless of stage, so two
+// adjacent rows only differed by that thin strip. `rowBg` washes the whole
+// chip area in the same hue, but at a much lower opacity than the label's
+// own `bg` (a whisper, not a wash) — deliberately faint for two reasons: (1)
+// this file's own dragover state already uses a soft violet tint for the
+// same area, and a stage tint needed to read as clearly weaker so dragover
+// still stands out; (2) the per-chip status colors added earlier this same
+// round (rose/gray/emerald/amber for Reject/On Hold/Scheduled/Not scheduled)
+// sit ON TOP of this background, and needed to stay the dominant, legible
+// signal — a strong row wash would visually compete with them, particularly
+// In-Person (amber label) against a "Not scheduled" chip (also amber).
+const STAGE_COLORS: Record<string, { bg: string; text: string; dot: string; border: string; rowBg: string }> = {
+  TA:         { bg: "bg-blue-50 dark:bg-blue-500/10",    text: "text-blue-700 dark:text-blue-400",    dot: "bg-blue-400",    border: "border-blue-200 dark:border-blue-500/30",    rowBg: "bg-blue-50/50 dark:bg-blue-500/5" },
+  L1:         { bg: "bg-violet-50 dark:bg-violet-500/10", text: "text-violet-700 dark:text-violet-400", dot: "bg-violet-400",  border: "border-violet-200 dark:border-violet-500/30", rowBg: "bg-violet-50/50 dark:bg-violet-500/5" },
+  // Was indigo — 2026-08-03 (Vlad: "L1 and L2 look too similar"). Indigo
+  // sits directly next to L1's violet on the color wheel, so at the row
+  // wash's low opacity the two were nearly indistinguishable. Cyan is far
+  // enough from both violet (L1) and blue (TA) to read as clearly distinct.
+  L2:         { bg: "bg-cyan-50 dark:bg-cyan-500/10",     text: "text-cyan-700 dark:text-cyan-400",     dot: "bg-cyan-400",    border: "border-cyan-200 dark:border-cyan-500/30",     rowBg: "bg-cyan-50/50 dark:bg-cyan-500/5" },
+  "In-Person":{ bg: "bg-amber-50 dark:bg-amber-500/10",   text: "text-amber-700 dark:text-amber-400",   dot: "bg-amber-400",   border: "border-amber-200 dark:border-amber-500/30",   rowBg: "bg-amber-50/30 dark:bg-amber-500/5" },
+  Offer:      { bg: "bg-emerald-50 dark:bg-emerald-500/10",text: "text-emerald-700 dark:text-emerald-400",dot: "bg-emerald-400",border: "border-emerald-200 dark:border-emerald-500/30", rowBg: "bg-emerald-50/50 dark:bg-emerald-500/5" },
+  Reject:     { bg: "bg-rose-50 dark:bg-rose-500/10",     text: "text-rose-700 dark:text-rose-400",     dot: "bg-rose-400",    border: "border-rose-200 dark:border-rose-500/30",     rowBg: "bg-rose-50/50 dark:bg-rose-500/5" },
 };
 
 function DrawerBody({
@@ -2899,10 +2917,11 @@ function DrawerBody({
       <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
+            {/* Blink removed 2026-08-03 (Vlad's ask, same round as the
+                Tracker board chip colors: "remove the blinking... use
+                transparent colors so it doesn't hurt the eye") — was an
+                animate-ping overlay shown while unscheduled. */}
             <span className="relative flex h-3 w-3 shrink-0">
-              {!interviewDate && (
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              )}
               <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-400" />
             </span>
             <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
@@ -3233,7 +3252,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
           {allStages.map(({ key, label, isUnplaced }) => {
             const candidates = grouped[key] ?? [];
             const c = isUnplaced
-              ? { bg: "bg-zinc-50 dark:bg-zinc-900/50", text: "text-zinc-400 dark:text-zinc-500", dot: "bg-zinc-300", border: "border-zinc-200 dark:border-zinc-700" }
+              ? { bg: "bg-zinc-50 dark:bg-zinc-900/50", text: "text-zinc-400 dark:text-zinc-500", dot: "bg-zinc-300", border: "border-zinc-200 dark:border-zinc-700", rowBg: "bg-zinc-50/60 dark:bg-zinc-900/30" }
               : STAGE_COLORS[key];
             const isDropTarget = !isUnplaced && TRACKER_STAGES.includes(key as TrackerStage);
             const isOver = dragOverStage === key;
@@ -3256,7 +3275,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
 
                 {/* Chips */}
                 <div className={`flex flex-1 flex-wrap items-start gap-2 px-4 py-3 transition-colors ${
-                  isOver ? "bg-violet-50/60 dark:bg-violet-500/5" : "bg-white dark:bg-zinc-900/30"
+                  isOver ? "bg-violet-50/60 dark:bg-violet-500/5" : c.rowBg
                 }`}>
                   {isOver && candidates.length === 0 && (
                     <div className="flex h-10 w-full items-center justify-center rounded-lg border-2 border-dashed border-violet-300 dark:border-violet-500/40">
@@ -3269,6 +3288,30 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                   {candidates.map((s) => {
                     const isActive = selected?.id === s.id;
                     const isDragging = draggingId === s.id;
+                    const td = trackerData[s.id];
+                    // Whole-chip status color, 2026-08-03 (Vlad's ask: "Make
+                    // the whole user chip Green (if scheduled), Yellow (if
+                    // not scheduled), Red (if rejected)... Use transparent
+                    // colors so it doesn't hurt the eye"). Only meaningful
+                    // once a candidate is actually placed in a real stage —
+                    // "New"/unplaced candidates keep the neutral zinc look
+                    // they always had, same as before this change. Priority
+                    // (a chip only ever shows ONE dominant tone): Reject is
+                    // terminal so it always wins; On Hold is an exceptional
+                    // state worth flagging even over a scheduled interview;
+                    // otherwise scheduled/not-scheduled as before. All tones
+                    // use low-opacity/soft fills (`*-50`/`*-500/10`, matching
+                    // this file's existing STAGE_COLORS palette) rather than
+                    // solid color, per "use transparent colors."
+                    const tone = isUnplaced
+                      ? { bg: "bg-white dark:bg-zinc-800", border: "border-zinc-200 dark:border-zinc-700", hover: "hover:border-zinc-300 dark:hover:border-zinc-600" }
+                      : key === "Reject"
+                      ? { bg: "bg-rose-50/70 dark:bg-rose-500/10", border: "border-rose-200 dark:border-rose-500/25", hover: "hover:border-rose-300 dark:hover:border-rose-500/40" }
+                      : td?.onHold
+                      ? { bg: "bg-zinc-100/80 dark:bg-zinc-700/25", border: "border-zinc-300 dark:border-zinc-600/50", hover: "hover:border-zinc-400 dark:hover:border-zinc-500" }
+                      : td?.scheduled
+                      ? { bg: "bg-emerald-50/70 dark:bg-emerald-500/10", border: "border-emerald-200 dark:border-emerald-500/25", hover: "hover:border-emerald-300 dark:hover:border-emerald-500/40" }
+                      : { bg: "bg-amber-50/60 dark:bg-amber-500/10", border: "border-amber-200 dark:border-amber-500/25", hover: "hover:border-amber-300 dark:hover:border-amber-500/40" };
                     return (
                       <div
                         key={s.id}
@@ -3280,10 +3323,9 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                         <button
                           type="button"
                           onClick={() => !isDragging && setSelected(isActive ? null : s)}
-                          className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-all select-none ${
-                            isActive
-                              ? "border-violet-300 bg-violet-50 shadow-md dark:border-violet-500/40 dark:bg-violet-500/10"
-                              : "border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:hover:border-zinc-600"
+                          title={!isUnplaced ? (key === "Reject" ? "Rejected" : td?.onHold ? "On hold" : td?.scheduled ? "Scheduled" : "Not scheduled") : undefined}
+                          className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-all select-none ${tone.bg} ${tone.border} ${
+                            isActive ? `shadow-md ring-2 ring-violet-300 dark:ring-violet-500/40` : `${tone.hover} hover:shadow-sm`
                           }`}>
                           <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-lg">
                             {photoUrls[s.id] ? (
@@ -3302,18 +3344,13 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                             <circle cx="2" cy="12" r="1.5"/><circle cx="6" cy="12" r="1.5"/>
                           </svg>
                           <span className="font-medium text-zinc-900 dark:text-zinc-100">{s.candidateName}</span>
-                          {trackerData[s.id]?.interviewDate && (
+                          {td?.interviewDate && (
                             <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
-                              {new Date(trackerData[s.id].interviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              {new Date(td.interviewDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                             </span>
                           )}
-                          {!isUnplaced && (
-                            trackerData[s.id]?.scheduled
-                              ? <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" title="Scheduled" />
-                              : <span className="relative flex h-2 w-2 shrink-0" title="Not scheduled">
-                                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
-                                  <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
-                                </span>
+                          {!isUnplaced && td?.onHold && (
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Hold</span>
                           )}
                         </button>
                       </div>
@@ -3555,7 +3592,20 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
   }
 
   function handleStageChange(id: number, stage: TrackerStage) {
-    handleTrackerDataChange(id, { stage });
+    // Clear the interview date/scheduled flag on a real stage move, 2026-08-03
+    // (Vlad's ask) — an interview date set for the stage a candidate is
+    // LEAVING shouldn't keep showing (Scheduled/green) once they've moved to
+    // a new stage that hasn't had its own interview scheduled yet. Re-picking
+    // the SAME stage a candidate is already in (a no-op click, e.g. the
+    // Tracker board's own re-click-to-cancel-pending-move pattern) leaves
+    // both fields untouched — nothing actually moved, so nothing should
+    // reset. `stagesMap` is this function's own component-scope lookup of
+    // each candidate's current stage, already computed above.
+    const changingStage = stagesMap[id] !== stage;
+    handleTrackerDataChange(id, {
+      stage,
+      ...(changingStage ? { interviewDate: "", scheduled: false } : {}),
+    });
   }
 
   function handleTrackerDataChange(id: number, fields: Partial<FullTrackerData>) {
