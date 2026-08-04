@@ -2,6 +2,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { getRecruiterEmailMap } from "@/lib/recruiters";
 import type { CandidateStatus, TrackerStage } from "@/lib/types";
 import type { FunnelCandidate, FunnelData, FunnelProjectBreakdown, FunnelStageCount } from "./types";
+import { TRACKER_ORDER, candidateMatchesStageKey, stageKeyFor } from "./stageMatch";
 
 // Isolated data layer — deliberately does not import lib/screenings.ts or reuse
 // SCREENING_COLUMNS. FunnelView needs its own column set (user_id, linkedin_mode,
@@ -30,8 +31,6 @@ interface TrackerFunnelRow {
   previous_stage: TrackerStage | null;
 }
 
-const TRACKER_ORDER: TrackerStage[] = ["TA", "L1", "L2", "In-Person", "Offer"];
-
 function furthestStage(stage: TrackerStage | null, previousStage: TrackerStage | null): TrackerStage | null {
   // Reject is a terminal branch, not a progression step — for "how far did they get"
   // purposes, a rejected candidate's high-water mark is whatever stage they were in
@@ -40,20 +39,11 @@ function furthestStage(stage: TrackerStage | null, previousStage: TrackerStage |
   return stage;
 }
 
-// NOT `status !== "new_applicant"` — that treats every archived candidate as
-// "reached out," including ones nobody ever actually contacted:
-// below-threshold candidates are auto-archived straight from creation
-// (previousStatus stays null, no engagement ever happened), and a recruiter
-// can also archive a "new_applicant" directly without moving them through
-// recruiter_screen/contacted/screening first. Vlad flagged this 2026-07-16
-// after noticing the number looked too high. The previous_status column is
-// trigger-maintained on every status UPDATE
-// (supabase-migration-previous-status.sql) and always holds the status
-// immediately before the current one — so for an archived candidate,
-// checking previousStatus tells us whether they passed through real
-// engagement on their way there. "Reached out" now means: currently in an
-// active engagement status, OR archived after having been in one.
-const ACTIVE_ENGAGEMENT_STATUSES: CandidateStatus[] = ["recruiter_screen", "contacted", "screening"];
+// "Reached out" / cumulative tracker-stage predicates now live in
+// ./stageMatch.ts (candidateMatchesStageKey) — split out 2026-08-04 so
+// app/funnelview/page.tsx's row-click drill-down can reuse the exact same
+// logic instead of a hand-duplicated copy that could drift out of sync.
+// See that file's own comment for the full "why."
 
 /**
  * Raw (label/conversion-free) stage counts for one candidate set — pulled out
@@ -68,26 +58,16 @@ function computeRawStageCounts(totalScreened: number, candidates: FunnelCandidat
   // has to actually filter on the passedThreshold flag computed per-candidate
   // below, or this stage is just a second copy of Total Screened. Fixed
   // 2026-07-16 — see session-log follow-on #38.
-  const passedThreshold = candidates.filter((c) => c.passedThreshold).length;
+  const passedThreshold = candidates.filter((c) => candidateMatchesStageKey(c, "passed_threshold")).length;
 
-  const reachedOut = candidates.filter(
-    (c) =>
-      ACTIVE_ENGAGEMENT_STATUSES.includes(c.status) ||
-      (c.status === "archived" && c.previousStatus != null && ACTIVE_ENGAGEMENT_STATUSES.includes(c.previousStatus))
-  ).length;
+  const reachedOut = candidates.filter((c) => candidateMatchesStageKey(c, "reached_out")).length;
 
   // Cumulative funnel: "reached at least this tracker stage" — a candidate at L2
   // counts toward TA, L1, and L2. Reject doesn't advance the count itself; its
   // furthestStage (computed above) already credits the last real stage reached.
-  const stageIndex = new Map(TRACKER_ORDER.map((s, i) => [s, i]));
   const trackerCounts = TRACKER_ORDER.map((stage) => {
-    const idx = stageIndex.get(stage)!;
-    const count = candidates.filter((c) => {
-      const reached = c.furthestStage;
-      if (!reached) return false;
-      const reachedIdx = stageIndex.get(reached);
-      return reachedIdx != null && reachedIdx >= idx;
-    }).length;
+    const key = stageKeyFor(stage);
+    const count = candidates.filter((c) => candidateMatchesStageKey(c, key)).length;
     return { stage, count };
   });
 
@@ -95,7 +75,7 @@ function computeRawStageCounts(totalScreened: number, candidates: FunnelCandidat
     { key: "screened", label: "Total Screened", count: totalScreened },
     { key: "passed_threshold", label: "Passed Threshold", count: passedThreshold },
     { key: "reached_out", label: "Reached Out", count: reachedOut },
-    ...trackerCounts.map(({ stage, count }) => ({ key: stage.toLowerCase().replace(/[^a-z0-9]/g, "_"), label: stage, count })),
+    ...trackerCounts.map(({ stage, count }) => ({ key: stageKeyFor(stage), label: stage, count })),
   ];
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ARCHIVE_REASONS, FRAUD_PATTERN_TYPES, FRAUD_PATTERN_TYPE_LABELS, type FraudPatternType } from "@/lib/types";
+import { useEffect, useState } from "react";
+import { ARCHIVE_REASONS, FRAUD_PATTERN_TYPES, FRAUD_PATTERN_TYPE_LABELS, type FraudCalibrationExample, type FraudPatternType } from "@/lib/types";
 
 interface ClaimDraft {
   claimText: string;
@@ -72,7 +72,34 @@ export function RejectionCard({
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(!!initialReason);
 
+  // Looks up whether THIS candidate's rejection was already flagged as
+  // fraud in a previous session — added 2026-08-04 (Vlad's ask: "make sure
+  // that I can see fraud reason when I try to edit a rejected candidate
+  // from the tracker drawer"). Before this, the collapsed "Rejection
+  // submitted" confirmation's "— fraud flagged" suffix only ever reflected
+  // `isFraud`'s own component-local state, which resets to false on every
+  // remount — so reopening the drawer for an already-fraud-flagged
+  // candidate silently dropped that information, even though it was saved
+  // correctly server-side (fraud_calibration_examples.source_screening_id).
+  const [savedFraudExample, setSavedFraudExample] = useState<FraudCalibrationExample | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!initialReason) return;
+    fetch(`/api/fraud-calibration?screeningId=${screeningId}`)
+      .then((res) => (res.ok ? res.json() : { example: null }))
+      .then((data) => {
+        if (!cancelled) setSavedFraudExample(data.example ?? null);
+      })
+      .catch(() => {
+        // Non-fatal — the rest of the rejection card still works without this.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [screeningId, initialReason]);
+
   const finalReason = reasonChoice === OTHER ? otherText.trim() : reasonChoice;
+  const showsFraudFlagged = isFraud || savedFraudExample != null;
 
   function updateClaim(index: number, field: keyof ClaimDraft, value: string) {
     setClaims((prev) => prev.map((c, i) => (i === index ? { ...c, [field]: value } : c)));
@@ -94,11 +121,20 @@ export function RejectionCard({
       if (isFraud) {
         const validClaims = claims.filter((c) => c.claimText.trim().length > 0);
         if (validClaims.length > 0) {
-          await fetch("/api/fraud-calibration", {
+          const res = await fetch("/api/fraud-calibration", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ screeningId, patternType, claims: validClaims }),
-          }).catch(() => {});
+          }).catch(() => null);
+          // Optimistic — mirrors the shape getFraudCalibrationExampleByScreeningId
+          // would return, so the collapsed summary below shows this save
+          // immediately instead of waiting on a refetch that might not even
+          // happen again this mount (the lookup effect only runs once, keyed
+          // off `initialReason` at mount time).
+          if (res?.ok) {
+            const data = await res.json().catch(() => null);
+            if (data?.example) setSavedFraudExample(data.example);
+          }
         }
       }
       setSubmitted(true);
@@ -113,22 +149,47 @@ export function RejectionCard({
   if (submitted) {
     return (
       <div className="border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
-        <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
-          <div className="flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0 text-emerald-600 dark:text-emerald-400">
-              <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-              {isFraud ? "Rejection submitted — fraud flagged" : "Rejection submitted"}
-            </span>
+        <div className="flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0 text-emerald-600 dark:text-emerald-400">
+                <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                {showsFraudFlagged ? "Rejection submitted — fraud flagged" : "Rejection submitted"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSubmitted(false)}
+              className="shrink-0 text-xs font-medium text-zinc-500 underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            >
+              Edit
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setSubmitted(false)}
-            className="shrink-0 text-xs font-medium text-zinc-500 underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-          >
-            Edit
-          </button>
+          {/* Read-only fraud reason summary, 2026-08-04 (Vlad's ask) — the
+              whole point of surfacing this here is so reopening the drawer
+              later actually shows WHY it was flagged, not just that it was.
+              Deliberately not the full editable pattern-type-dropdown-plus-
+              N-textareas form from below; that's for entering new claims,
+              this is for reading ones already on file — a plain, compact
+              summary matches how every other "signal" in this app displays
+              (e.g. FraudRiskChecker's own summary card, credibility's
+              SIGNAL_BADGE), rather than reopening a heavy input form just
+              to look at something. */}
+          {savedFraudExample && (
+            <div className="flex flex-col gap-1.5 rounded-lg border border-rose-200 bg-white/70 p-2.5 dark:border-rose-500/25 dark:bg-black/10">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400">
+                Fraud reason — {FRAUD_PATTERN_TYPE_LABELS[savedFraudExample.patternType]}
+              </p>
+              {savedFraudExample.claims.map((c, i) => (
+                <p key={i} className="text-xs text-zinc-600 dark:text-zinc-400">
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">&ldquo;{c.claimText}&rdquo;</span>
+                  {c.explanation && <> — {c.explanation}</>}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );

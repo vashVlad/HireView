@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { saveFraudCalibrationExample, listFraudCalibrationExamples, deleteFraudCalibrationExample } from "@/lib/fraudCalibrationExamples";
+import { saveFraudCalibrationExample, listFraudCalibrationExamples, getFraudCalibrationExampleByScreeningId, deleteFraudCalibrationExample } from "@/lib/fraudCalibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { getScreeningResume } from "@/lib/screenings";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
@@ -72,10 +72,29 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ saved: example !== null, example });
 }
 
-/** Used by any future calibration-library management UI — not wired up yet, mirrors GET on the existing /api/calibration-examples route (see that route for the sibling project-scoped calibration library). */
+/**
+ * `?screeningId=X` mode added 2026-08-04 — lets the Tracker drawer look up
+ * whether THIS specific candidate's rejection was already flagged as fraud
+ * (see RejectionCard.tsx's doc comment and getFraudCalibrationExampleByScreeningId's
+ * own comment for the full "why"). Without a screeningId, falls back to the
+ * original behavior: used by any future calibration-library management UI —
+ * not wired up yet, mirrors GET on the existing /api/calibration-examples
+ * route (see that route for the sibling project-scoped calibration library).
+ */
 export async function GET(request: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const screeningIdParam = request.nextUrl.searchParams.get("screeningId");
+  if (screeningIdParam) {
+    const screeningId = parseInt(screeningIdParam, 10);
+    if (isNaN(screeningId)) return NextResponse.json({ error: "Invalid screeningId" }, { status: 400 });
+    if (!(await canAccessScreening(user, screeningId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const example = await getFraudCalibrationExampleByScreeningId(screeningId);
+    return NextResponse.json({ example });
+  }
 
   const patternTypeParam = request.nextUrl.searchParams.get("patternType");
   const patternType = FRAUD_PATTERN_TYPES.includes(patternTypeParam as FraudPatternType)

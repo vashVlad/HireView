@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import SourceIcon from "@/components/SourceIcon";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import type { FunnelCandidate, FunnelData } from "@/lib/funnelview/types";
+import { candidateMatchesStageKey } from "@/lib/funnelview/stageMatch";
 
 // FunnelCandidate.source uses "inbound"/"outbound"/"agency" (kept distinct
 // from lib/sourceType.ts's "applicant"/"linkedin"/"agency" naming to
@@ -47,7 +48,22 @@ function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "lin
 // only 28px tall, so tracking Y added jitter without adding anything useful.
 const TOOLTIP_HALF_WIDTH = 112; // half of w-56 (224px)
 
-function StageBar({ stages }: { stages: FunnelData["stages"] }) {
+// Made every row clickable, 2026-08-04 (Vlad's ask: "when i press on the row
+// of funnel tab the candidates of that status must show up in the bottom
+// block of all candidates ... witch exact number"). `onSelectStage` toggles
+// the same key back off if the already-selected row is clicked again — see
+// the page component's `selectedStageKey` state and `candidateMatchesStageKey`
+// (lib/funnelview/stageMatch.ts) for how the Candidates table below turns
+// this into an exact-match drill-down list.
+function StageBar({
+  stages,
+  selectedKey,
+  onSelectStage,
+}: {
+  stages: FunnelData["stages"];
+  selectedKey: string | null;
+  onSelectStage: (key: string) => void;
+}) {
   const [hover, setHover] = useState<{ key: string; x: number } | null>(null);
   const max = Math.max(...stages.map((s) => s.count), 1);
 
@@ -58,16 +74,32 @@ function StageBar({ stages }: { stages: FunnelData["stages"] }) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-1">
       {stages.map((s) => {
         const barWidthPct = Math.max((s.count / max) * 100, s.count > 0 ? 2 : 0);
         const inboundPct = s.count > 0 ? (s.bySource.inbound / s.count) * 100 : 0;
         const outboundPct = s.count > 0 ? (s.bySource.outbound / s.count) * 100 : 0;
         const agencyPct = s.count > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
         const isHovered = hover?.key === s.key;
+        const isSelected = selectedKey === s.key;
         return (
-          <div key={s.key} className="flex items-center gap-3">
-            <span className="w-32 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">{s.label}</span>
+          <div
+            key={s.key}
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelectStage(s.key)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelectStage(s.key);
+              }
+            }}
+            title={`Show candidates in ${s.label}`}
+            className={`-mx-2 flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1 transition-colors ${
+              isSelected ? "bg-violet-50 dark:bg-violet-500/10" : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
+            }`}
+          >
+            <span className={`w-32 shrink-0 text-xs font-medium ${isSelected ? "text-violet-700 dark:text-violet-400" : "text-zinc-500 dark:text-zinc-400"}`}>{s.label}</span>
             <div
               className="relative h-7 flex-1 overflow-visible rounded-lg bg-zinc-100 dark:bg-zinc-800"
               onMouseEnter={(e) => updateHoverX(s.key, e)}
@@ -192,6 +224,15 @@ export default function FunnelViewPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | "">("");
   const [showArchived, setShowArchived] = useState(false);
+  // Funnel row drill-down, 2026-08-04 (Vlad's ask). Deliberately NOT reset
+  // when selectedProjectId changes — staying applied across a role switch is
+  // exactly "responsive to the selected role": since the candidate list this
+  // drives is filtered from `activeCandidates` (already role-scoped, see
+  // below), picking a different role while a stage is selected just updates
+  // the drill-down to that role's own matching candidates instead of losing
+  // the selection outright.
+  const [selectedStageKey, setSelectedStageKey] = useState<string | null>(null);
+  const [candidateSearch, setCandidateSearch] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -252,6 +293,43 @@ export default function FunnelViewPage() {
     if (!showArchived && (c.status === "archived" || c.trackerStage === "Reject")) return false;
     return true;
   });
+
+  // Stage drill-down, 2026-08-04 (Vlad's ask). Deliberately filters from
+  // `activeCandidates` (role-scoped, but NOT the `showArchived` list) rather
+  // than `filteredCandidates` — a selected stage's whole point is to show
+  // the EXACT set behind that row's count (e.g. "Reached Out" includes
+  // candidates later archived after real engagement), so it can't be
+  // silently narrowed further by an unrelated archived/rejected toggle. The
+  // toggle itself is hidden while a stage is selected (see the table header
+  // below) so there's no control on screen implying it still applies.
+  const selectedStage = selectedStageKey ? activeStages.find((s) => s.key === selectedStageKey) ?? null : null;
+  const stageCandidates = selectedStageKey
+    ? activeCandidates.filter((c) => candidateMatchesStageKey(c, selectedStageKey))
+    : filteredCandidates;
+
+  // Small search field, 2026-08-04 (Vlad's ask) — narrows whichever list is
+  // currently showing (default candidate list or a stage drill-down) by
+  // name. Applied last, on top of everything else, so the header count
+  // always reflects exactly what's rendered below it.
+  const searchedCandidates = candidateSearch.trim()
+    ? stageCandidates.filter((c) => c.candidateName.toLowerCase().includes(candidateSearch.trim().toLowerCase()))
+    : stageCandidates;
+
+  function handleSelectStage(key: string) {
+    setSelectedStageKey((prev) => {
+      const next = prev === key ? null : key;
+      // Jump to the Candidates table on selection (not on deselect) — a nice-
+      // to-have for smaller screens where the funnel card can push it below
+      // the fold, same pattern already used for the Pipeline drawer's
+      // scroll-to-expanded-card behavior.
+      if (next) {
+        requestAnimationFrame(() => {
+          document.getElementById("funnel-candidates")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+      return next;
+    });
+  }
 
   function handleExport() {
     if (!data) return;
@@ -414,31 +492,57 @@ export default function FunnelViewPage() {
                   No screening activity yet{activeProject ? " for this role" : ""} — the funnel fills in as candidates are screened.
                 </p>
               ) : (
-                <StageBar stages={activeStages} />
+                <StageBar stages={activeStages} selectedKey={selectedStageKey} onSelectStage={handleSelectStage} />
               )}
             </div>
 
             {/* Candidate table */}
-            <div className="rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <div id="funnel-candidates" className="scroll-mt-6 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-6 py-4 dark:border-zinc-800">
                 <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                  Candidates {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}{" "}
-                  <span className="font-normal text-zinc-400">({filteredCandidates.length})</span>
+                  Candidates {activeProject && <span className="font-normal text-zinc-400">— {activeProject.projectName}</span>}
+                  {selectedStage && <span className="font-normal text-violet-600 dark:text-violet-400"> — {selectedStage.label}</span>}{" "}
+                  <span className="font-normal text-zinc-400">({searchedCandidates.length})</span>
                 </h2>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-                    <input
-                      type="checkbox"
-                      checked={showArchived}
-                      onChange={(e) => setShowArchived(e.target.checked)}
-                      className="rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600"
-                    />
-                    Show archived/rejected
-                  </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Small search field, 2026-08-04 (Vlad's ask) — narrows
+                      whatever's currently shown (default list or a stage
+                      drill-down) by candidate name. */}
+                  <input
+                    type="text"
+                    value={candidateSearch}
+                    onChange={(e) => setCandidateSearch(e.target.value)}
+                    placeholder="Search candidates…"
+                    className="w-36 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-700 placeholder:text-zinc-400 focus:border-violet-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                  />
+                  {selectedStage ? (
+                    // Replaces the archived toggle while a stage is selected
+                    // — that toggle doesn't apply to a drill-down list (see
+                    // stageCandidates' own comment above), so showing it here
+                    // would imply a filter that isn't actually in effect.
+                    <button
+                      type="button"
+                      onClick={() => setSelectedStageKey(null)}
+                      className="flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700 transition-colors hover:bg-violet-200 dark:bg-violet-500/15 dark:text-violet-400 dark:hover:bg-violet-500/25"
+                    >
+                      {selectedStage.label}
+                      <span aria-hidden>×</span>
+                    </button>
+                  ) : (
+                    <label className="flex items-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+                      <input
+                        type="checkbox"
+                        checked={showArchived}
+                        onChange={(e) => setShowArchived(e.target.checked)}
+                        className="rounded border-zinc-300 text-violet-600 focus:ring-violet-500 dark:border-zinc-600"
+                      />
+                      Show archived/rejected
+                    </label>
+                  )}
                 </div>
               </div>
 
-              {filteredCandidates.length === 0 ? (
+              {searchedCandidates.length === 0 ? (
                 <p className="px-6 py-8 text-center text-sm text-zinc-400">No candidates match this filter.</p>
               ) : (
                 <table className="w-full">
@@ -452,7 +556,7 @@ export default function FunnelViewPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                    {filteredCandidates.map((c) => (
+                    {searchedCandidates.map((c) => (
                       <tr key={c.screeningId}>
                         <td className="px-6 py-3 text-sm text-zinc-800 dark:text-zinc-200">
                           {c.projectId != null ? (

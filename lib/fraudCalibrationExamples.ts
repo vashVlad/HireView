@@ -110,6 +110,40 @@ export async function listFraudCalibrationExamples(patternType?: FraudPatternTyp
   }
 }
 
+/**
+ * Looks up the confirmed-fraud calibration example (if any) recorded from a
+ * SPECIFIC screening's rejection — added 2026-08-04 (Vlad's ask: "make sure
+ * that I can see fraud reason when I try to edit a rejected candidate from
+ * the tracker drawer"). Root cause of the gap: saveFraudCalibrationExample()
+ * always wrote `source_screening_id`, so the data was already there — but
+ * nothing ever read it back per-screening; RejectionCard.tsx's "fraud
+ * flagged" confirmation only ever reflected its OWN component-local
+ * checkbox state for the current mount, which resets to false every time the
+ * drawer is reopened for an already-rejected candidate. Same fail-closed
+ * reasoning as listFraudCalibrationExamples above — a missing table/column
+ * (pre-migration) should read as "nothing on file," not throw.
+ */
+export async function getFraudCalibrationExampleByScreeningId(screeningId: number): Promise<FraudCalibrationExample | null> {
+  try {
+    const supabase = getSupabaseClient();
+
+    const { data, error } = await supabase
+      .from("fraud_calibration_examples")
+      .select("id, pattern_type, claims, resume_path, resume_mime_type, extracted_text, source_screening_id, created_at")
+      .eq("source_screening_id", screeningId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<FraudCalibrationExampleRow>();
+    if (error) throw error;
+    if (!data) return null;
+
+    return rowToExample(data, fileNameFromPath(data.resume_path));
+  } catch (err) {
+    console.error("getFraudCalibrationExampleByScreeningId failed (non-fatal — treated as none on file):", err);
+    return null;
+  }
+}
+
 export async function deleteFraudCalibrationExample(id: number): Promise<void> {
   const supabase = getSupabaseClient();
 
