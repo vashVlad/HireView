@@ -229,7 +229,19 @@ export async function assessCredibility(params: {
     ? "\n\nNote: original screening concerns are listed in instruction 8 below — resolvedConcerns only applies if the cross-reference document is present."
     : "";
 
+  // Grounds any date reasoning (employment gaps, "still employed" claims,
+  // future-dated end dates) in the ACTUAL current date — added 2026-08-04,
+  // same real gap found in lib/assessFraudRisk.ts the same day (Vlad: a
+  // genuine past end date got flagged as "projected or fabricated" because
+  // nothing told Claude what today's date actually is). This file does its
+  // own separate date arithmetic (education year comparisons, employment
+  // overlap checks) and had the identical missing grounding.
+  // scoreCandidate.ts (do-not-touch) already has the equivalent line.
+  const todayNote = `Today is ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. Use this as ground truth for any date reasoning — do not flag a date as "future," "projected," or "fabricated" based on your own sense of the current date; compare it against the date above instead.`;
+
   const userContent = `You are a recruiting assistant performing a credibility check on a candidate. This recruiter works in IT staffing/consulting, so staffing-agency-vs-client-site naming patterns are common and expected — do not treat them as suspicious on their own.
+
+${todayNote}
 
 ${roleNote}
 

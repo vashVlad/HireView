@@ -27,6 +27,12 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
   const [screening, setScreening] = useState<ScreeningRecord | null>(null);
   const [projectName, setProjectName] = useState<string | undefined>(undefined);
   const [jdAnalysis, setJdAnalysis] = useState<JDAnalysis | null | undefined>(undefined);
+  // Feeds ResultCard's scoreThreshold prop — see that component's own doc
+  // comment (2026-08-03 fix, Vlad: "why does the result card say 'Proceed'
+  // if the candidate was below the threshold?"). This page fetched the
+  // project already for jdAnalysis/name; scoreThreshold was just never
+  // pulled off the same response.
+  const [scoreThreshold, setScoreThreshold] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Read via window.location.search (not useSearchParams()) to avoid Next's
@@ -67,6 +73,7 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
               const pData = await pRes.json();
               setProjectName(pData.project?.name);
               setJdAnalysis(pData.project?.jdAnalysis ?? null);
+              setScoreThreshold(pData.project?.scoreThreshold);
             }
           } catch {
             // non-fatal
@@ -163,6 +170,7 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
               solo
               roleContext={projectName}
               jdAnalysis={jdAnalysis}
+              scoreThreshold={scoreThreshold}
               onStatusChange={handleStatusChange}
               onArchiveReasonChange={handleArchiveReasonChange}
             />

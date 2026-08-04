@@ -145,7 +145,19 @@ export async function assessFraudRisk(params: {
 
   const calibrationBlock = buildFraudCalibrationBlock(calibrationExamples, calibrationExamples.length);
 
+  // Grounds "is this date plausible" reasoning in the ACTUAL current date —
+  // added 2026-08-04, real bug Vlad caught: a resume's real, past end date
+  // ("11/2023 - 04/2026") got flagged as "a projected or fabricated end
+  // date" because nothing in this prompt ever told Claude what today's date
+  // actually is, so it fell back to guessing from training-data cutoff
+  // instead — and guessed wrong. scoreCandidate.ts (do-not-touch) already
+  // grounds its own date reasoning the same way ("Today is [X]. Do not flag
+  // past dates as future.") — this file just never had the equivalent line.
+  const todayNote = `Today is ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. Use this as ground truth for any date reasoning — do not flag a date as "future," "projected," or "fabricated" based on your own sense of the current date; compare it against the date above instead.`;
+
   const userContent = `You are a recruiting assistant performing a fraud risk check on a candidate resume that already scored well on job-fit (this check is only ever run on strong-looking candidates — score >= 75 — since a weak resume's problems are already visible without this).
+
+${todayNote}
 
 ${roleNote}
 

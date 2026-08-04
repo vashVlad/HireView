@@ -868,6 +868,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
               roleContext={project.name}
               rejectionHistory={rejectionMatches.get(result.fileName)}
               blacklistMatch={blacklistMatches.get(result.fileName)}
+              scoreThreshold={project.scoreThreshold}
               eligibleForFitCheck={eligibleForFitCheck}
               otherActiveCount={otherActiveCount}
               onCheckCrossProjectPromise={eligibleForFitCheck ? () => {
@@ -1958,6 +1959,37 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     >
                       {s.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
                     </Link>
+                  )}
+                  {/* Fraud risk check summary, at-a-glance on the collapsed
+                      card — Vlad's ask, 2026-08-04: "make sure fraud risk
+                      summary shows on the result card in the pipeline if it
+                      was ran post-screening." The check itself is always
+                      run post-screening (FraudRiskChecker.tsx is manual-only,
+                      never fires during batch scoring — see that
+                      component's doc comment), and its full summary already
+                      rendered correctly once a card was expanded, but there
+                      was no signal at all on the collapsed row — a recruiter
+                      had to remember to open every card to find out a check
+                      had even been run, let alone what it found. Mirrors the
+                      Duplicate detected/Known fraud pattern badges right
+                      above: only surfaces when there's something worth
+                      flagging (moderate/high), same "warn, don't reassure"
+                      convention already used for every other collapsed-row
+                      badge on this card. No separate onClick — the whole
+                      header row already expands the card on click, which is
+                      exactly where the full breakdown (FraudRiskChecker)
+                      lives. */}
+                  {fraudRiskMap[s.id] && fraudRiskMap[s.id].overallRisk !== "low" && (
+                    <span
+                      title={fraudRiskMap[s.id].summary}
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                        fraudRiskMap[s.id].overallRisk === "high"
+                          ? "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400"
+                          : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
+                      }`}
+                    >
+                      {fraudRiskMap[s.id].overallRisk === "high" ? "Fraud risk: high" : "Fraud risk: moderate"}
+                    </span>
                   )}
                   {s.nameMatchId != null && mergePosition === "solo" && (
                     <button

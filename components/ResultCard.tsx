@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { BlacklistEntry, CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, FraudRiskAssessment, RejectionHistoryEntry, TrackerStage } from "@/lib/types";
+import type { BlacklistEntry, CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, FraudRiskAssessment, RejectionHistoryEntry, Recommendation, TrackerStage } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
 import { FraudRiskChecker } from "./FraudRiskChecker";
@@ -65,6 +65,7 @@ export function ResultCard({
   nameMatch,
   rejectionHistory,
   blacklistMatch,
+  scoreThreshold,
   solo = false,
 }: {
   result: CandidateResult;
@@ -145,6 +146,25 @@ export function ResultCard({
    * rejection.
    */
   blacklistMatch?: BlacklistEntry;
+  /**
+   * This project's own configurable auto-archive bar (Project.scoreThreshold)
+   * — Vlad's ask, 2026-08-03: "why does the result card say 'Proceed' if the
+   * candidate was below the threshold?" Root cause: `result.recommendation`
+   * comes straight from scoreCandidate.ts (do-not-touch), which derives it
+   * from a FIXED `score > 50` split baked into the scoring call, completely
+   * independent of whatever threshold this specific project is actually
+   * configured with. A candidate could clear that hardcoded 50 (badge says
+   * "Proceed") while still scoring below this project's real, higher bar and
+   * getting auto-archived — a direct contradiction on screen. When provided,
+   * the badge below is recomputed from `score >= scoreThreshold` instead of
+   * trusting the model's independent value, matching the exact rule
+   * lib/screenings.ts's saveScreening() already uses to decide auto-archive
+   * (`score < scoreThreshold` → archived) — same "deterministic, not
+   * model-decided" pattern already used for credibility/fraud severity
+   * elsewhere in this app. Optional and falls back to `result.recommendation`
+   * so a caller with no project context (none currently exists) doesn't break.
+   */
+  scoreThreshold?: number;
   solo?: boolean;
 }) {
   const [credibility, setCredibility] = useState<CredibilityAssessment | null>(
@@ -313,6 +333,14 @@ export function ResultCard({
   const mustSkills = jdAnalysis?.mustHaveSkills ?? [];
   const niceSkills = jdAnalysis?.niceToHaveSkills ?? [];
 
+  // See scoreThreshold's doc comment above — recomputed against THIS
+  // project's real bar instead of trusting result.recommendation's
+  // independent, hardcoded 50-point split.
+  const displayRecommendation: Recommendation =
+    scoreThreshold !== undefined
+      ? (result.score >= scoreThreshold ? "proceed" : "decline")
+      : result.recommendation;
+
   return (
     <li className={`animate-fade-in-up rounded-2xl border border-zinc-200 bg-white transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 ${solo ? "p-10" : "p-5"}`}>
       {/* Header: centered score + name */}
@@ -328,7 +356,7 @@ export function ResultCard({
             <h3 className={`font-semibold text-zinc-900 dark:text-zinc-50 ${solo ? "text-2xl" : "text-base"}`}>
               {result.candidateName}
             </h3>
-            <RecommendationBadge recommendation={result.recommendation} />
+            <RecommendationBadge recommendation={displayRecommendation} />
             {result.duplicateFlag && (
               <span
                 title="Duplicate detected — matches another candidate's content fingerprint"

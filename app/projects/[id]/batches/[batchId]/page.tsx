@@ -36,6 +36,10 @@ export default function BatchResultsPage({ params }: { params: Promise<{ id: str
   const [screenings, setScreenings] = useState<ScreeningRecord[] | null>(null);
   const [projectName, setProjectName] = useState<string | undefined>(undefined);
   const [jdAnalysis, setJdAnalysis] = useState<JDAnalysis | null | undefined>(undefined);
+  // Feeds ResultCard's scoreThreshold prop — see that component's own doc
+  // comment (2026-08-03 fix). This page already fetches the full project for
+  // jdAnalysis/name; scoreThreshold was just never pulled off the response.
+  const [scoreThreshold, setScoreThreshold] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +65,7 @@ export default function BatchResultsPage({ params }: { params: Promise<{ id: str
         if (!projectData.error) {
           setProjectName(projectData.project?.name);
           setJdAnalysis(projectData.project?.jdAnalysis ?? null);
+          setScoreThreshold(projectData.project?.scoreThreshold);
         }
       })
       .catch(() => {
@@ -143,6 +148,7 @@ export default function BatchResultsPage({ params }: { params: Promise<{ id: str
                 rank={i + 1}
                 roleContext={projectName}
                 jdAnalysis={jdAnalysis}
+                scoreThreshold={scoreThreshold}
                 onStatusChange={handleStatusChange}
                 onArchiveReasonChange={handleArchiveReasonChange}
               />
