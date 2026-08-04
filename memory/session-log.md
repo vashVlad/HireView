@@ -12,6 +12,14 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-08-04 (round 67) — FunnelView row-click drill-down + fraud reason visible on reopen in Tracker drawer
+- **Ask (Vlad):** click a FunnelView stage row (e.g. "Reached out") and have the exact-matching candidates show up in the Candidates table below, role-responsive, plus a small search field there. Separately: show the fraud reason when reopening a rejected candidate from the Tracker drawer, with simpler UI. Noted for later (not built): per-role Excel export, recruiter chatbot.
+- **FunnelView:** extracted the stage-match predicate out of `lib/funnelview/data.ts` (server-only) into a new dependency-free `lib/funnelview/stageMatch.ts` so the client page can import the identical logic — guarantees the drill-down count can never drift from the funnel bar's own count. Clicking a row now filters the Candidates table to that stage (toggles off on second click) and scrolls to it; added a search-by-name field; both stay scoped to the selected role. Selection deliberately not reset on role switch — that's the "responsive to role" behavior.
+- **Fraud reason fix:** `RejectionCard.tsx`'s `isFraud` state was purely local and always initialized `false`, so reopening an already-fraud-flagged rejected candidate showed a fraud-blind confirmation even though the classification was correctly saved server-side. Added `getFraudCalibrationExampleByScreeningId` (`lib/fraudCalibrationExamples.ts`) plus a `?screeningId=` mode on `GET /api/fraud-calibration`, and a read-only rose-tinted summary block in the collapsed view when a saved example exists. The editable multi-field form (for entering new claims) is untouched.
+- **Verified:** `npx tsc --noEmit -p .` clean. Do-not-touch files confirmed zero diff. **Not yet live-tested by Vlad.**
+
+---
+
 ## 2026-08-04 (round 66) — Fraud risk badge on the collapsed Pipeline card + fixed a false "future date" fraud flag
 - **Ask (Vlad):** "Make sure fraud risk summary shows on the result card in the pipeline if it was ran post-screening." Plus a confusing real example: the fraud checker flagged a genuinely past end date ("11/2023 - 04/2026") as "a projected or fabricated end date."
 - **Card visibility:** the fraud risk summary already rendered correctly once a Pipeline card was expanded (round 64 already fixed it not reverting), but there was no signal at all on the COLLAPSED row — a recruiter had to remember to open every card to know a check had even been run. Added a small "Fraud risk: high/moderate" badge next to the existing Duplicate detected/Known fraud pattern badges on the collapsed header, gated on `fraudRiskMap[s.id]`. Follows the same "only surface a warning, not a reassurance" convention already used there — low risk stays quiet, same as "no duplicate" showing nothing.
