@@ -1255,6 +1255,23 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
       .catch(() => setActionsMap((prev) => ({ ...prev, [id]: [] })));
   }, [expandedId, actionsMap]);
 
+  // Round 64 sweep (Vlad: "activities... must update the visual card right
+  // after the change"). The lazy-load effect above only ever fetches once
+  // per id — dropping the cached entry here makes its guard see `undefined`
+  // again, so it refetches automatically on next render. Without this, a
+  // brand new action (status change, flag toggle, note, credibility/fraud
+  // check, rescreen, blacklist — the actions lib/screenings.ts's
+  // updateScreening() actually logs) wouldn't show in an already-expanded
+  // card's Activity Timeline until it was collapsed and reopened.
+  function invalidateActions(id: number) {
+    setActionsMap((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
   useEffect(() => {
     setScreenings(initialScreenings);
     const saved: Record<number, CredibilityAssessment> = {};
@@ -1438,6 +1455,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     const now = new Date().toISOString();
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, status, statusUpdatedAt: now } : s));
     onScreeningFieldSaved?.(id, { status, statusUpdatedAt: now });
+    invalidateActions(id);
     if (status === "archived") {
       setJustArchivedIds((prev) => new Set(prev).add(id));
     } else {
@@ -1465,6 +1483,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   async function handleBlacklistChange(id: number, blacklisted: boolean, blacklistReason: string | null) {
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, blacklisted, blacklistReason: blacklistReason ?? undefined } : s));
     onScreeningFieldSaved?.(id, { blacklisted, blacklistReason: blacklistReason ?? undefined });
+    invalidateActions(id);
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ blacklisted, blacklistReason }) });
     } catch { /* non-fatal */ }
@@ -1513,10 +1532,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     setPendingFlagId(null);
     setPendingFlagNote("");
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, flagged: next, flagNote: next ? note : undefined } : s));
+    onScreeningFieldSaved?.(id, { flagged: next, flagNote: next ? note : undefined });
+    invalidateActions(id);
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flagged: next, flagNote: note }) });
     } catch {
       setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, flagged: current } : s));
+      onScreeningFieldSaved?.(id, { flagged: current });
+      invalidateActions(id);
     }
   }
 
@@ -1531,6 +1554,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     const previous = screenings.find((s) => s.id === id);
     setPendingSourceId(null);
     setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, linkedInMode, agencyName: trimmedAgencyName || undefined } : s));
+    onScreeningFieldSaved?.(id, { linkedInMode, agencyName: trimmedAgencyName || undefined });
     try {
       await fetch(`/api/history/${id}`, {
         method: "PATCH",
@@ -1538,7 +1562,10 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         body: JSON.stringify({ linkedInMode, agencyName: trimmedAgencyName }),
       });
     } catch {
-      if (previous) setScreenings((prev) => prev.map((s) => s.id === id ? previous : s));
+      if (previous) {
+        setScreenings((prev) => prev.map((s) => s.id === id ? previous : s));
+        onScreeningFieldSaved?.(id, previous);
+      }
     }
   }
 
@@ -1582,6 +1609,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
         // stale copy. Vlad's ask, 2026-08-03: "after rescreening the card I
         // want it to be updated in the pipeline right away."
         onScreeningFieldSaved?.(id, data.screening);
+        invalidateActions(id);
       }
     } catch {
       setRescreenErrorId(id);
@@ -1595,6 +1623,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
     try {
       await fetch(`/api/history/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes: text }) });
       setNotesMap((prev) => ({ ...prev, [id]: { text, saveState: "saved" } }));
+      // Also merge onto `screenings` itself (local + parent), not just
+      // notesMap — round 64 sweep (Vlad: "flags, activities, etc. must
+      // update the visual card right after the change"). notesMap starts
+      // empty on every mount and was the ONLY place a saved note lived;
+      // getNotesText() falls back to `s.notes` once notesMap has nothing
+      // for this id, so a tab switch (unmounts this component) and back
+      // showed the pre-edit note until a full page reload.
+      setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, notes: text } : s));
+      onScreeningFieldSaved?.(id, { notes: text });
+      invalidateActions(id);
       setTimeout(() => setNotesMap((prev) => prev[id]?.saveState === "saved" ? { ...prev, [id]: { text, saveState: "idle" } } : prev), 2000);
     } catch {
       setNotesMap((prev) => ({ ...prev, [id]: { text, saveState: "idle" } }));
@@ -2175,6 +2213,8 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       });
                       if (!res.ok) return false;
                       setCredibilityMap((prev) => ({ ...prev, [s.id]: assessment }));
+                      onScreeningFieldSaved?.(s.id, { credibility: assessment });
+                      invalidateActions(s.id);
                       return true;
                     } catch {
                       return false;
@@ -2199,6 +2239,8 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                         });
                         if (!res.ok) return false;
                         setFraudRiskMap((prev) => ({ ...prev, [s.id]: assessment }));
+                        onScreeningFieldSaved?.(s.id, { fraudRisk: assessment });
+                        invalidateActions(s.id);
                         return true;
                       } catch {
                         return false;

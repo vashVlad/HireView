@@ -12,6 +12,14 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-08-03 (round 64) — Swept the rest of PipelineTab's card mutations onto the same propagation fix
+- **Ask (Vlad):** "any modification that has been to the result card has to be updated and displayed right away. So status change, flags, activities, etc. must update the visual card right after the change."
+- **Same root cause as round 63, applied everywhere else it was still lurking in PipelineTab:** flag toggle (`handleToggleFlag`), source edit (`handleSourceChange`, including its error-rollback branch), notes (`saveNotes` — this one previously ONLY wrote to `notesMap`, never to `screenings.notes` at all, local or parent), and the inline Cross-Reference/Fraud-Risk checkers' `onComplete` handlers (previously only wrote to `credibilityMap`/`fraudRiskMap`, same gap). All now also call `onScreeningFieldSaved?.(id, {...changed fields})`.
+- **"Activities" specifically:** the Activity Timeline (`actionsMap`) lazy-loads once per candidate id and never refetched again while a card stayed expanded, so a brand-new logged action (status/flag/note/credibility/fraud-risk/rescreen/blacklist — whatever `lib/screenings.ts`'s `updateScreening()` actually logs) wouldn't appear until the card was collapsed and reopened. Added `invalidateActions(id)` — drops the cached entry so the existing lazy-load effect's own guard sees it as unloaded and refetches — called from every one of the handlers above plus the ones already fixed in round 63 (status, blacklist, rescreen).
+- **Verified:** `npx tsc --noEmit -p .` clean. Do-not-touch files confirmed zero diff. **Not yet live-tested by Vlad.**
+
+---
+
 ## 2026-08-03 (round 63) — Real bug fix: archive reason needed picking twice to sink to Archived
 - **Ask (Vlad):** "I have to give archive reason multiple times for it to actually go down to the archive section of the pipeline."
 - **Root cause:** PipelineTab's local `handleArchiveReasonChange`/`handleBlacklistChange`/`handleTransferred` only ever updated PipelineTab's own LOCAL `screenings` state — none of them propagated up to the parent page's `screenings` state the way `handleStatusChange` did (via a narrow `onStatusChange?: (id, status) => void` prop). Picking a reason fires an archive-reason save AND a status="archived" save together (see StatusStageControl.tsx); the status save's round-trip through the parent's `onStatusChange` reconstructed the row from the parent's own STALE copy of `s` (`{ ...s, status, statusUpdatedAt }`, no `archiveReason`), and PipelineTab's `useEffect(() => setScreenings(initialScreenings), [initialScreenings])` then resynced local state from that stale parent copy — stomping the just-picked `archiveReason` back to blank right after it was set. The second pick "worked" only because by then no accompanying status change fired to trigger another resync.
