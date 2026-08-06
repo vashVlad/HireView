@@ -26,40 +26,32 @@ interface ScreeningFunnelRow {
 }
 
 /**
- * Current company/title/trajectory, 2026-08-04 (Vlad's ask) — deliberately
- * a SEPARATE, best-effort query from the main screenings select above, NOT
- * folded into it. Those three columns require
- * supabase-migration-current-role.sql / career_trajectory has been present
- * longer but isn't otherwise selected here; a missing column would fail a
+ * Current company/title/total-experience-summary, 2026-08-04 (Vlad's ask) —
+ * deliberately a SEPARATE, best-effort query from the main screenings select
+ * above, NOT folded into it. These columns require
+ * supabase-migration-current-role.sql; a missing column would fail a
  * combined query outright, and FunnelView is a live, already-working page —
  * per the standing "never add columns to an already-live query path before
  * the migration is confirmed run" rule (memory/feedback_migration_
  * sequencing.md, 2026-07-09 outage), this must degrade to nulls instead of
  * breaking the whole page pre-migration.
+ *
+ * total_experience_summary is its own short, dedicated field (NOT extracted
+ * from career_trajectory) — see lib/generateTrajectory.ts's comment: Vlad
+ * asked for this to be much shorter than the trajectory narrative's own
+ * closing paragraph, which stays untouched for its existing on-screen uses.
  */
 interface ScreeningCurrentRoleRow {
   id: number;
   current_company: string | null;
   current_title: string | null;
-  career_trajectory: string | null;
+  total_experience_summary: string | null;
 }
 
 interface TrackerFunnelRow {
   screening_id: number;
   stage: TrackerStage | null;
   previous_stage: TrackerStage | null;
-}
-
-// "Total experience" export column, 2026-08-04 (Vlad's ask) — the trajectory
-// narrative's own prompt (lib/generateTrajectory.ts / lib/scoreCandidate.ts)
-// always ends with "a final short paragraph... with a clear recommendation",
-// so the last blank-line-separated block is that summary, not a full role.
-// Falls back to the whole string if no blank-line break is found (short/
-// malformed trajectory), rather than returning nothing.
-function bottomTrajectoryParagraph(trajectory: string | null): string | null {
-  if (!trajectory || !trajectory.trim()) return null;
-  const paragraphs = trajectory.trim().split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  return paragraphs.length > 0 ? paragraphs[paragraphs.length - 1] : trajectory.trim();
 }
 
 function furthestStage(stage: TrackerStage | null, previousStage: TrackerStage | null): TrackerStage | null {
@@ -198,7 +190,7 @@ export async function getFunnelData(): Promise<FunnelData> {
   try {
     const { data, error } = await supabase
       .from("screenings")
-      .select("id, current_company, current_title, career_trajectory")
+      .select("id, current_company, current_title, total_experience_summary")
       .returns<ScreeningCurrentRoleRow[]>();
     if (error) throw error;
     currentRoleByScreeningId = new Map((data ?? []).map((r) => [r.id, r]));
@@ -227,7 +219,7 @@ export async function getFunnelData(): Promise<FunnelData> {
       recruiterEmail: s.user_id != null ? (emailByUserId.get(s.user_id) ?? s.user_id) : null,
       currentCompany: currentRole?.current_company ?? null,
       currentTitle: currentRole?.current_title ?? null,
-      totalExperienceSummary: bottomTrajectoryParagraph(currentRole?.career_trajectory ?? null),
+      totalExperienceSummary: currentRole?.total_experience_summary ?? null,
       source: s.linkedin_mode ? "outbound" : s.agency_name ? "agency" : "inbound",
       ...(s.agency_name ? { agencyName: s.agency_name } : {}),
       score: s.score,

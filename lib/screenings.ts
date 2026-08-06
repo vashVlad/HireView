@@ -1414,6 +1414,34 @@ export async function getScreeningRoleFitContext(id: number): Promise<{
   };
 }
 
+/**
+ * Which screenings already have current_company/current_title set —
+ * 2026-08-04, added so the "Regenerate trajectories" backfill button
+ * (Settings tab) can skip candidates that already have both instead of
+ * re-running a Claude call (cost + time) on every candidate in a role each
+ * time it's clicked. Same deferred-column, fail-soft pattern as
+ * getFraudCalibrationExampleByScreeningId — if
+ * supabase-migration-current-role.sql hasn't run yet, this returns an empty
+ * map, which the caller correctly reads as "everyone is still missing it."
+ */
+export async function getCurrentRoleStatus(
+  screeningIds: number[]
+): Promise<Map<number, { currentCompany: string | null; currentTitle: string | null }>> {
+  if (screeningIds.length === 0) return new Map();
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("screenings")
+      .select("id, current_company, current_title")
+      .in("id", screeningIds)
+      .returns<{ id: number; current_company: string | null; current_title: string | null }[]>();
+    if (error) throw error;
+    return new Map((data ?? []).map((r) => [r.id, { currentCompany: r.current_company, currentTitle: r.current_title }]));
+  } catch {
+    return new Map();
+  }
+}
+
 // ── Update ─────────────────────────────────────────────────────────────────
 
 export async function updateScreening(
@@ -1508,6 +1536,8 @@ export async function updateScreening(
      */
     currentCompany?: string;
     currentTitle?: string;
+    /** Same deferred-column pattern as currentCompany above — see that field's comment and lib/types.ts's ScreeningRecord.totalExperienceSummary. */
+    totalExperienceSummary?: string;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1525,6 +1555,7 @@ export async function updateScreening(
   // above; only ever passed by the regenerate-trajectories backfill route.
   if (fields.currentCompany !== undefined) update.current_company = fields.currentCompany;
   if (fields.currentTitle !== undefined) update.current_title = fields.currentTitle;
+  if (fields.totalExperienceSummary !== undefined) update.total_experience_summary = fields.totalExperienceSummary;
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   // cross_ref_is_linkedin requires supabase-migration-cross-ref-doc-type.sql
