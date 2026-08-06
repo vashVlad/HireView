@@ -993,6 +993,32 @@ export async function saveScreening(params: {
 
   const screeningId = insert.data.id;
 
+  // Current company/title/total-experience/LinkedIn, 2026-08-06 — do-not-
+  // touch exception, Vlad's explicit sign-off. scoreCandidate.ts now
+  // generates these in the same call as scoring (see that file's own
+  // comment), so a NEW screening gets them automatically instead of only
+  // via the manual "Regenerate trajectories" backfill button. Deliberately
+  // a SEPARATE, best-effort call — NOT folded into the main insert above —
+  // because these columns are still deferred-migration (supabase-migration-
+  // current-role.sql may not have run yet in this environment); a single
+  // INSERT with all fields bundled together would fail the WHOLE screening
+  // save (including score/summary/everything else) if even one of these
+  // columns doesn't exist. Splitting them out means a pre-migration
+  // environment still saves the screening correctly — it just silently
+  // skips these four fields until the migration runs, same fail-soft
+  // pattern already used by the regenerate-trajectories route for the exact
+  // same reason.
+  try {
+    await updateScreening(screeningId, {
+      currentCompany: result.currentCompany,
+      currentTitle: result.currentTitle,
+      totalExperienceSummary: result.totalExperienceSummary,
+      linkedinUrl: result.linkedinUrl,
+    });
+  } catch {
+    /* pre-migration or other non-fatal failure — the screening itself already saved above */
+  }
+
   // Vlad's ask, 2026-07-15: the status dropdown should be usable right on
   // the ResultCard immediately after screening, not only once the recruiter
   // navigates to the Pipeline tab. ResultCard already renders StatusSelect
@@ -1415,28 +1441,51 @@ export async function getScreeningRoleFitContext(id: number): Promise<{
 }
 
 /**
- * Which screenings already have current_company/current_title set —
- * 2026-08-04, added so the "Regenerate trajectories" backfill button
- * (Settings tab) can skip candidates that already have both instead of
- * re-running a Claude call (cost + time) on every candidate in a role each
- * time it's clicked. Same deferred-column, fail-soft pattern as
+ * Which screenings already have current_company/current_title/
+ * total_experience_summary/linkedin_url set — 2026-08-04, added so the
+ * "Regenerate trajectories" backfill button (Settings tab) can skip
+ * candidates that already have them instead of re-running a Claude call
+ * (cost + time) on every candidate in a role each time it's clicked.
+ * Extended to all 4 fields 2026-08-06 — originally only checked the first
+ * two, which meant candidates backfilled BEFORE totalExperienceSummary/
+ * linkedinUrl existed would silently stay skipped forever, never picking up
+ * the newer fields. Same deferred-column, fail-soft pattern as
  * getFraudCalibrationExampleByScreeningId — if
- * supabase-migration-current-role.sql hasn't run yet, this returns an empty
- * map, which the caller correctly reads as "everyone is still missing it."
+ * supabase-migration-current-role.sql hasn't run yet (or is missing any of
+ * these 4 columns), this returns an empty map, which the caller correctly
+ * reads as "everyone is still missing it" (safe: just means redundant
+ * reprocessing until the migration catches up, never hides real data).
  */
 export async function getCurrentRoleStatus(
   screeningIds: number[]
-): Promise<Map<number, { currentCompany: string | null; currentTitle: string | null }>> {
+): Promise<
+  Map<
+    number,
+    { currentCompany: string | null; currentTitle: string | null; totalExperienceSummary: string | null; linkedinUrl: string | null }
+  >
+> {
   if (screeningIds.length === 0) return new Map();
   try {
     const supabase = getSupabaseClient();
     const { data, error } = await supabase
       .from("screenings")
-      .select("id, current_company, current_title")
+      .select("id, current_company, current_title, total_experience_summary, linkedin_url")
       .in("id", screeningIds)
-      .returns<{ id: number; current_company: string | null; current_title: string | null }[]>();
+      .returns<
+        { id: number; current_company: string | null; current_title: string | null; total_experience_summary: string | null; linkedin_url: string | null }[]
+      >();
     if (error) throw error;
-    return new Map((data ?? []).map((r) => [r.id, { currentCompany: r.current_company, currentTitle: r.current_title }]));
+    return new Map(
+      (data ?? []).map((r) => [
+        r.id,
+        {
+          currentCompany: r.current_company,
+          currentTitle: r.current_title,
+          totalExperienceSummary: r.total_experience_summary,
+          linkedinUrl: r.linkedin_url,
+        },
+      ])
+    );
   } catch {
     return new Map();
   }
@@ -1531,13 +1580,18 @@ export async function updateScreening(
      * Current employer/title, 2026-08-04 (Vlad's ask: FunnelView Excel
      * export needs these columns). Requires
      * supabase-migration-current-role.sql — NOT YET CONFIRMED RUN, same
-     * deferred-column pattern as suggestedRoleFits/blacklisted above. Only
-     * ever set by app/api/screenings/regenerate-trajectories/route.ts.
+     * deferred-column pattern as suggestedRoleFits/blacklisted above. Set by
+     * app/api/screenings/regenerate-trajectories/route.ts (backfill) and, as
+     * of 2026-08-06, saveScreening() itself for new screenings (see that
+     * function's own comment for why it's a separate call, not folded into
+     * the main insert).
      */
     currentCompany?: string;
     currentTitle?: string;
     /** Same deferred-column pattern as currentCompany above — see that field's comment and lib/types.ts's ScreeningRecord.totalExperienceSummary. */
     totalExperienceSummary?: string;
+    /** Same deferred-column pattern as currentCompany above — see lib/types.ts's ScreeningRecord.linkedinUrl. Added 2026-08-06. */
+    linkedinUrl?: string;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1556,6 +1610,7 @@ export async function updateScreening(
   if (fields.currentCompany !== undefined) update.current_company = fields.currentCompany;
   if (fields.currentTitle !== undefined) update.current_title = fields.currentTitle;
   if (fields.totalExperienceSummary !== undefined) update.total_experience_summary = fields.totalExperienceSummary;
+  if (fields.linkedinUrl !== undefined) update.linkedin_url = fields.linkedinUrl;
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   // cross_ref_is_linkedin requires supabase-migration-cross-ref-doc-type.sql

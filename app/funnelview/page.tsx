@@ -353,11 +353,16 @@ export default function FunnelViewPage() {
     // export (activeProject null) — a sheet spanning every role needs some
     // way to tell candidates apart by role, which a single-role export
     // (the normal case, per Vlad's own on-screen dropdown) doesn't need.
+    // LinkedIn added 2026-08-06, slotted right after Current Title.
     const candidateRows = activeCandidates.map((c) => ({
       Name: c.candidateName,
       ...(activeProject ? {} : { Role: c.projectName }),
       "Current Company": c.currentCompany ?? "",
       "Current Title": c.currentTitle ?? "",
+      // Added 2026-08-06 (Vlad's ask: a LinkedIn link column) — genuinely
+      // blank for candidates whose resume never listed a profile URL, same
+      // "expected absence, not a bug" note as currentCompany/currentTitle.
+      LinkedIn: c.linkedinUrl ?? "",
       Score: c.score,
       "Current Status": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
       // Past Stage stays in the Excel export only — Vlad's ask, 2026-07-20:
@@ -373,7 +378,7 @@ export default function FunnelViewPage() {
     candidateSheet["!cols"] = [
       { wch: 24 },
       ...(activeProject ? [] : [{ wch: 22 }]),
-      { wch: 22 }, { wch: 22 }, { wch: 8 }, { wch: 16 }, { wch: 16 },
+      { wch: 22 }, { wch: 22 }, { wch: 32 }, { wch: 8 }, { wch: 16 }, { wch: 16 },
       { wch: 14 }, { wch: 32 }, { wch: 28 },
     ];
 

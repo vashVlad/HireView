@@ -26,15 +26,27 @@ interface ScreeningFunnelRow {
 }
 
 /**
- * Current company/title/total-experience-summary, 2026-08-04 (Vlad's ask) —
- * deliberately a SEPARATE, best-effort query from the main screenings select
- * above, NOT folded into it. These columns require
- * supabase-migration-current-role.sql; a missing column would fail a
- * combined query outright, and FunnelView is a live, already-working page —
- * per the standing "never add columns to an already-live query path before
- * the migration is confirmed run" rule (memory/feedback_migration_
- * sequencing.md, 2026-07-09 outage), this must degrade to nulls instead of
- * breaking the whole page pre-migration.
+ * Current company/title/total-experience-summary/linkedin-url, 2026-08-04
+ * (Vlad's ask) — deliberately SEPARATE, best-effort queries from the main
+ * screenings select above, NOT folded into it. These columns require
+ * supabase-migration-current-role.sql; per the pattern documented in
+ * memory/decisions-log.md ("this project has hit the same failure mode
+ * twice before... wiring a new, not-yet-migrated column into an existing
+ * query can make the WHOLE query fail once Postgres rejects the unknown
+ * column"), each column is fetched independently below (see
+ * fetchCurrentRoleColumn), not bundled into one query.
+ *
+ * REAL INCIDENT, 2026-08-06: this was originally one bundled query for all
+ * three of current_company/current_title/total_experience_summary sharing a
+ * single try/catch. total_experience_summary's migration hadn't run yet,
+ * which failed that ENTIRE query — wiping out current_company/current_title
+ * too, even though those two columns existed and were already populated for
+ * 14 real candidates. Vlad reported this as "the columns went gone." Root
+ * cause confirmed directly against the live DB (not guessed): 14 non-null
+ * current_company/current_title rows existed, total_experience_summary
+ * didn't exist as a column at all, and the bundled select errored outright.
+ * Splitting into independent per-column queries (below) means any single
+ * missing/not-yet-migrated column can only ever null out itself.
  *
  * total_experience_summary is its own short, dedicated field (NOT extracted
  * from career_trajectory) — see lib/generateTrajectory.ts's comment: Vlad
@@ -42,10 +54,33 @@ interface ScreeningFunnelRow {
  * closing paragraph, which stays untouched for its existing on-screen uses.
  */
 interface ScreeningCurrentRoleRow {
-  id: number;
-  current_company: string | null;
-  current_title: string | null;
-  total_experience_summary: string | null;
+  currentCompany: string | null;
+  currentTitle: string | null;
+  totalExperienceSummary: string | null;
+  linkedinUrl: string | null;
+}
+
+/**
+ * Fetches one current-role column for every screening, isolated from every
+ * other column in this row shape — see ScreeningCurrentRoleRow's comment
+ * above for why. Failure (column doesn't exist yet) degrades to an empty
+ * map for just this one field, never touching the others.
+ */
+async function fetchCurrentRoleColumn(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  column: "current_company" | "current_title" | "total_experience_summary" | "linkedin_url"
+): Promise<Map<number, string | null>> {
+  try {
+    const { data, error } = await supabase
+      .from("screenings")
+      .select(`id, ${column}`)
+      .returns<Record<"id" | typeof column, number | string | null>[]>();
+    if (error) throw error;
+    return new Map((data ?? []).map((r) => [r.id as number, r[column] as string | null]));
+  } catch (err) {
+    console.error(`FunnelView: ${column} unavailable (migration likely not run yet) — degrading to nulls for this field only:`, err);
+    return new Map();
+  }
 }
 
 interface TrackerFunnelRow {
@@ -182,20 +217,25 @@ export async function getFunnelData(): Promise<FunnelData> {
   if (trackerRes.error) throw trackerRes.error;
 
   // Best-effort, separate from the required query above — see
-  // ScreeningCurrentRoleRow's comment for why. A missing column (migration
-  // not yet run) just means every candidate's currentCompany/currentTitle/
-  // totalExperienceSummary comes back null, same as any other candidate that
-  // hasn't been backfilled yet — the rest of FunnelView is unaffected.
-  let currentRoleByScreeningId = new Map<number, ScreeningCurrentRoleRow>();
-  try {
-    const { data, error } = await supabase
-      .from("screenings")
-      .select("id, current_company, current_title, total_experience_summary")
-      .returns<ScreeningCurrentRoleRow[]>();
-    if (error) throw error;
-    currentRoleByScreeningId = new Map((data ?? []).map((r) => [r.id, r]));
-  } catch (err) {
-    console.error("FunnelView: current-role columns unavailable (migration likely not run yet) — degrading to nulls:", err);
+  // ScreeningCurrentRoleRow's comment for why each of these 4 is its own
+  // independent, isolated fetch rather than one combined query. A missing
+  // column (migration not yet run) just means that ONE field comes back
+  // null for everyone, same as any candidate not yet backfilled — every
+  // other field, and the rest of FunnelView, is unaffected.
+  const [companyById, titleById, experienceById, linkedinById] = await Promise.all([
+    fetchCurrentRoleColumn(supabase, "current_company"),
+    fetchCurrentRoleColumn(supabase, "current_title"),
+    fetchCurrentRoleColumn(supabase, "total_experience_summary"),
+    fetchCurrentRoleColumn(supabase, "linkedin_url"),
+  ]);
+  const currentRoleByScreeningId = new Map<number, ScreeningCurrentRoleRow>();
+  for (const s of screeningsRes.data ?? []) {
+    currentRoleByScreeningId.set(s.id, {
+      currentCompany: companyById.get(s.id) ?? null,
+      currentTitle: titleById.get(s.id) ?? null,
+      totalExperienceSummary: experienceById.get(s.id) ?? null,
+      linkedinUrl: linkedinById.get(s.id) ?? null,
+    });
   }
 
   const screenings = screeningsRes.data ?? [];
@@ -217,9 +257,10 @@ export async function getFunnelData(): Promise<FunnelData> {
       projectName: s.project_id != null ? (projectNameById.get(s.project_id) ?? `Project ${s.project_id}`) : "—",
       recruiterId: s.user_id,
       recruiterEmail: s.user_id != null ? (emailByUserId.get(s.user_id) ?? s.user_id) : null,
-      currentCompany: currentRole?.current_company ?? null,
-      currentTitle: currentRole?.current_title ?? null,
-      totalExperienceSummary: currentRole?.total_experience_summary ?? null,
+      currentCompany: currentRole?.currentCompany ?? null,
+      currentTitle: currentRole?.currentTitle ?? null,
+      totalExperienceSummary: currentRole?.totalExperienceSummary ?? null,
+      linkedinUrl: currentRole?.linkedinUrl ?? null,
       source: s.linkedin_mode ? "outbound" : s.agency_name ? "agency" : "inbound",
       ...(s.agency_name ? { agencyName: s.agency_name } : {}),
       score: s.score,

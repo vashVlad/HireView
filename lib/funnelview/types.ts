@@ -50,6 +50,16 @@ export interface FunnelCandidate {
    * "Regenerate trajectories" button in a project's Settings tab.
    */
   totalExperienceSummary: string | null;
+  /**
+   * "LinkedIn" export column, 2026-08-06 (Vlad's ask). Auto-extracted from
+   * the resume's own contact info — genuinely absent for many candidates
+   * whose resume never lists one, which is expected, not a sign of a
+   * missing backfill (unlike currentCompany/currentTitle/
+   * totalExperienceSummary above, which the "Regenerate trajectories"
+   * button treats null as needing a re-run — see getCurrentRoleStatus's
+   * comment for why linkedinUrl is deliberately excluded from that check).
+   */
+  linkedinUrl: string | null;
 }
 
 export interface FunnelStageCount {

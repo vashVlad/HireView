@@ -2619,13 +2619,17 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
   const [checkingArchive, setCheckingArchive] = useState(false);
   const [archiveCheckResult, setArchiveCheckResult] = useState<string | null>(null);
   // Regenerate trajectories, 2026-08-04 (Vlad's ask, added then briefly
-  // removed then re-added same day) — backfills current company/title
-  // (+ the short totalExperienceSummary) for this project's already-screened
-  // candidates, so the FunnelView Excel export's new columns aren't blank.
-  // The route now ONLY processes candidates missing current_company/
-  // current_title (see app/api/screenings/regenerate-trajectories/route.ts),
-  // so it's safe/cheap to click again later as new candidates get screened —
-  // it won't re-run or re-charge for anyone already backfilled.
+  // removed then re-added same day) — backfills current company/title/
+  // total experience/LinkedIn for this project's already-screened
+  // candidates, so the FunnelView Excel export's columns aren't blank. As of
+  // 2026-08-06, NEW screenings get all four automatically at scoring time
+  // (lib/scoreCandidate.ts, do-not-touch exception) — this button now exists
+  // purely to backfill candidates screened BEFORE that wiring existed, per
+  // Vlad's explicit ask to keep it right here rather than duplicate it
+  // elsewhere. The route ONLY processes candidates missing current_company/
+  // current_title/totalExperienceSummary (see app/api/screenings/regenerate-
+  // trajectories/route.ts), so it's safe/cheap to click again later — it
+  // won't re-run or re-charge for anyone already backfilled.
   const [regeneratingTrajectories, setRegeneratingTrajectories] = useState(false);
   const [regenerateResult, setRegenerateResult] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -2837,15 +2841,17 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
       </div>
 
       {/* Regenerate trajectories — Vlad's ask, 2026-08-04: backfills current
-          company/title + a short total-experience summary for candidates in
-          this role that don't have them yet, so the FunnelView Excel
-          export's columns aren't blank. Only processes candidates missing
-          current_company/current_title — safe to click again later. */}
+          company/title/total-experience/LinkedIn for candidates in this role
+          that don't have them yet, so the FunnelView Excel export's columns
+          aren't blank. New screenings get these automatically as of
+          2026-08-06 — this stays for candidates screened before that.
+          Only processes candidates missing current_company/current_title/
+          totalExperienceSummary — safe to click again later. */}
       <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <div>
           <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Regenerate trajectories</p>
           <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            {regenerateResult ?? "Backfill Current Company/Title for candidates in this role who don't have them yet."}
+            {regenerateResult ?? "Backfill Current Company/Title/Total Experience/LinkedIn for candidates in this role who don't have them yet (new candidates get this automatically)."}
           </p>
         </div>
         <button type="button" onClick={regenerateTrajectories} disabled={regeneratingTrajectories}

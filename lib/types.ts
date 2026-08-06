@@ -232,6 +232,18 @@ export interface CandidateResult {
   strengths: string[];
   concerns: string[];
   careerTrajectory?: string;
+  /**
+   * Mirrors ScreeningRecord.currentCompany/currentTitle/totalExperienceSummary/
+   * linkedinUrl — present here because scoreCandidate.ts (do-not-touch
+   * exception, 2026-08-06, Vlad's explicit sign-off) now generates these in
+   * the same call as scoring, so saveScreening() reads them straight off
+   * this result rather than a separate lookup. See ScreeningRecord's own
+   * comments on each field for the full "why."
+   */
+  currentCompany?: string;
+  currentTitle?: string;
+  totalExperienceSummary?: string;
+  linkedinUrl?: string;
   recommendation: Recommendation;
   status?: CandidateStatus;
   credibility?: CredibilityAssessment;
@@ -476,13 +488,17 @@ export interface ScreeningRecord {
   /**
    * Current/most-recent employer + title, added 2026-08-04 (Vlad's ask: a
    * "Current Company" / "Current Title" column on the FunnelView Excel
-   * export). Extracted alongside careerTrajectory by lib/generateTrajectory.ts
-   * (same Claude call, no extra API cost) — populated going forward only via
-   * the "Regenerate trajectories" backfill (app/api/screenings/regenerate-
-   * trajectories/route.ts), not the main scoring flow. Deliberately NOT in
+   * export). Extracted alongside careerTrajectory — as of 2026-08-06 this
+   * happens both in the main scoring call (lib/scoreCandidate.ts, do-not-
+   * touch exception — see memory/decisions-log.md) for new screenings going
+   * forward, AND in lib/generateTrajectory.ts for the "Regenerate
+   * trajectories" backfill (app/api/screenings/regenerate-trajectories/
+   * route.ts) covering already-screened candidates. Deliberately NOT in
    * the shared SCREENING_COLUMNS select — same deferred pattern as
    * archiveReason above, see supabase-migration-current-role.sql. Only ever
-   * written via updateScreening() and read via FunnelView's own isolated
+   * written via updateScreening() (a separate, best-effort call — see
+   * saveScreening()'s own comment for why it can't be bundled into the main
+   * insert) and read via FunnelView's own isolated, per-column-resilient
    * query (lib/funnelview/data.ts).
    */
   currentCompany?: string;
@@ -495,6 +511,15 @@ export interface ScreeningRecord {
    * further same day. Same deferred-column pattern as currentCompany above.
    */
   totalExperienceSummary?: string;
+  /**
+   * LinkedIn profile URL, added 2026-08-06 (Vlad's ask: a "LinkedIn" link
+   * column on the FunnelView Excel export). Auto-extracted from the resume's
+   * own contact info/text — NOT every resume lists one, so this is
+   * frequently absent even for fully-backfilled candidates; that's expected,
+   * not a bug. Same deferred-column pattern and generation paths as
+   * currentCompany above.
+   */
+  linkedinUrl?: string;
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;

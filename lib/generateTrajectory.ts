@@ -39,8 +39,16 @@ const TRAJECTORY_TOOL = {
         type: "string",
         description: `1 sentence preferred, 2 sentences ABSOLUTE MAX (never more): total years of relevant experience, primary domain/industry, and current seniority level. Facts only — no opinion, no recommendation. Example (1 sentence, preferred): "8 years in backend engineering, mostly fintech, currently a Staff Engineer." Only use a second sentence if one genuinely can't cover it — never a third.`,
       },
+      // Added 2026-08-06 (Vlad's ask: a "LinkedIn" link column on the
+      // FunnelView Excel export). Also added to lib/scoreCandidate.ts's own
+      // schema the same day so new candidates get it at screening time too —
+      // this one stays the backfill path for already-screened candidates.
+      linkedinUrl: {
+        type: "string",
+        description: `The candidate's LinkedIn profile URL, exactly as it appears in the resume's contact info/header (e.g. "linkedin.com/in/janedoe" or a full https:// URL). If the resume genuinely doesn't list one, use an empty string — do not guess or construct one from the candidate's name.`,
+      },
     },
-    required: ["careerTrajectory", "currentCompany", "currentTitle", "totalExperienceSummary"],
+    required: ["careerTrajectory", "currentCompany", "currentTitle", "totalExperienceSummary", "linkedinUrl"],
   },
 };
 
@@ -49,6 +57,8 @@ export interface TrajectoryResult {
   currentCompany: string;
   currentTitle: string;
   totalExperienceSummary: string;
+  /** Normalized to undefined (not "") when the resume doesn't list one — see submit_trajectory's own field comment. */
+  linkedinUrl?: string;
 }
 
 export async function generateTrajectory(
@@ -74,7 +84,7 @@ Analyse this candidate's career trajectory against the job description below.
 
 List roles in reverse chronological order — most recent first, oldest last. For each role: one short sentence (company, what they do, full-time or contract), then 2–3 bullet points (domain alignment, key signal, transition logic — one line each). End with a short paragraph (3–4 sentences): clear recommendation on whether this candidate is worth a conversation and why.
 
-Also separately report the candidate's current (most recent) employer and job title as clean, standalone values, plus a total-experience summary (years, domain, seniority) — 1 sentence preferred, 2 sentences absolute max, facts only, no opinion.
+Also separately report the candidate's current (most recent) employer and job title as clean, standalone values, plus a total-experience summary (years, domain, seniority) — 1 sentence preferred, 2 sentences absolute max, facts only, no opinion. Also report their LinkedIn profile URL if the resume lists one, exactly as written — empty string if it doesn't.
 
 JOB DESCRIPTION:
 ${jobDescription}
@@ -98,5 +108,6 @@ ${resumeText}`,
     currentCompany: input.currentCompany,
     currentTitle: input.currentTitle,
     totalExperienceSummary: input.totalExperienceSummary,
+    linkedinUrl: input.linkedinUrl ? input.linkedinUrl : undefined,
   };
 }

@@ -13,11 +13,14 @@ export const maxDuration = 60;
  * to match every other cross-team/bulk operation in the app.
  *
  * Scope narrowed 2026-08-04 (Vlad's ask: "only do the candidates who don't
- * have those two yet") — this now ONLY processes screenings missing
- * current_company or current_title (via getCurrentRoleStatus), skipping
- * everyone already backfilled. Makes it safe/cheap to click repeatedly as a
- * role gets new candidates, instead of re-running a Claude call (and
- * re-writing careerTrajectory) for every candidate in the role every time.
+ * have those two yet") — this now ONLY processes screenings missing any of
+ * current_company/current_title/total_experience_summary/linkedin_url (via
+ * getCurrentRoleStatus), skipping everyone already fully backfilled. Makes
+ * it safe/cheap to click repeatedly as a role gets new candidates, instead
+ * of re-running a Claude call (and re-writing careerTrajectory) for every
+ * candidate in the role every time. Widened to all 4 fields 2026-08-06 —
+ * checking only the first two would've left candidates backfilled before
+ * totalExperienceSummary/linkedinUrl existed permanently stuck without them.
  */
 export async function POST(request: NextRequest) {
   const user = await getAuthUser();
@@ -44,7 +47,11 @@ export async function POST(request: NextRequest) {
   const statusById = await getCurrentRoleStatus(screenings.map((s) => s.id!));
   const pending = screenings.filter((s) => {
     const status = statusById.get(s.id!);
-    return !status || !status.currentCompany || !status.currentTitle;
+    return !status || !status.currentCompany || !status.currentTitle || !status.totalExperienceSummary;
+    // linkedinUrl deliberately excluded from this check — many resumes
+    // genuinely don't list one, so a null linkedinUrl is a normal, expected
+    // outcome (not "still needs backfill") and would otherwise mark
+    // fully-processed candidates as pending forever.
   });
   const skipped = screenings.length - pending.length;
 
@@ -59,19 +66,19 @@ export async function POST(request: NextRequest) {
     try {
       const { data, fileName } = await getScreeningResume(s.id!);
       const resumeText = await extractResumeText(fileName, data);
-      const { careerTrajectory, currentCompany, currentTitle, totalExperienceSummary } = await generateTrajectory(s.jobDescription, resumeText);
+      const { careerTrajectory, currentCompany, currentTitle, totalExperienceSummary, linkedinUrl } = await generateTrajectory(s.jobDescription, resumeText);
       await updateScreening(s.id!, { careerTrajectory });
       updated++;
       // Separate, best-effort update — current_company/current_title/
-      // total_experience_summary all need supabase-migration-current-role.sql,
-      // which may not be run yet. A single updateScreening() call batches
-      // every field into one SQL UPDATE, so bundling these with
+      // total_experience_summary/linkedin_url all need supabase-migration-
+      // current-role.sql, which may not be run yet. A single updateScreening()
+      // call batches every field into one SQL UPDATE, so bundling these with
       // careerTrajectory above would fail the WHOLE write (including the
       // trajectory itself) if the columns don't exist. Split out so a
       // pre-migration environment still gets the trajectory refresh — it
       // just silently skips the new columns until the migration runs.
       try {
-        await updateScreening(s.id!, { currentCompany, currentTitle, totalExperienceSummary });
+        await updateScreening(s.id!, { currentCompany, currentTitle, totalExperienceSummary, linkedinUrl });
       } catch {
         /* pre-migration or other non-fatal failure — trajectory update above already counted */
       }

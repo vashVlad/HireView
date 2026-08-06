@@ -62,8 +62,36 @@ const SCORE_TOOL = {
         type: "string",
         description: `Career arc narrative covering every role. ALWAYS list roles in reverse chronological order — most recent role first, oldest last. For each role, write a bold header line in this exact format: **[Company Name] — [Title], [full-time or contract], [date range]**. Employment type is inferred from tenure length, title signals like "Consultant"/"Contract"/"via [staffing agency]", or consecutive short stints at different companies. Do not add a sentence after the header — go straight to 3 tight bullet points: (1) what the company does and whether its domain aligns with the role being hired for (use training knowledge; if unknown say "company not found" and infer from title/description), (2) the key signal this role adds to the candidate's story, (3) whether the transition into or out of this role makes sense. Keep bullets to one line each. After all roles, add a final short paragraph (3–4 sentences max): clear recommendation on whether this candidate is worth a conversation and why.`,
       },
+      // Added 2026-08-06 — do-not-touch exception, Vlad's explicit ask: these
+      // four fields used to only exist via a separate post-hoc call
+      // (lib/generateTrajectory.ts, still used by the "Regenerate
+      // trajectories" backfill button for already-screened candidates). Root
+      // cause of "the FunnelView export columns are blank": that backfill is
+      // a manual, per-role, opt-in button — a brand new candidate never got
+      // these fields at all until someone remembered to click it. Since this
+      // call already reads the whole resume and already writes
+      // careerTrajectory, generating these four alongside it is the exact
+      // same "no extra API cost" reasoning generateTrajectory.ts used —
+      // descriptions intentionally mirrored from that file for output
+      // consistency between the two paths.
+      currentCompany: {
+        type: "string",
+        description: `The candidate's most recent (or current, if still employed there) employer — company name only, no extra description. If the resume genuinely doesn't name an employer, use "Not specified".`,
+      },
+      currentTitle: {
+        type: "string",
+        description: `The candidate's most recent (or current) job title at currentCompany, as written on the resume. If the resume genuinely doesn't name a title, use "Not specified".`,
+      },
+      totalExperienceSummary: {
+        type: "string",
+        description: `1 sentence preferred, 2 sentences ABSOLUTE MAX (never more): total years of relevant experience, primary domain/industry, and current seniority level. Facts only — no opinion, no recommendation. Example (1 sentence, preferred): "8 years in backend engineering, mostly fintech, currently a Staff Engineer." Only use a second sentence if one genuinely can't cover it — never a third.`,
+      },
+      linkedinUrl: {
+        type: "string",
+        description: `The candidate's LinkedIn profile URL, exactly as it appears in the resume's contact info/header (e.g. "linkedin.com/in/janedoe" or a full https:// URL). If the resume genuinely doesn't list one, use an empty string — do not guess or construct one from the candidate's name.`,
+      },
     },
-    required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory"],
+    required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory", "currentCompany", "currentTitle", "totalExperienceSummary", "linkedinUrl"],
   },
 };
 
@@ -198,6 +226,10 @@ ${jobDescription}`,
   return {
     fileName,
     ...input,
+    // Empty string (schema's "genuinely doesn't list one" case) isn't a real
+    // URL — normalize to undefined so downstream code can use a plain
+    // truthiness/undefined check instead of also handling "".
+    linkedinUrl: input.linkedinUrl ? input.linkedinUrl : undefined,
     recommendation: input.score > 50 ? "proceed" : "decline",
   };
 }
