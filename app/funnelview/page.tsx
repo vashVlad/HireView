@@ -346,29 +346,35 @@ export default function FunnelViewPage() {
     const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
     summarySheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 20 }];
 
-    const candidateRows = activeCandidates.map((c) => {
-      const archived = c.status === "archived" || c.trackerStage === "Reject";
-      return {
-        Name: c.candidateName,
-        Role: c.projectName,
-        Source: c.source === "outbound" ? "Sourced" : c.source === "agency" ? `Agency (${c.agencyName ?? "—"})` : "Applied",
-        Score: c.score,
-        "Current Stage": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
-        // Past Stage stays in the Excel export only — Vlad's ask, 2026-07-20:
-        // "don't show Past Stage on the Candidates tab on the FunnelView
-        // page, keep it in the report and everywhere else." Removed from the
-        // on-screen table below; this is now the only remaining place it renders.
-        "Past Stage": pastStageLabel(c) === "—" ? "" : pastStageLabel(c),
-        Recruiter: c.recruiterEmail ?? "",
-        "Screened Date": new Date(c.createdAt).toLocaleDateString(),
-        "Fraud Flags (Y/N)": c.hasFraudFlag ? "Y" : "N",
-        "Archived (Y/N)": archived ? "Y" : "N",
-      };
-    });
+    // Column set rebuilt 2026-08-04 (Vlad's exact spec): Name, Current
+    // Company, Current Title, Score, Current Status, Past Stage, Screened
+    // Date, Total experience, Recruiter — replaces the old Role/Source/
+    // Fraud Flags/Archived set. Role is added back ONLY for the "All roles"
+    // export (activeProject null) — a sheet spanning every role needs some
+    // way to tell candidates apart by role, which a single-role export
+    // (the normal case, per Vlad's own on-screen dropdown) doesn't need.
+    const candidateRows = activeCandidates.map((c) => ({
+      Name: c.candidateName,
+      ...(activeProject ? {} : { Role: c.projectName }),
+      "Current Company": c.currentCompany ?? "",
+      "Current Title": c.currentTitle ?? "",
+      Score: c.score,
+      "Current Status": c.trackerStage ?? STAGE_LABELS[c.status] ?? c.status,
+      // Past Stage stays in the Excel export only — Vlad's ask, 2026-07-20:
+      // "don't show Past Stage on the Candidates tab on the FunnelView
+      // page, keep it in the report and everywhere else." Removed from the
+      // on-screen table below; this is now the only remaining place it renders.
+      "Past Stage": pastStageLabel(c) === "—" ? "" : pastStageLabel(c),
+      "Screened Date": new Date(c.createdAt).toLocaleDateString(),
+      "Total experience": c.totalExperienceSummary ?? "",
+      Recruiter: c.recruiterEmail ?? "",
+    }));
     const candidateSheet = XLSX.utils.json_to_sheet(candidateRows);
     candidateSheet["!cols"] = [
-      { wch: 24 }, { wch: 22 }, { wch: 10 }, { wch: 8 }, { wch: 18 }, { wch: 18 },
-      { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 14 },
+      { wch: 24 },
+      ...(activeProject ? [] : [{ wch: 22 }]),
+      { wch: 22 }, { wch: 22 }, { wch: 8 }, { wch: 16 }, { wch: 16 },
+      { wch: 14 }, { wch: 50 }, { wch: 28 },
     ];
 
     const wb = XLSX.utils.book_new();

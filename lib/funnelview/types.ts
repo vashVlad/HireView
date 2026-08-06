@@ -32,6 +32,23 @@ export interface FunnelCandidate {
   /** True if either Feature 1.1 (same-project duplicate) or 1.4 (cross-project history alert) has flagged this candidate. */
   hasFraudFlag: boolean;
   createdAt: string;
+  /**
+   * Current employer/title, 2026-08-04 (Vlad's ask: FunnelView Excel export
+   * "Current Company" / "Current Title" columns). Null until backfilled —
+   * see supabase-migration-current-role.sql and the "Regenerate
+   * trajectories" button in a project's Settings tab.
+   */
+  currentCompany: string | null;
+  currentTitle: string | null;
+  /**
+   * "Total experience" export column — the final paragraph of
+   * lib/generateTrajectory.ts's careerTrajectory narrative (its own prompt
+   * always ends with "a final short paragraph... with a clear
+   * recommendation"), extracted server-side in lib/funnelview/data.ts so the
+   * export doesn't dump the entire multi-role trajectory into one cell. Null
+   * if no trajectory has ever been generated for this candidate.
+   */
+  totalExperienceSummary: string | null;
 }
 
 export interface FunnelStageCount {

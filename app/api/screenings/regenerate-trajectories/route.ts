@@ -46,9 +46,25 @@ export async function POST(request: NextRequest) {
     try {
       const { data, fileName } = await getScreeningResume(s.id!);
       const resumeText = await extractResumeText(fileName, data);
-      const trajectory = await generateTrajectory(s.jobDescription, resumeText);
-      await updateScreening(s.id!, { careerTrajectory: trajectory });
+      // Also backfills current_company/current_title, 2026-08-04 (Vlad's
+      // ask) — same Claude call as the trajectory itself now returns both,
+      // see lib/generateTrajectory.ts.
+      const { careerTrajectory, currentCompany, currentTitle } = await generateTrajectory(s.jobDescription, resumeText);
+      await updateScreening(s.id!, { careerTrajectory });
       updated++;
+      // Separate, best-effort update — current_company/current_title need
+      // supabase-migration-current-role.sql, which may not be run yet. A
+      // single updateScreening() call batches every field into one SQL
+      // UPDATE, so bundling these with careerTrajectory above would fail the
+      // WHOLE write (including the trajectory itself) if the columns don't
+      // exist. Split out so a pre-migration environment still gets the
+      // trajectory refresh — it just silently skips the new columns until
+      // the migration runs, instead of regressing this route's one existing job.
+      try {
+        await updateScreening(s.id!, { currentCompany, currentTitle });
+      } catch {
+        /* pre-migration or other non-fatal failure — trajectory update above already counted */
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       errors.push(`${s.candidateName}: ${msg}`);

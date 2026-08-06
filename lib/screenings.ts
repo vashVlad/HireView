@@ -1499,6 +1499,15 @@ export async function updateScreening(
      */
     blacklisted?: boolean;
     blacklistReason?: string | null;
+    /**
+     * Current employer/title, 2026-08-04 (Vlad's ask: FunnelView Excel
+     * export needs these columns). Requires
+     * supabase-migration-current-role.sql — NOT YET CONFIRMED RUN, same
+     * deferred-column pattern as suggestedRoleFits/blacklisted above. Only
+     * ever set by app/api/screenings/regenerate-trajectories/route.ts.
+     */
+    currentCompany?: string;
+    currentTitle?: string;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1511,6 +1520,11 @@ export async function updateScreening(
   if (fields.flagNote !== undefined) update.flag_note = fields.flagNote;
   if (fields.credibility !== undefined) update.credibility = fields.credibility;
   if (fields.careerTrajectory !== undefined) update.career_trajectory = fields.careerTrajectory;
+  // current_company/current_title require supabase-migration-current-role.sql
+  // — NOT YET CONFIRMED RUN. Same deferred-wiring pattern as archive_reason
+  // above; only ever passed by the regenerate-trajectories backfill route.
+  if (fields.currentCompany !== undefined) update.current_company = fields.currentCompany;
+  if (fields.currentTitle !== undefined) update.current_title = fields.currentTitle;
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   // cross_ref_is_linkedin requires supabase-migration-cross-ref-doc-type.sql
