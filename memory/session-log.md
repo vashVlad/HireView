@@ -12,6 +12,33 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-08-04 (round 70) — Removed the Settings-tab "Regenerate trajectories" button added in round 69
+- **Ask (Vlad):** "remove that button now" — the Settings-tab trigger added in round 69 for backfilling Current Company/Title.
+- Reverted `app/projects/[id]/page.tsx`: removed the `regeneratingTrajectories`/`regenerateResult` state, the `regenerateTrajectories()` handler, and the button's JSX block from `SettingsTab`. `POST /api/screenings/regenerate-trajectories` itself is untouched and still works — it just has no UI entry point again, same as before round 69. To backfill AI Builder's existing candidates now, someone with admin access needs to call that route directly (e.g. from the browser console while logged in: `fetch('/api/screenings/regenerate-trajectories', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({projectId: <AI Builder's id>})})`).
+- Everything else from round 69 (migration, `generateTrajectory.ts` extraction, FunnelView export columns, isolated best-effort read in `lib/funnelview/data.ts`) is unchanged.
+- **Verified:** `npx tsc --noEmit -p .` clean. Do-not-touch files confirmed zero diff.
+
+---
+
+## 2026-08-04 (round 69) — FunnelView Excel export: rebuilt candidate columns to Vlad's exact spec, added Current Company/Title
+- **Ask (Vlad):** "For the excel report of funnel view add current employer column. So it's Name, Current Company, Current Title, Score, Current Status, Past Stage, Screened Date, Total experience (Bottom trajectory summary), recruiter. Add this information to existing AI Builder role."
+- **New data needed:** Current Company/Title didn't exist anywhere as structured fields. Extended `lib/generateTrajectory.ts`'s existing Claude tool call (no extra API cost — it already reads the whole resume for the trajectory narrative) to also return `currentCompany`/`currentTitle`. New columns `current_company`/`current_title` on `screenings` (`supabase-migration-current-role.sql`, **not yet run**). Written only via `updateScreening()` — deliberately NOT added to the shared `SCREENING_COLUMNS` read path (per [[feedback_migration_sequencing]]: that caused an app-wide outage before). `lib/funnelview/data.ts` reads these via its own SEPARATE best-effort query (try/catch, degrades to null) rather than folding them into its main required query — FunnelView is a live page, so a missing column can't be allowed to break the whole thing pre-migration.
+- **"Total experience"** = the trajectory narrative's own final paragraph (its prompt already always ends with one), extracted server-side via `bottomTrajectoryParagraph()` in `lib/funnelview/data.ts` rather than dumping the whole multi-role narrative into one cell.
+- **Export columns rebuilt** in `handleExport()` to Vlad's exact list, dropping Source/Fraud Flags/Archived (Y/N). Role is added back only for the "All roles" export (no single project selected) — a multi-role sheet needs some way to tell candidates apart by role; a single-role export doesn't.
+- **Backfill path for already-screened candidates (e.g. AI Builder):** added a "Regenerate trajectories" button to the project Settings tab — the existing `/api/screenings/regenerate-trajectories` maintenance route had no UI trigger at all before this. Admin-gated (existing route behavior); shows "Admin only" inline instead of a raw 403 if a non-admin clicks it. **Removed same day, see round 70** — Vlad asked for the button to come back out; the route itself is unaffected.
+- **Needs Vlad:** (1) run `supabase-migration-current-role.sql`, (2) trigger the backfill for AI Builder's existing candidates — see round 70's entry for how, now that there's no UI button (new screenings won't get these until wired into the live scoring flow — do-not-touch `scoreCandidate.ts`/`screen-resumes/route.ts`, so that would need explicit sign-off first — flagged in open-questions.md).
+- **Verified:** `npx tsc --noEmit -p .` clean. Do-not-touch files confirmed zero diff. **Not yet live-tested by Vlad** — migration hasn't run yet, so Current Company/Title will show blank until then.
+
+---
+
+## 2026-08-04 (round 68) — Closed out the two items deferred from round 67: Excel export scoping + batch-link clipboard copy
+- **Ask (Vlad):** "execute the rest of the things mentioned above" — the two items explicitly deferred in round 67 (role-specific Excel export, copy "Link to this batch" to clipboard). Chatbot stays backlog per Vlad's answer when asked.
+- **Excel export:** turned out to need no code change. `handleExport()` in `app/funnelview/page.tsx` already scopes the whole report to `activeProject` once a role is picked via the existing on-screen dropdown (skips "By Project" sheet, adds role slug to filename). Asked Vlad whether that on-screen selector was good enough vs. a separate export-only picker — confirmed yes. Closed the open-questions.md entry as resolved rather than building anything new.
+- **Batch link copy:** `app/projects/[id]/page.tsx`'s "Link to this batch" was a plain `<Link>` with no clipboard behavior. Added an `onClick` alongside the navigation (doesn't block it) that writes `${origin}/projects/[id]/batches/[batchId]` to the clipboard — same pattern as the existing per-candidate share link (`handleCopyLink` in this file's PipelineTab, and `app/candidates/page.tsx`). Button swaps to a checkmark + "Link copied" for 1.5s.
+- **Verified:** `npx tsc --noEmit -p .` clean. Do-not-touch files confirmed zero diff. Real diff scoped to exactly `app/projects/[id]/page.tsx`. **Not yet live-tested by Vlad.**
+
+---
+
 ## 2026-08-04 (round 67) — FunnelView row-click drill-down + fraud reason visible on reopen in Tracker drawer
 - **Ask (Vlad):** click a FunnelView stage row (e.g. "Reached out") and have the exact-matching candidates show up in the Candidates table below, role-responsive, plus a small search field there. Separately: show the fraud reason when reopening a rejected candidate from the Tracker drawer, with simpler UI. Noted for later (not built): per-role Excel export, recruiter chatbot.
 - **FunnelView:** extracted the stage-match predicate out of `lib/funnelview/data.ts` (server-only) into a new dependency-free `lib/funnelview/stageMatch.ts` so the client page can import the identical logic — guarantees the drill-down count can never drift from the funnel bar's own count. Clicking a row now filters the Candidates table to that stage (toggles off on second click) and scrolls to it; added a search-by-name field; both stay scoped to the selected role. Selection deliberately not reset on role switch — that's the "responsive to role" behavior.

@@ -361,6 +361,19 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
   // page itself — nothing here is shared across users, only the URL it
   // points to is.
   const [currentBatchId, setCurrentBatchId] = useState<string | undefined>(() => initialBatch?.batchId);
+  // "Link to this batch" also copies the URL to the clipboard, 2026-08-04
+  // (Vlad's ask) — same origin+path copy pattern already used for the
+  // per-candidate share link (handleCopyLink in this file's PipelineTab) and
+  // app/candidates/page.tsx. Does not prevent the normal navigation — the
+  // link still works as a link, this just also puts the URL on the
+  // clipboard so the recruiter can paste it somewhere (Slack, email) without
+  // a separate copy step.
+  const [batchLinkCopied, setBatchLinkCopied] = useState(false);
+  async function handleCopyBatchLink(batchId: string) {
+    await navigator.clipboard.writeText(`${window.location.origin}/projects/${project.id}/batches/${batchId}`);
+    setBatchLinkCopied(true);
+    setTimeout(() => setBatchLinkCopied(false), 1500);
+  }
   // Files that matched an existing screening in this project via the free
   // pre-check (app/api/screen-resumes/check-existing) — set aside before
   // ever reaching the scoring route, keyed by the original File so a
@@ -797,13 +810,25 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
             {currentBatchId && (
               <Link
                 href={`/projects/${project.id}/batches/${currentBatchId}`}
+                onClick={() => handleCopyBatchLink(currentBatchId)}
                 className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Link to this batch
+                {batchLinkCopied ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Link copied
+                  </>
+                ) : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Link to this batch
+                  </>
+                )}
               </Link>
             )}
             <button type="button" onClick={handleReset}

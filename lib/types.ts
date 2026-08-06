@@ -473,6 +473,20 @@ export interface ScreeningRecord {
    * /api/projects/[id]/archive-fits routes.
    */
   suggestedRoleFits?: string[];
+  /**
+   * Current/most-recent employer + title, added 2026-08-04 (Vlad's ask: a
+   * "Current Company" / "Current Title" column on the FunnelView Excel
+   * export). Extracted alongside careerTrajectory by lib/generateTrajectory.ts
+   * (same Claude call, no extra API cost) — populated going forward only via
+   * the "Regenerate trajectories" backfill (app/api/screenings/regenerate-
+   * trajectories/route.ts), not the main scoring flow. Deliberately NOT in
+   * the shared SCREENING_COLUMNS select — same deferred pattern as
+   * archiveReason above, see supabase-migration-current-role.sql. Only ever
+   * written via updateScreening() and read via FunnelView's own isolated
+   * query (lib/funnelview/data.ts).
+   */
+  currentCompany?: string;
+  currentTitle?: string;
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;
