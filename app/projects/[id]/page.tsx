@@ -2618,6 +2618,16 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
   // app/api/projects/[id]/archive-fits/check/route.ts.
   const [checkingArchive, setCheckingArchive] = useState(false);
   const [archiveCheckResult, setArchiveCheckResult] = useState<string | null>(null);
+  // Regenerate trajectories, 2026-08-04 (Vlad's ask, added then briefly
+  // removed then re-added same day) — backfills current company/title
+  // (+ the short totalExperienceSummary) for this project's already-screened
+  // candidates, so the FunnelView Excel export's new columns aren't blank.
+  // The route now ONLY processes candidates missing current_company/
+  // current_title (see app/api/screenings/regenerate-trajectories/route.ts),
+  // so it's safe/cheap to click again later as new candidates get screened —
+  // it won't re-run or re-charge for anyone already backfilled.
+  const [regeneratingTrajectories, setRegeneratingTrajectories] = useState(false);
+  const [regenerateResult, setRegenerateResult] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
   async function saveName() {
@@ -2678,6 +2688,34 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
       setArchiveCheckResult("Network error — please try again");
     } finally {
       setCheckingArchive(false);
+    }
+  }
+
+  async function regenerateTrajectories() {
+    setRegeneratingTrajectories(true);
+    setRegenerateResult(null);
+    try {
+      const res = await fetch("/api/screenings/regenerate-trajectories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 403) {
+        setRegenerateResult("Admin only — ask an admin to run this.");
+        return;
+      }
+      if (!res.ok) {
+        setRegenerateResult(data.error ?? "Regeneration failed");
+        return;
+      }
+      const errorNote = data.errors?.length > 0 ? ` (${data.errors.length} failed)` : "";
+      const skippedNote = data.skipped > 0 ? `, skipped ${data.skipped} (already had it)` : "";
+      setRegenerateResult(`Updated ${data.updated ?? 0} candidate${data.updated === 1 ? "" : "s"}${skippedNote}${errorNote}.`);
+    } catch {
+      setRegenerateResult("Network error — please try again");
+    } finally {
+      setRegeneratingTrajectories(false);
     }
   }
 
@@ -2795,6 +2833,24 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
         <button type="button" onClick={checkArchiveFits} disabled={checkingArchive}
           className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
           {checkingArchive ? "Checking..." : "Check now"}
+        </button>
+      </div>
+
+      {/* Regenerate trajectories — Vlad's ask, 2026-08-04: backfills current
+          company/title + a short total-experience summary for candidates in
+          this role that don't have them yet, so the FunnelView Excel
+          export's columns aren't blank. Only processes candidates missing
+          current_company/current_title — safe to click again later. */}
+      <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div>
+          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Regenerate trajectories</p>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            {regenerateResult ?? "Backfill Current Company/Title for candidates in this role who don't have them yet."}
+          </p>
+        </div>
+        <button type="button" onClick={regenerateTrajectories} disabled={regeneratingTrajectories}
+          className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+          {regeneratingTrajectories ? "Regenerating..." : "Regenerate now"}
         </button>
       </div>
 

@@ -24,8 +24,23 @@ const TRAJECTORY_TOOL = {
         type: "string",
         description: `The candidate's most recent (or current) job title at currentCompany, as written on the resume. If the resume genuinely doesn't name a title, use "Not specified".`,
       },
+      // Added 2026-08-04 (Vlad's follow-up ask: the export's "Total
+      // experience" column was too long — "just literally main points of
+      // the trajectory... just enough information to trust it", then
+      // tightened further same day to "2 sentences max, 1 preferred").
+      // Deliberately a SEPARATE field from careerTrajectory rather than a
+      // truncated/extracted version of it — careerTrajectory's own format
+      // (2-3 sentences per role + a closing recommendation paragraph) is an
+      // established, deliberately-tuned design used on-screen elsewhere
+      // (ResultCard, Interview view) and stays untouched here. This field is
+      // facts only, no opinion/recommendation, short enough to scan in one
+      // Excel cell.
+      totalExperienceSummary: {
+        type: "string",
+        description: `1 sentence preferred, 2 sentences ABSOLUTE MAX (never more): total years of relevant experience, primary domain/industry, and current seniority level. Facts only — no opinion, no recommendation. Example (1 sentence, preferred): "8 years in backend engineering, mostly fintech, currently a Staff Engineer." Only use a second sentence if one genuinely can't cover it — never a third.`,
+      },
     },
-    required: ["careerTrajectory", "currentCompany", "currentTitle"],
+    required: ["careerTrajectory", "currentCompany", "currentTitle", "totalExperienceSummary"],
   },
 };
 
@@ -33,6 +48,7 @@ export interface TrajectoryResult {
   careerTrajectory: string;
   currentCompany: string;
   currentTitle: string;
+  totalExperienceSummary: string;
 }
 
 export async function generateTrajectory(
@@ -58,7 +74,7 @@ Analyse this candidate's career trajectory against the job description below.
 
 List roles in reverse chronological order — most recent first, oldest last. For each role: one short sentence (company, what they do, full-time or contract), then 2–3 bullet points (domain alignment, key signal, transition logic — one line each). End with a short paragraph (3–4 sentences): clear recommendation on whether this candidate is worth a conversation and why.
 
-Also separately report the candidate's current (most recent) employer and job title as clean, standalone values.
+Also separately report the candidate's current (most recent) employer and job title as clean, standalone values, plus a total-experience summary (years, domain, seniority) — 1 sentence preferred, 2 sentences absolute max, facts only, no opinion.
 
 JOB DESCRIPTION:
 ${jobDescription}
@@ -81,5 +97,6 @@ ${resumeText}`,
     careerTrajectory: input.careerTrajectory,
     currentCompany: input.currentCompany,
     currentTitle: input.currentTitle,
+    totalExperienceSummary: input.totalExperienceSummary,
   };
 }

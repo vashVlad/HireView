@@ -374,7 +374,7 @@ export default function FunnelViewPage() {
       { wch: 24 },
       ...(activeProject ? [] : [{ wch: 22 }]),
       { wch: 22 }, { wch: 22 }, { wch: 8 }, { wch: 16 }, { wch: 16 },
-      { wch: 14 }, { wch: 50 }, { wch: 28 },
+      { wch: 14 }, { wch: 32 }, { wch: 28 },
     ];
 
     const wb = XLSX.utils.book_new();

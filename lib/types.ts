@@ -487,6 +487,14 @@ export interface ScreeningRecord {
    */
   currentCompany?: string;
   currentTitle?: string;
+  /**
+   * Short, facts-only summary — total years, domain, seniority — 1 sentence
+   * preferred, 2 sentences absolute max. Added 2026-08-04 for the FunnelView
+   * export's "Total experience" column after Vlad asked for it to be much
+   * shorter than careerTrajectory's own closing paragraph, then tightened
+   * further same day. Same deferred-column pattern as currentCompany above.
+   */
+  totalExperienceSummary?: string;
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;
