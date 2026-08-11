@@ -8,7 +8,20 @@ const TRAJECTORY_TOOL = {
     properties: {
       careerTrajectory: {
         type: "string",
-        description: `Career arc narrative covering every role. ALWAYS list roles in reverse chronological order — most recent role first, oldest last. For each role, write one short opening sentence (company name, what they do — use training knowledge; if unknown say "company not found" and infer from title/description — and employment type: full-time or contract, inferred from tenure length, title signals like "Consultant"/"Contract"/"via [staffing agency]", or consecutive short stints at different companies). Follow that sentence with 2–3 tight bullet points covering: domain alignment with the role being hired for, the key signal this role adds to the candidate's story, and whether the transition into or out of this role makes sense. Keep bullets short — one line each. After all roles, add a final short paragraph (3–4 sentences max) with a clear recommendation: is this candidate worth a conversation, and why or why not.`,
+        // Kept in sync with lib/scoreCandidate.ts's own careerTrajectory
+        // description (do-not-touch exception, 2026-08-06/2026-08-07) — both
+        // paths should produce the same structure. Restructured 2026-08-07
+        // (Vlad's ask): "career summary" moved to the TOP (before the role
+        // breakdown) and reworded to plain progression, not a verdict — the
+        // recommendation/verdict now lives ONLY in the closing paragraph.
+        // Also standardized the per-role header to the bold
+        // "**Company — Title, type, dates**" format scoreCandidate.ts
+        // already used, which this file had drifted from. Tightened again
+        // same day: the opening paragraph must name concrete progression
+        // signals (promotions, seniority jumps, regressions) instead of
+        // generic "moved through roles" language, at the same brevity as
+        // the closing paragraph.
+        description: `Career arc narrative covering every role. Start with a short opening paragraph (3–4 sentences, same brevity as the closing paragraph) summarizing the shape of the candidate's career: call out concrete progression signals — promotions, seniority/title jumps, expanding scope or ownership — or regressions — steps down in level, lateral moves, gaps — and where they've landed now. Specific and factual (e.g. "promoted from Associate to Senior Engineer within 18 months" beats "grew in responsibility"), no verdict or recommendation language — save that for the end. Then list roles in reverse chronological order — most recent role first, oldest last. For each role, write a bold header line in this exact format: **[Company Name] — [Title], [full-time or contract], [date range]**. Employment type is inferred from tenure length, title signals like "Consultant"/"Contract"/"via [staffing agency]", or consecutive short stints at different companies. Do not add a sentence after the header — go straight to 3 tight bullet points: (1) what the company does and whether its domain aligns with the role being hired for (use training knowledge; if unknown say "company not found" and infer from title/description), (2) the key signal this role adds to the candidate's story, (3) whether the transition into or out of this role makes sense. Keep bullets to one line each. After all roles, add a final short paragraph (3–4 sentences max): the clear recommendation on whether this candidate is worth a conversation and why — this is the only place the verdict belongs, not the opening paragraph.`,
       },
       // Added 2026-08-04 (Vlad's ask: FunnelView Excel export needs a
       // "Current Company" / "Current Title" column). Extracted here rather
@@ -82,7 +95,7 @@ export async function generateTrajectory(
 
 Analyse this candidate's career trajectory against the job description below.
 
-List roles in reverse chronological order — most recent first, oldest last. For each role: one short sentence (company, what they do, full-time or contract), then 2–3 bullet points (domain alignment, key signal, transition logic — one line each). End with a short paragraph (3–4 sentences): clear recommendation on whether this candidate is worth a conversation and why.
+Open with 3-4 sentences (same brevity as the closing paragraph) naming concrete progression signals — promotions, title/seniority jumps, expanding scope — or regressions — step down, lateral move, gap — and where they've landed now. Specific over vague. No verdict here. Then list roles in reverse chronological order — most recent first, oldest last. For each role: a bold header **Company — Title, full-time or contract, dates**, no sentence after it, then 3 tight bullet points (domain alignment, key signal, transition logic — one line each). End with a short paragraph (3–4 sentences): the clear recommendation on whether this candidate is worth a conversation and why — the only place the verdict belongs.
 
 Also separately report the candidate's current (most recent) employer and job title as clean, standalone values, plus a total-experience summary (years, domain, seniority) — 1 sentence preferred, 2 sentences absolute max, facts only, no opinion. Also report their LinkedIn profile URL if the resume lists one, exactly as written — empty string if it doesn't.
 

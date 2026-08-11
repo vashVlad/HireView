@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FilterConfig } from "@/lib/types";
 
 function CopyButton({ value }: { value: string }) {
@@ -57,7 +57,36 @@ function FilterBlock({ label, hint, children, copyValue }: {
   );
 }
 
-export function FilterSetView({ config }: { config: FilterConfig }) {
+// Editable boolean-string field, 2026-08-07 (Vlad's ask: "Make those
+// LinkedIn boolean search fields editable" — Keywords and Job Titles, the
+// two copy-paste boolean strings). Local state so typing feels instant (no
+// per-keystroke save); commits via onSave on blur, only when the value
+// actually changed. Re-syncs from `value` whenever it changes externally
+// (switching the wide/narrow mode toggle in FiltersTab swaps to a
+// different FilterConfig entirely, or a re-analyze/save from elsewhere
+// updates it) — a plain useState initializer alone would go stale in
+// either case since this component doesn't remount on those changes.
+function EditableBooleanField({ value, onSave }: { value: string; onSave: (next: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+
+  return (
+    <textarea
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={() => { if (text !== value) onSave(text); }}
+      rows={3}
+      className="w-full overflow-x-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs leading-relaxed text-zinc-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+    />
+  );
+}
+
+export function FilterSetView({ config, editable, onFieldChange }: {
+  config: FilterConfig;
+  /** Vlad's ask, 2026-08-07 — lets Keywords/Job Titles be edited in place instead of only regenerated via a full Re-analyze. Defaults to the original read-only behavior so no other caller is affected. */
+  editable?: boolean;
+  onFieldChange?: (field: "jobTitlesBoolean" | "keywords", value: string) => void;
+}) {
   const workTypeDisplay = config.workplaceType.join(", ") || "—";
   const industriesDisplay = config.industries.join(", ") || "—";
 
@@ -66,9 +95,13 @@ export function FilterSetView({ config }: { config: FilterConfig }) {
       {/* Keywords */}
       <div className="py-4 first:pt-0">
         <FilterBlock label="Keywords" copyValue={config.keywords}>
-          <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs leading-relaxed text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-            {config.keywords}
-          </pre>
+          {editable && onFieldChange ? (
+            <EditableBooleanField value={config.keywords} onSave={(next) => onFieldChange("keywords", next)} />
+          ) : (
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs leading-relaxed text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+              {config.keywords}
+            </pre>
+          )}
         </FilterBlock>
       </div>
 
@@ -79,9 +112,13 @@ export function FilterSetView({ config }: { config: FilterConfig }) {
           hint={config.jobTitleToggle}
           copyValue={config.jobTitlesBoolean}
         >
-          <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs leading-relaxed text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-            {config.jobTitlesBoolean}
-          </pre>
+          {editable && onFieldChange ? (
+            <EditableBooleanField value={config.jobTitlesBoolean} onSave={(next) => onFieldChange("jobTitlesBoolean", next)} />
+          ) : (
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs leading-relaxed text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+              {config.jobTitlesBoolean}
+            </pre>
+          )}
         </FilterBlock>
       </div>
 

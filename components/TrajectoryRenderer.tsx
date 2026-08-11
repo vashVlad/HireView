@@ -6,12 +6,26 @@
  *   - item          → bullet list item
  *   blank line      → paragraph / list break
  *
+ * Expected structure, 2026-08-07 (Vlad's ask — see lib/scoreCandidate.ts's
+ * careerTrajectory field comment): an OPENING paragraph (plain career-
+ * progression summary, no verdict) before the first role header, then the
+ * role-by-role breakdown, then a CLOSING paragraph (the actual
+ * recommendation/verdict). buildRenderOrder() below already handles this
+ * shape without any change — any paragraph block before the first header is
+ * kept as a "preamble" and rendered first in its original position; the
+ * LAST paragraph block (after at least one role) is still detected as the
+ * trailing summary and gets the softer/bordered treatment. A trajectory
+ * with no opening paragraph (older data, generated before this change)
+ * still renders correctly — preamble is simply empty.
+ *
  * Visual hierarchy:
+ *   opening para — plain paragraph style, same as any other body text
  *   role header  — strong, zinc-900/100, top divider between roles
  *   bullets      — subordinate, zinc-500/400
- *   summary para — softer, xs, top divider
+ *   closing para — softer, xs, top divider (the recommendation/verdict)
  *
- * Display order: newest role first (resume order / Claude output order).
+ * Display order: opening paragraph, then newest role first (resume order /
+ * Claude output order), then the closing paragraph.
  *
  * Keyword highlights:
  *   must-have  → amber background
