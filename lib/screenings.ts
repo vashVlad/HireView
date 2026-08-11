@@ -18,6 +18,7 @@ import { getProject } from "./projects";
 import { getPrimaryTeamId } from "./teams";
 import { getAuthUser } from "./auth";
 import { getRecruiterEmailMap } from "./recruiters";
+import { computeTargetCompanyBoost } from "./targetCompanyBoost";
 import { detectLinkedIn } from "./assessCredibility";
 import type {
   BlacklistEntry, CandidateResult, CandidateStatus, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
@@ -837,8 +838,19 @@ export async function saveScreening(params: {
    * getProject()/getPrimaryTeamId() lookup below, same as before).
    */
   teamId?: number | null;
+  /**
+   * Project's configured "score boost companies" — reuses JDAnalysis.wide/
+   * narrow.targetCompanies (JD Analyzer, edited via the project's Filters
+   * tab), combined+deduped by the caller (see lib/targetCompanyBoost.ts's
+   * combineTargetCompanies). Optional — omit for callers with no project
+   * context, same as scoreThreshold. Passed through by
+   * app/api/screen-resumes/route.ts (do-not-touch exception, 2026-08-07,
+   * Vlad's explicit sign-off) off the SAME project fetch already used for
+   * linkedInContext/scoreThreshold/teamId — zero extra DB round trips.
+   */
+  targetCompanies?: string[];
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies } = params;
   const supabase = getSupabaseClient();
 
   // Real bug found 2026-07-20 (Vlad: "FunnelView didn't save the recruiter
@@ -930,6 +942,25 @@ export async function saveScreening(params: {
     console.error("resume_content_hash computation failed (screening still saved):", err);
   }
 
+  // Target-company score boost, 2026-08-07 (Vlad's ask: "add companies in
+  // there that would increase the score if it matches with the candidate's
+  // resume"). Deterministic, code-computed — see lib/targetCompanyBoost.ts's
+  // own header for why this isn't baked into scoreCandidate.ts's prompt.
+  // Applied BEFORE initialStatus is computed below, so a match can actually
+  // help a borderline candidate clear the project's score threshold — that's
+  // the point of the feature, not an incidental side effect. Mutates
+  // result.score/result.targetCompanyMatches in place, same pattern as every
+  // other result.* mutation in this function (strengths/concerns above,
+  // status/archiveReason below) — reaches both do-not-touch callers'
+  // immediate API response for free.
+  if (targetCompanies && targetCompanies.length > 0 && resumeText) {
+    const boost = computeTargetCompanyBoost(resumeText, targetCompanies);
+    if (boost.matched) {
+      result.score = Math.min(100, result.score + boost.bonus);
+    }
+    result.targetCompanyMatches = boost.matchedCompanies;
+  }
+
   const resumePath = `${randomUUID()}/${sanitizeStorageFileName(result.fileName)}`;
   const upload = await supabase.storage
     .from(RESUME_BUCKET)
@@ -1014,6 +1045,11 @@ export async function saveScreening(params: {
       currentTitle: result.currentTitle,
       totalExperienceSummary: result.totalExperienceSummary,
       linkedinUrl: result.linkedinUrl,
+      // Folded into this same best-effort call rather than a second one —
+      // same deferred-migration reasoning (supabase-migration-target-
+      // company-boost.sql), only set when the boost was actually evaluated
+      // above (undefined = no target companies configured, skip entirely).
+      ...(result.targetCompanyMatches !== undefined ? { targetCompanyMatches: result.targetCompanyMatches } : {}),
     });
   } catch {
     /* pre-migration or other non-fatal failure — the screening itself already saved above */
@@ -1592,6 +1628,8 @@ export async function updateScreening(
     totalExperienceSummary?: string;
     /** Same deferred-column pattern as currentCompany above — see lib/types.ts's ScreeningRecord.linkedinUrl. Added 2026-08-06. */
     linkedinUrl?: string;
+    /** Same deferred-column pattern as currentCompany above — see lib/types.ts's ScreeningRecord.targetCompanyMatches. Added 2026-08-07. */
+    targetCompanyMatches?: string[];
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1611,6 +1649,7 @@ export async function updateScreening(
   if (fields.currentTitle !== undefined) update.current_title = fields.currentTitle;
   if (fields.totalExperienceSummary !== undefined) update.total_experience_summary = fields.totalExperienceSummary;
   if (fields.linkedinUrl !== undefined) update.linkedin_url = fields.linkedinUrl;
+  if (fields.targetCompanyMatches !== undefined) update.target_company_matches = fields.targetCompanyMatches;
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   // cross_ref_is_linkedin requires supabase-migration-cross-ref-doc-type.sql

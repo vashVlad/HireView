@@ -27,6 +27,7 @@ import type {
 import type { ScreeningAction } from "@/lib/screeningActions";
 import type { CrossProjectMatch } from "@/lib/screenings";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
+import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
@@ -101,6 +102,76 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
   const [reanalyzeError, setReanalyzeError] = useState<string | null>(null);
   const jdFileRef = useRef<HTMLInputElement>(null);
 
+  // Score boost companies, 2026-08-07 (Vlad's ask) — see the card's own
+  // comment below for the full "why" and how this relates to the LinkedIn
+  // filter view's targetCompanies.
+  const [companyInput, setCompanyInput] = useState("");
+  const [savingCompanies, setSavingCompanies] = useState(false);
+  const [companiesError, setCompaniesError] = useState<string | null>(null);
+  const boostCompanies = combineTargetCompanies(analysis.wide.targetCompanies, analysis.narrow.targetCompanies);
+
+  async function saveBoostCompanies(newList: string[]) {
+    setSavingCompanies(true);
+    setCompaniesError(null);
+    try {
+      const newAnalysis: JDAnalysis = {
+        ...analysis,
+        wide: { ...analysis.wide, targetCompanies: newList },
+        narrow: { ...analysis.narrow, targetCompanies: newList },
+      };
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jdAnalysis: newAnalysis }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      onAnalysisUpdated(newAnalysis, jobDescription);
+    } catch {
+      setCompaniesError("Couldn't save — try again.");
+    } finally {
+      setSavingCompanies(false);
+    }
+  }
+
+  // Editable Keywords/Job Titles boolean fields, 2026-08-07 (Vlad's ask) —
+  // saves into whichever mode (wide/narrow) is currently selected via the
+  // toggle above, since that's the exact FilterConfig FilterSetView is
+  // rendering. Same PATCH-full-jdAnalysis pattern as saveBoostCompanies.
+  const [filterFieldError, setFilterFieldError] = useState<string | null>(null);
+  async function saveFilterField(field: "jobTitlesBoolean" | "keywords", value: string) {
+    setFilterFieldError(null);
+    try {
+      const newAnalysis: JDAnalysis = {
+        ...analysis,
+        [mode]: { ...analysis[mode], [field]: value },
+      };
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jdAnalysis: newAnalysis }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      onAnalysisUpdated(newAnalysis, jobDescription);
+    } catch {
+      setFilterFieldError("Couldn't save — try again.");
+    }
+  }
+
+  function handleAddCompany() {
+    const trimmed = companyInput.trim();
+    if (!trimmed) return;
+    if (boostCompanies.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      setCompanyInput("");
+      return;
+    }
+    setCompanyInput("");
+    saveBoostCompanies([...boostCompanies, trimmed]);
+  }
+
+  function handleRemoveCompany(company: string) {
+    saveBoostCompanies(boostCompanies.filter((c) => c.toLowerCase() !== company.toLowerCase()));
+  }
+
   async function handleReanalyze() {
     if (!jdFile && !jdText.trim()) return;
     setReanalyzeError(null);
@@ -172,7 +243,8 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
                 ))}
               </div>
 
-              <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} />
+              <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} editable onFieldChange={saveFilterField} />
+              {filterFieldError && <p className="text-xs text-rose-500">{filterFieldError}</p>}
 
               <div className="grid grid-cols-2 gap-4 border-t border-zinc-100 pt-5 dark:border-zinc-800">
                 <div className="flex flex-col gap-2">
@@ -246,6 +318,59 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Score boost companies, 2026-08-07 (Vlad's ask): "add companies in
+          there that would increase the score if it matches with the
+          candidate's resume." Reuses analysis.wide/narrow.targetCompanies
+          (same underlying JD Analyzer data, per Vlad's explicit choice) but
+          deliberately its OWN card, separate from the LinkedIn Recruiter
+          filters above — that view was already trimmed down to 5 filters
+          (Vlad's earlier ask, see memory/jd_filter_output_feedback.md) and
+          never showed target companies at all; this isn't un-decluttering
+          that view, it's a new purpose for otherwise-unused data. Editing
+          here writes the SAME list into both wide and narrow so the two
+          stay in sync — see lib/targetCompanyBoost.ts's combineTargetCompanies
+          for why the score-boost check still unions both (pre-existing
+          projects may have them differ until edited here). +5 to the score
+          for new screenings only — see lib/screenings.ts's saveScreening(). */}
+      <div className="rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex flex-col gap-1">
+          <span className="font-semibold text-zinc-900 dark:text-zinc-50">Score boost companies</span>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            New candidates whose resume mentions any of these get +5 added to their score. Doesn't affect already-screened candidates.
+          </p>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {boostCompanies.length === 0 && (
+            <span className="text-sm text-zinc-400 dark:text-zinc-500">No companies added yet.</span>
+          )}
+          {boostCompanies.map((c) => (
+            <span key={c} className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-300">
+              {c}
+              <button type="button" onClick={() => handleRemoveCompany(c)} disabled={savingCompanies}
+                className="text-emerald-500 hover:text-rose-500 disabled:opacity-50" aria-label={`Remove ${c}`}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="text"
+            value={companyInput}
+            onChange={(e) => setCompanyInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCompany(); } }}
+            placeholder="Add a company…"
+            disabled={savingCompanies}
+            className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          />
+          <button type="button" onClick={handleAddCompany} disabled={savingCompanies || !companyInput.trim()}
+            className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            Add
+          </button>
+        </div>
+        {companiesError && <p className="mt-2 text-xs text-rose-500">{companiesError}</p>}
       </div>
     </div>
   );

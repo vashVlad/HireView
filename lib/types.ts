@@ -244,6 +244,18 @@ export interface CandidateResult {
   currentTitle?: string;
   totalExperienceSummary?: string;
   linkedinUrl?: string;
+  /**
+   * Target-company score boost, 2026-08-07 (Vlad's ask: "add companies in
+   * there that would increase the score if it matches with the candidate's
+   * resume"). Set by saveScreening() (lib/screenings.ts) — a deterministic,
+   * code-computed match (lib/targetCompanyBoost.ts), NOT part of
+   * scoreCandidate.ts's own judgment, so it's auditable independent of the
+   * model. Present here (not just ScreeningRecord) for the same reason
+   * archiveReason is — the post-screening ResultCard predates a real
+   * ScreeningRecord read-back. Empty array = checked, no match. Undefined =
+   * no target companies configured for this project, boost not evaluated.
+   */
+  targetCompanyMatches?: string[];
   recommendation: Recommendation;
   status?: CandidateStatus;
   credibility?: CredibilityAssessment;
@@ -520,6 +532,17 @@ export interface ScreeningRecord {
    * currentCompany above.
    */
   linkedinUrl?: string;
+  /**
+   * Target-company score boost, 2026-08-07 (Vlad's ask). Which of the
+   * project's configured "score boost companies" (JD Analyzer, reuses
+   * JDAnalysis.wide/narrow.targetCompanies) matched this candidate's resume
+   * text — see lib/targetCompanyBoost.ts. Same deferred-column pattern as
+   * currentCompany above (supabase-migration-target-company-boost.sql).
+   * Written via saveScreening()'s existing best-effort secondary update,
+   * never the main insert, so a screening can never fail just because this
+   * migration hasn't run.
+   */
+  targetCompanyMatches?: string[];
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;

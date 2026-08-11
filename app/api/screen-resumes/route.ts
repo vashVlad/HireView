@@ -5,6 +5,7 @@ import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening } from "@/lib/screenings";
+import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import { getProject } from "@/lib/projects";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
@@ -142,11 +143,21 @@ export async function POST(request: NextRequest) {
   // re-fetching this same project row itself (see lib/screenings.ts's
   // params.teamId comment). Purely additive, no existing field changed.
   let teamId: number | null = null;
+  // DO-NOT-TOUCH EXCEPTION (2026-08-07, Vlad's explicit ask — see
+  // decisions-log.md): "score boost companies" (JD Analyzer, reuses
+  // jdAnalysis.wide/narrow.targetCompanies) read off this SAME already-
+  // fetched project object — zero extra DB round trips, same shape as
+  // teamId just above. Passed straight through to saveScreening(), which
+  // does the actual (deterministic, code-computed) score adjustment — see
+  // lib/targetCompanyBoost.ts. Does not touch the scoreCandidate() call or
+  // any of its inputs.
+  let targetCompanies: string[] = [];
   if (projectId) {
     const project = await getProject(projectId).catch(() => null);
     linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
     scoreThreshold = project?.scoreThreshold ?? 45;
     teamId = project?.teamId ?? null;
+    targetCompanies = combineTargetCompanies(project?.jdAnalysis?.wide?.targetCompanies, project?.jdAnalysis?.narrow?.targetCompanies);
   }
 
   if (files.length === 0) {
@@ -270,6 +281,9 @@ export async function POST(request: NextRequest) {
           // lib/screenings.ts's params.actingUserId/params.teamId comments.
           actingUserId,
           teamId,
+          // DO-NOT-TOUCH EXCEPTION (2026-08-07 — see decisions-log.md and
+          // the comment where targetCompanies is resolved above).
+          targetCompanies,
         });
         result.id = id;
       } catch (err) {

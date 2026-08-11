@@ -384,6 +384,21 @@ export function ResultCard({
                 {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
+            {/* Target company score boost, 2026-08-07 (Vlad's ask) — only
+                shown when a match was actually found (see
+                lib/targetCompanyBoost.ts); an empty array (checked, no
+                match) or undefined (no target companies configured) both
+                render nothing, matching this row's "only surface a signal,
+                not a reassurance" convention (same as the duplicate/history
+                badges above). */}
+            {result.targetCompanyMatches && result.targetCompanyMatches.length > 0 && (
+              <span
+                title={`Score boosted +5 for matching: ${result.targetCompanyMatches.join(", ")}`}
+                className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+              >
+                Target company match
+              </span>
+            )}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} contentIsLinkedIn={result.resumeIsLinkedIn} />
             {/* Visible agency name, added 2026-07-27 (Vlad's ask: "also show
                 agency name when it's given") — previously only surfaced as a
