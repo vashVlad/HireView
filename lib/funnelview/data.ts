@@ -186,7 +186,7 @@ function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { 
 /**
  * Admin-only, org-wide funnel — deliberately not team-scoped (matches the existing
  * /analytics precedent: admin sees everything regardless of team, no new role).
- * See memory/HireView_Enterprise_Plan.md, FUNNELVIEW section.
+ * See memory/Cirot_Enterprise_Plan.md, FUNNELVIEW section.
  */
 export async function getFunnelData(): Promise<FunnelData> {
   const supabase = getSupabaseClient();

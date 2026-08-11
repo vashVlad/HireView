@@ -13,7 +13,7 @@ import { toCandidateResult } from "@/lib/toCandidateResult";
  * attempt at this used sessionStorage to restore the Screen tab's in-memory
  * results view; Vlad correctly flagged that as a dead end for a recruiter
  * who explicitly works across two machines (sessionStorage is one-browser-
- * tab-local, see CLAUDE.md's "why HireView is web-hosted, not local"). This
+ * tab-local, see CLAUDE.md's "why Cirot is web-hosted, not local"). This
  * page is the real fix: every screening saved in one screening run carries
  * the same batchId (see supabase-migration-batch-id.sql and
  * app/api/screen-resumes/route.ts's do-not-touch exception), so this is a

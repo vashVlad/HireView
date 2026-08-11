@@ -44,7 +44,7 @@ export default function SetPasswordPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo size={44} rounded="rounded-2xl" className="mb-3" />
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">HireView</h1>
+          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Cirot</h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Set your password to continue</p>
         </div>
 

@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Feature 2.1 — Cross-Project Fit Suggestion (HireView_Enterprise_Plan.md).
+ * Feature 2.1 — Cross-Project Fit Suggestion (Cirot_Enterprise_Plan.md).
  * A candidate who scored below threshold on the active role gets re-scored
  * against every other active project in the same team, surfacing the best
  * match if one clears that project's own bar. Deliberately stateless — no

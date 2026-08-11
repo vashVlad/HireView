@@ -14,14 +14,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "HireView",
+  title: "Cirot",
   description: "AI-powered JD analysis and resume screening for recruiters.",
 };
 
 const THEME_INIT_SCRIPT = `
 (function () {
   try {
-    var stored = localStorage.getItem("hireview-theme");
+    var stored = localStorage.getItem("cirot-theme");
     var isDark = stored === "dark" || (stored !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
     document.documentElement.classList.toggle("dark", isDark);
   } catch (e) {}

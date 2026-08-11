@@ -110,7 +110,7 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"recruiter" | "admin">("recruiter");
-  const [inviteTempPassword, setInviteTempPassword] = useState("HireView2026!");
+  const [inviteTempPassword, setInviteTempPassword] = useState("Cirot2026!");
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
@@ -385,7 +385,7 @@ export default function UsersPage() {
     } else {
       setInviteSuccess(`Account created for ${inviteEmail} — they can sign in with the temporary password right away.`);
       setInviteEmail("");
-      setInviteTempPassword("HireView2026!");
+      setInviteTempPassword("Cirot2026!");
       fetchUsers();
     }
     setInviting(false);
@@ -398,7 +398,7 @@ export default function UsersPage() {
     const userRes = await fetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: req.email, role: "recruiter", tempPassword: "HireView2026!" }),
+      body: JSON.stringify({ email: req.email, role: "recruiter", tempPassword: "Cirot2026!" }),
     });
 
     if (!userRes.ok) {
@@ -417,7 +417,7 @@ export default function UsersPage() {
 
     setApproveResult((prev) => ({
       ...prev,
-      [req.id]: `Approved — account created with password HireView2026!`,
+      [req.id]: `Approved — account created with password Cirot2026!`,
     }));
     setApprovingId(null);
     fetchRequests();

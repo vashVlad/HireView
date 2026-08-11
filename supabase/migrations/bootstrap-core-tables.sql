@@ -4,7 +4,7 @@
 --
 -- Written 2026-07-23 as part of the Brillio enterprise-pilot database
 -- migration readiness pass (see memory/decisions-log.md and
--- docs/HireView-Database-Migration-Runbook.md).
+-- docs/Cirot-Database-Migration-Runbook.md).
 --
 -- WHY THIS FILE EXISTS: three tables — screenings, tracker, and
 -- calibration_examples — were created directly in the Supabase dashboard
@@ -147,7 +147,7 @@ CREATE INDEX IF NOT EXISTS calibration_examples_project_id_idx ON calibration_ex
 -- ── RLS reality check — read before assuming Postgres RLS is an access
 -- control boundary in this app ──────────────────────────────────────────────
 --
--- HireView's Next.js server ALWAYS talks to Supabase via the service-role
+-- Cirot's Next.js server ALWAYS talks to Supabase via the service-role
 -- key (lib/supabase.ts's getSupabaseClient(), explicitly documented there as
 -- bypassing RLS). Every access-control decision — which team's projects a
 -- recruiter can see, whether a candidate belongs to their team, admin vs.

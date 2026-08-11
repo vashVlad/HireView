@@ -1,4 +1,4 @@
-# HireView — Enterprise Product Plan
+# Cirot — Enterprise Product Plan
 **Owner:** Vladyslav Vashchuk
 **Last Updated:** July 8, 2026
 **Version:** 1.0
@@ -6,7 +6,7 @@
 ---
 
 ## Identity
-HireView is the verification and trust layer for AI recruiting.
+Cirot is the verification and trust layer for AI recruiting.
 Every feature must answer one question: **does this increase trust, reduce fraud, or improve recruiter decision quality?**
 If not — it doesn't ship.
 
@@ -61,7 +61,7 @@ Reuses: existing interview questions feature, existing credibility checker.
 
 Formerly logged as Phase 3.3 "Role-Based Analytics" under Phase 3 (post-demo), assumed to depend on Teams (1.3). That dependency is soft, not hard: v1 is admin-gated the same way Team/Statistics already are — no team-scoping needed yet, so no need to wait for Teams or "post-demo." Moved here since there's a live stakeholder need now and nothing else blocks it once 1.5 ships.
 
-**Scope:** Admin-only view inside HireView showing the full candidate funnel — Screened → Passed Threshold → Reached Out → TA → L1 → L2 → Offer → Archived — with conversion rate between each stage, inbound/outbound source split (via `linkedin_mode`), current + previous stage per candidate, recruiter attribution.
+**Scope:** Admin-only view inside Cirot showing the full candidate funnel — Screened → Passed Threshold → Reached Out → TA → L1 → L2 → Offer → Archived — with conversion rate between each stage, inbound/outbound source split (via `linkedin_mode`), current + previous stage per candidate, recruiter attribution.
 
 **Architecture:** Isolated module — `app/funnelview/` (UI) + `lib/funnelview/` (data access, maps `screenings`/`tracker` rows into one clean funnel-record shape). No entanglement with core scoring files. The mapping layer is a deliberate seam: if this is ever needed by other departments as a standalone product, that same shape becomes a CSV/API contract and the module extracts cleanly with minimal rework.
 
@@ -70,7 +70,7 @@ Formerly logged as Phase 3.3 "Role-Based Analytics" under Phase 3 (post-demo), a
 ---
 
 ## PHASE 2 — INTELLIGENCE LAYER (30 DAYS)
-*Make HireView smarter than any recruiter working alone.*
+*Make Cirot smarter than any recruiter working alone.*
 
 **2.1 Cross-Project Fit Suggestion** `HIGH`
 Score below threshold on active role → auto-score against all other active projects in same team → surface best match.
@@ -94,7 +94,7 @@ Reuses: existing Credibility Checker — extend with LinkedIn-specific prompting
 ---
 
 ## PHASE 3 — ENTERPRISE SCALE (POST-DEMO)
-*Make HireView impossible to replace.*
+*Make Cirot impossible to replace.*
 
 **3.1 Proxy Interview Detection** — identity verification across interview → onboarding gap. Long-term play.
 **3.2 ATS/Reval Integration** — accept candidate submissions from external tools, run through fraud layer.
@@ -143,7 +143,7 @@ Remaining Phase 3 features reuse Teams architecture (1.3) and Credibility Checke
 
 ## COMPETITIVE POSITION
 
-| | Reval ($8k/hire) | Hivemind | HireView |
+| | Reval ($8k/hire) | Hivemind | Cirot |
 |--|--|--|--|
 | Sourcing | ✓ | ✓ | ✗ (not our market) |
 | AI Screening | ✓ | ✓ | ✓ |
@@ -154,7 +154,7 @@ Remaining Phase 3 features reuse Teams architecture (1.3) and Credibility Checke
 | Recruiter Attribution | ✗ | partial | ✓ |
 | Human-in-loop Trust | ✗ | ✗ | ✓ |
 
-**HireView's moat:** Reval and Hivemind automate the top of funnel. HireView answers the question neither can: *can I actually trust this candidate?*
+**Cirot's moat:** Reval and Hivemind automate the top of funnel. Cirot answers the question neither can: *can I actually trust this candidate?*
 
 ---
 
@@ -170,7 +170,7 @@ Remaining Phase 3 features reuse Teams architecture (1.3) and Credibility Checke
 ---
 
 ## PRIOR ART PROTECTION
-- Calibration system: Novel Implementation A — documented in HireView_Prior_Art_Document.pdf
+- Calibration system: Novel Implementation A — documented in Cirot_Prior_Art_Document.pdf
 - Credibility checker: Novel Implementation B — documented
 - Duplicate fingerprinting system: **document as Novel Implementation C immediately after Phase 1.1 ships**
 - Rule: any novel implementation ships → prior art document updated same day

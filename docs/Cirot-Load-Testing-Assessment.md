@@ -1,6 +1,6 @@
-# HireView — Load Testing / Scale Assessment for the Brillio Pilot
+# Cirot — Load Testing / Scale Assessment for the Brillio Pilot
 
-*Written 2026-07-23. Assesses HireView's current architecture against 56 concurrent recruiters across 5 geographies, with current, sourced figures for Anthropic and Vercel limits rather than assumed ones (see Sources at the end).*
+*Written 2026-07-23. Assesses Cirot's current architecture against 56 concurrent recruiters across 5 geographies, with current, sourced figures for Anthropic and Vercel limits rather than assumed ones (see Sources at the end).*
 
 ## 1. Current concurrency limits (as built today)
 
@@ -45,7 +45,7 @@ Brillio's enterprise deployment will almost certainly run on a Pro or Enterprise
 
 ## 5. Supabase — no traditional connection-pooling risk
 
-HireView's server code never opens a raw Postgres connection — `lib/supabase.ts`'s `getSupabaseClient()` uses `@supabase/supabase-js`, which talks to Supabase over its REST API (PostgREST), not a persistent `pg` connection (confirmed: no `pg`/`postgres` driver dependency exists anywhere in `package.json`). Each Vercel serverless invocation makes stateless HTTPS calls; Supabase's own infrastructure handles connection pooling on its side. This means the classic serverless failure mode — exhausting a fixed Postgres connection pool under concurrent cold starts — **does not apply to this architecture as built.** The real Supabase-side scaling question is the project's own compute tier (database size/CPU/RAM on Supabase's side) handling 56 concurrent users' query volume, which is a Supabase plan/tier question for Brillio's infra team, not a code-architecture risk.
+Cirot's server code never opens a raw Postgres connection — `lib/supabase.ts`'s `getSupabaseClient()` uses `@supabase/supabase-js`, which talks to Supabase over its REST API (PostgREST), not a persistent `pg` connection (confirmed: no `pg`/`postgres` driver dependency exists anywhere in `package.json`). Each Vercel serverless invocation makes stateless HTTPS calls; Supabase's own infrastructure handles connection pooling on its side. This means the classic serverless failure mode — exhausting a fixed Postgres connection pool under concurrent cold starts — **does not apply to this architecture as built.** The real Supabase-side scaling question is the project's own compute tier (database size/CPU/RAM on Supabase's side) handling 56 concurrent users' query volume, which is a Supabase plan/tier question for Brillio's infra team, not a code-architecture risk.
 
 ## 6. Recommendation summary
 

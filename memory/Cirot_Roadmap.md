@@ -1,4 +1,4 @@
-# HireView — Product Roadmap
+# Cirot — Product Roadmap
 **Owner:** Vladyslav Vashchuk
 **Last Updated:** July 8, 2026
 **Strategic Position:** Trust & Verification Layer for AI Recruiting
@@ -6,7 +6,7 @@
 ---
 
 ## North Star
-HireView is not an ATS. It is the verification layer that makes any sourcing tool safe to use at scale. Every feature must answer: does this increase trust, reduce fraud, or improve recruiter decision quality?
+Cirot is not an ATS. It is the verification layer that makes any sourcing tool safe to use at scale. Every feature must answer: does this increase trust, reduce fraud, or improve recruiter decision quality?
 
 ---
 
@@ -30,9 +30,9 @@ HireView is not an ATS. It is the verification layer that makes any sourcing too
 ## FUNNELVIEW — MANAGER VISIBILITY (after Phase 1, before Phase 2)
 *Give the hiring manager the complete candidate funnel in real time, without recruiter mediation.*
 
-Isolated module inside HireView, not a separate project — `app/funnelview/` (routes/UI), `lib/funnelview/` (data layer, maps `screenings`/`tracker` into one clean funnel-record shape). Admin-only, same gate as Team/Statistics — no new role. Live HireView data, no CSV export/import, no external tool, no Lever/LinkedIn connection.
+Isolated module inside Cirot, not a separate project — `app/funnelview/` (routes/UI), `lib/funnelview/` (data layer, maps `screenings`/`tracker` into one clean funnel-record shape). Admin-only, same gate as Team/Statistics — no new role. Live Cirot data, no CSV export/import, no external tool, no Lever/LinkedIn connection.
 
-**Funnel:** Total Screened → Passed HireView Threshold → Reached Out (Active/Rejected) → TA → L1 → L2 → Offer → Archived/Rejected (with last stage reached). Split by source at every stage: Inbound (LinkedIn toggle OFF) vs Outbound (LinkedIn toggle ON). Per candidate: name, source, current stage, previous stage, recruiter who screened, conversion rate between stages.
+**Funnel:** Total Screened → Passed Cirot Threshold → Reached Out (Active/Rejected) → TA → L1 → L2 → Offer → Archived/Rejected (with last stage reached). Split by source at every stage: Inbound (LinkedIn toggle OFF) vs Outbound (LinkedIn toggle ON). Per candidate: name, source, current stage, previous stage, recruiter who screened, conversion rate between stages.
 
 **Reuses:** `screenings`/`tracker` tables, `previous_status`/`previous_stage` (Postgres trigger, already merged to main), existing `isAdmin` gate.
 
@@ -43,11 +43,11 @@ Isolated module inside HireView, not a separate project — `app/funnelview/` (r
 ---
 
 ## PHASE 2 — INTELLIGENCE LAYER (NEXT 30 DAYS)
-*Goal: Make HireView smarter than any recruiter working alone.*
+*Goal: Make Cirot smarter than any recruiter working alone.*
 
 | # | Feature | Problem Solved | Priority |
 |---|---------|---------------|----------|
-| 2.1 | Cross-Project Fit Suggestion | Resume scores 35 on FDE → HireView suggests AI Developer role where score is 73. Prevents good candidates lost to wrong role | HIGH |
+| 2.1 | Cross-Project Fit Suggestion | Resume scores 35 on FDE → Cirot suggests AI Developer role where score is 73. Prevents good candidates lost to wrong role | HIGH |
 | 2.2 | Contextual Search | "Incident response" understood as implying specific cybersecurity stack. Semantic synonyms, not keyword matching | HIGH |
 | 2.3 | Smart Unified Candidate View | Cross-project dashboard: all candidates, filterable by fraud flag, score, stage, recruiter, date. Director-level visibility | MEDIUM |
 | 2.4 | LinkedIn Comparison | Upload LinkedIn PDF alongside resume → surface mismatches in dates, titles, skills, network signals. Extends existing Credibility Checker | MEDIUM |
@@ -57,12 +57,12 @@ Isolated module inside HireView, not a separate project — `app/funnelview/` (r
 ---
 
 ## PHASE 3 — SCALE & DEFENSE (POST-SUCHIN DEMO)
-*Goal: Make HireView ready for enterprise use and impossible to replace.*
+*Goal: Make Cirot ready for enterprise use and impossible to replace.*
 
 | # | Feature | Problem Solved | Priority |
 |---|---------|---------------|----------|
 | 3.1 | Proxy Interview Detection | Compare interview performance profile against first-week work output signals. Long-term identity verification play | FUTURE |
-| 3.2 | Reval/ATS Integration | Accept candidate submissions from Reval or Lever → run through HireView fraud layer → return verified candidates | FUTURE |
+| 3.2 | Reval/ATS Integration | Accept candidate submissions from Reval or Lever → run through Cirot fraud layer → return verified candidates | FUTURE |
 | 3.3 | Role-Based Analytics | Director sees team-wide fraud signals, throughput, recruiter performance. Recruiter sees only their pipeline | FUTURE |
 | 3.4 | Candidate Social Graph | LinkedIn mutual connections, activity patterns, comment history as fraud signals | FUTURE |
 
@@ -89,7 +89,7 @@ Phase 1 features 1.1 → 1.2 → 1.3 → 1.4 in that order. 1.5 added after 1.4 
 6. Recruiter wants a single place to view all duplicate-flagged candidates together, not just per-candidate badges scattered across pipelines (Phase 2.3 — logged 2026-07-08, surfaced during Phase 1.1 use)
 
 ## Competitive Position
-| Competitor | Their Strength | Their Gap | HireView Advantage |
+| Competitor | Their Strength | Their Gap | Cirot Advantage |
 |-----------|---------------|-----------|-------------------|
 | Reval ($8k/hire) | Autonomous sourcing + AI screening | Zero fraud detection, scores fake resumes | Fraud fingerprinting, credibility verification, human-in-loop trust |
 | Hivemind | Full ATS workflow | No fraud layer, no verification | Fraud prevention, calibration learning, attribution |

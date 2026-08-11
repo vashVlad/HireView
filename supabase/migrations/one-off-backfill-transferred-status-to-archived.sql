@@ -1,5 +1,5 @@
 -- One-off data backfill — NOT part of the ordered supabase-migration-*.sql
--- sequence in docs/HireView-Database-Migration-Runbook.md (deliberately named
+-- sequence in docs/Cirot-Database-Migration-Runbook.md (deliberately named
 -- without that prefix so it's never mistaken for a schema migration a fresh
 -- DB setup needs to run). Written 2026-08-02 per Vlad's ask: "I don't want
 -- to show the transferred status of the candidate in the status dropdown

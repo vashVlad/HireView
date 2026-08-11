@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "HireView <onboarding@resend.dev>",
+          from: "Cirot <onboarding@resend.dev>",
           to: [process.env.NOTIFICATION_EMAIL ?? "vladvashchuk2005@gmail.com"],
           subject: `New feedback from ${user.email ?? "a recruiter"}`,
           html: `
