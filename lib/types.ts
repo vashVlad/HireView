@@ -162,6 +162,24 @@ export interface CredibilityRow {
   severity?: "material" | "minor";
 }
 
+/**
+ * Plain public GitHub profile facts for a username found in resume text.
+ * See lib/githubCorroboration.ts for extraction/fetch logic — kept here,
+ * not there, matching this file's own convention (LinkedInSignals right
+ * below is the same pattern: the shared type lives in types.ts, the file
+ * that produces it just imports the type back).
+ */
+export interface GithubCorroboration {
+  username: string;
+  profileUrl: string;
+  name: string | null;
+  company: string | null;
+  bio: string | null;
+  publicRepos: number;
+  followers: number;
+  accountCreatedYear: number | null;
+}
+
 export type CredibilitySignal = "clean" | "minor_concerns" | "significant_concerns";
 
 /**
@@ -219,6 +237,17 @@ export interface CredibilityAssessment {
   resolvedConcerns?: { concern: string; explanation: string }[];
   /** Populated only when the cross-reference document is a LinkedIn profile PDF. Phase 2.4. */
   linkedInSignals?: LinkedInSignals;
+  /**
+   * GitHub corroboration, 2026-08-17 (roadmap 2.5.3) — plain public-profile
+   * facts for a GitHub username found in the resume text, attached by the
+   * assess-credibility route AFTER assessCredibility() returns. Deliberately
+   * NOT part of CREDIBILITY_TOOL's schema and never model-generated — see
+   * lib/githubCorroboration.ts's header comment for why this stays a pure
+   * code-side passthrough for now. Undefined = no GitHub URL found in the
+   * resume, or the lookup failed/no such user; both render the same (no
+   * panel shown).
+   */
+  githubSignal?: GithubCorroboration;
 }
 
 export interface CandidateResult {

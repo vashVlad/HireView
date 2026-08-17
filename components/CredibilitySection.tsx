@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals } from "@/lib/types";
+import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals, GithubCorroboration } from "@/lib/types";
 
 const SIGNAL_CONFIG: Record<CredibilitySignal, { label: string; className: string }> = {
   clean: {
@@ -49,6 +49,36 @@ function LinkedInSignalsPanel({ signals }: { signals: LinkedInSignals }) {
       <span className="text-zinc-300 dark:text-zinc-600">·</span>
       <span className="text-xs text-zinc-500 dark:text-zinc-400">{chips.join(" · ")}</span>
     </div>
+  );
+}
+
+// GitHub corroboration panel, 2026-08-17 (roadmap 2.5.3) — plain public
+// facts, not an AI verdict (see lib/githubCorroboration.ts's header comment
+// and CredibilityAssessment.githubSignal). Deliberately styled as neutral
+// info, not a pass/fail signal like the LinkedIn activity panel above —
+// this hasn't been reasoned about by anything, it's just what the profile
+// says, so the recruiter reads and judges it themselves.
+function GithubSignalPanel({ signal }: { signal: GithubCorroboration }) {
+  const chips: string[] = [];
+  chips.push(`${signal.publicRepos} public repo${signal.publicRepos !== 1 ? "s" : ""}`);
+  chips.push(`${signal.followers} follower${signal.followers !== 1 ? "s" : ""}`);
+  if (signal.accountCreatedYear) chips.push(`joined ${signal.accountCreatedYear}`);
+  if (signal.company) chips.push(signal.company);
+
+  return (
+    <a
+      href={signal.profileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 transition-colors hover:border-zinc-200 dark:border-zinc-800 dark:bg-zinc-800/30 dark:hover:border-zinc-700"
+    >
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+        GitHub
+      </span>
+      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">@{signal.username}</span>
+      <span className="text-zinc-300 dark:text-zinc-600">·</span>
+      <span className="text-xs text-zinc-500 dark:text-zinc-400">{chips.join(" · ")}</span>
+    </a>
   );
 }
 
@@ -296,6 +326,9 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
           {isLinkedIn && assessment.linkedInSignals && (
             <LinkedInSignalsPanel signals={assessment.linkedInSignals} />
           )}
+
+          {/* GitHub corroboration panel — only when a GitHub URL was found in the resume and the lookup succeeded */}
+          {assessment.githubSignal && <GithubSignalPanel signal={assessment.githubSignal} />}
 
           {/* Summary — only shown when not lifted into parent */}
           {showSummary && (

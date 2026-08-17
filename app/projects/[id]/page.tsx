@@ -63,6 +63,15 @@ interface ArchiveFitCandidate {
   candidateName: string;
   score: number;
   suggestedRoleFit: string | null;
+  /**
+   * Stage 2, 2026-08-17 — see lib/archiveFits.ts's ArchiveFitQueueRow
+   * comment for the full "why." Real checklist items this candidate's
+   * strengths/concerns already back up, computed live (not persisted) so
+   * it can never go stale against a since-edited checklist. Empty array
+   * either way (no checklist configured, or genuinely no evidence found) —
+   * the card just shows Stage 1's plain suggested-fit text in that case.
+   */
+  matchedChecklistItems: ChecklistItem[];
 }
 type ScreenView = "form" | "loading" | "results";
 
@@ -2930,6 +2939,30 @@ function ArchiveFitCard({ projectId, candidate, onDecided, onScreened }: {
           <p className="text-sm text-zinc-600 dark:text-zinc-300">
             Suggested fit: <span className="font-medium text-violet-700 dark:text-violet-400">{candidate.suggestedRoleFit}</span>
           </p>
+        )}
+        {/* Stage 2 evidence, 2026-08-17 (Vlad's ask) — real checklist items
+            this candidate's own strengths/concerns already back up, not just
+            Stage 1's generic suggested-role-fit title. Only rendered when
+            there's actual evidence (empty array = no checklist configured,
+            or genuinely nothing matched) — same "only surface a signal"
+            convention used across this app's other badges. */}
+        {candidate.matchedChecklistItems.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">Evidence:</span>
+            {candidate.matchedChecklistItems.map((item) => (
+              <span
+                key={item.id}
+                title={item.label}
+                className={`max-w-[220px] truncate rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                  item.category === "decrease"
+                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                    : "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400"
+                }`}
+              >
+                {item.label}
+              </span>
+            ))}
+          </div>
         )}
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
           Scored {candidate.score} on original role

@@ -5,6 +5,7 @@ import { extractResumeText } from "@/lib/parseResume";
 import { getScreeningConcerns, getScreeningResume, updateScreening } from "@/lib/screenings";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
+import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
 
 export const maxDuration = 60;
 
@@ -176,6 +177,21 @@ export async function POST(request: NextRequest) {
   // always resume-vs-resume, never LinkedIn, so skip detection there.
   const isLinkedIn = hasCrossRefDoc ? detectLinkedIn(crossRefText) : false;
 
+  // GitHub corroboration, 2026-08-17 (roadmap 2.5.3) — deliberately run and
+  // attached AFTER assessCredibility() returns, not fed into its prompt.
+  // See lib/githubCorroboration.ts's header comment for the full reasoning:
+  // assessCredibility.ts's prompt is a tuned, live-calibrated system this
+  // sandbox can't test against, so this stays a pure code-side passthrough
+  // rather than risking a regression to it. Best-effort end to end — a
+  // missing/failed lookup just means no panel shows, same as no cross-ref
+  // doc at all; never blocks or slows the real credibility check
+  // meaningfully (5s timeout, and only even attempted when a GitHub URL is
+  // actually present in the resume text).
+  const githubUsername = extractGithubUsername(resumeText);
+  const githubSignal = githubUsername
+    ? await fetchGithubCorroboration(githubUsername).catch(() => null)
+    : null;
+
   const assessment = await assessCredibility({
     resumeText,
     crossRefText,
@@ -183,6 +199,9 @@ export async function POST(request: NextRequest) {
     isLinkedIn,
     originalConcerns,
   });
+  if (githubSignal) {
+    assessment.githubSignal = githubSignal;
+  }
 
   // Persist cross-reference doc path (reuses linkedin_pdf_path column — no schema change)
   if (crossRefPath) {
