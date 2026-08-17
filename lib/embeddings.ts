@@ -109,11 +109,22 @@ export function buildCandidateEmbeddingText(params: {
   concerns?: string[];
   careerTrajectory?: string;
 }): string {
+  // Real bug found and fixed 2026-08-17, live-verified against the actual
+  // backfill run: the filter below used to check `Boolean(p && p.trim()...)`,
+  // which crashes with "p.trim is not a function" the moment `p` is a
+  // truthy non-string — and real, live `strengths`/`concerns` data for a
+  // handful of historical screenings genuinely IS shaped that way (arrays
+  // of objects like `[{"Skill": "..."}]` instead of plain strings — an old
+  // scoreCandidate.ts tool-call output quirk, not something this file can
+  // fix at the source). Two real rows crashed the backfill script on this
+  // exact line before the `typeof p === "string"` check was added — now
+  // those items are just dropped from the embedding text (no usable string
+  // to embed) instead of crashing the whole candidate's embedding.
   const parts = [
     params.summary,
     ...(params.strengths ?? []),
     ...(params.concerns ?? []),
     params.careerTrajectory,
-  ].filter((p): p is string => Boolean(p && p.trim().length > 0));
+  ].filter((p): p is string => typeof p === "string" && p.trim().length > 0);
   return parts.join("\n");
 }

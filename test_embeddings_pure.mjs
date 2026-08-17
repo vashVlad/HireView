@@ -10,7 +10,7 @@ function buildCandidateEmbeddingText(params) {
     ...(params.strengths ?? []),
     ...(params.concerns ?? []),
     params.careerTrajectory,
-  ].filter((p) => Boolean(p && p.trim().length > 0));
+  ].filter((p) => typeof p === "string" && p.trim().length > 0);
   return parts.join("\n");
 }
 
@@ -67,6 +67,23 @@ check(
   "whitespace-only fields treated as absent",
   buildCandidateEmbeddingText({ summary: "   ", strengths: ["Real strength"] }),
   "Real strength"
+);
+// Real bug found and fixed 2026-08-17, live-verified against the actual
+// backfill run: 2 real screenings (out of 396) had strengths/concerns
+// shaped as arrays of OBJECTS (an old scoreCandidate.ts tool-call output
+// quirk, e.g. [{"Skill": "..."}]) instead of plain strings. The original
+// filter (`Boolean(p && p.trim()...)`) crashed with "p.trim is not a
+// function" the instant it hit one of these — real production data, not a
+// hypothetical edge case.
+check(
+  "non-string array items (real malformed data) are dropped, not a crash",
+  buildCandidateEmbeddingText({
+    summary: "Program manager",
+    strengths: [{ Skill: "Regulated industry delivery" }, "Real strength: evidenced"],
+    concerns: [{ item: "Some concern object" }],
+    careerTrajectory: "Steady growth",
+  }),
+  "Program manager\nReal strength: evidenced\nSteady growth"
 );
 
 // highlightQueryOverlap
