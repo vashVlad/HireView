@@ -1,10 +1,10 @@
-# HireView — Teams Architecture for the Brillio Geography Pilot
+# Cirot — Teams Architecture for the Brillio Geography Pilot
 
-*Written 2026-07-23. Covers how HireView's existing Teams model maps to the 5-geography pilot structure, and the onboarding flow for the initial 56 recruiters.*
+*Written 2026-07-23. Covers how Cirot's existing Teams model maps to the 5-geography pilot structure, and the onboarding flow for the initial 56 recruiters.*
 
 ## 1. The existing architecture already fits this need — nothing new to build
 
-HireView's Teams model (Admin → Team → Projects → Users), shipped 2026-07-09 as Phase 1.3 and in daily use since, is a direct fit for "each region operates as its own team":
+Cirot's Teams model (Admin → Team → Projects → Users), shipped 2026-07-09 as Phase 1.3 and in daily use since, is a direct fit for "each region operates as its own team":
 
 - **`teams`** — one row per team. A geography (India, USA, UK, Romania, Mexico) is just a team with that name; there is nothing India-specific or geography-specific to build.
 - **`team_members`** — many-to-many between `teams` and `auth.users`. A recruiter belongs to one or more teams.

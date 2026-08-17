@@ -1,4 +1,4 @@
-# HireView Database Audit — 2026-07-31
+# Cirot Database Audit — 2026-07-31
 
 Full read-through of every table (via `supabase/migrations/*.sql`, cross-checked against `lib/*.ts` read/write usage — no live DB access this session, so row counts/actual query plans aren't verified, just schema + code paths). 14 application tables total, plus Supabase-managed `auth.users`.
 

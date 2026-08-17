@@ -4,7 +4,7 @@
 --
 -- Backs the "Send feedback" form in the SiteHeader account dropdown — a
 -- lightweight in-app way for recruiters to flag bugs/asks to Vlad without
--- leaving HireView. Mirrors access_requests' shape (see
+-- leaving Cirot. Mirrors access_requests' shape (see
 -- supabase-migration-access-requests.sql): service-role-only table, RLS
 -- disabled, all access via the API route, best-effort email notification
 -- on submit via Resend.

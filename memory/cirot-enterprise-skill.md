@@ -1,12 +1,12 @@
 ---
-name: hireview-enterprise
-description: Enterprise-scale product decisions for HireView — feature prioritization, UI/UX standards, roadmap governance, and competitive positioning. Use when Vlad asks about what to build next, whether a feature is worth adding, how the interface should work, or how to position HireView against competitors. This skill prevents feature bloat, enforces the trust-layer identity, and applies 2026 enterprise SaaS standards to every decision.
+name: cirot-enterprise
+description: Enterprise-scale product decisions for Cirot — feature prioritization, UI/UX standards, roadmap governance, and competitive positioning. Use when Vlad asks about what to build next, whether a feature is worth adding, how the interface should work, or how to position Cirot against competitors. This skill prevents feature bloat, enforces the trust-layer identity, and applies 2026 enterprise SaaS standards to every decision.
 ---
 
-# HireView Enterprise Product Guide
+# Cirot Enterprise Product Guide
 
 ## Identity (never drift from this)
-HireView is the verification and trust layer for AI recruiting.
+Cirot is the verification and trust layer for AI recruiting.
 NOT an ATS. NOT a sourcing tool. NOT a feature-packed platform.
 Every feature must answer: does this increase trust, reduce fraud, or improve recruiter decision quality?
 
@@ -46,9 +46,9 @@ Never build: autonomous AI interviewing, full ATS replacement, job posting/sourc
 ## Competitive Position
 - Reval ($8k/hire): sources and screens but scores fake resumes, zero fraud detection
 - Hivemind: full ATS workflow, no verification layer
-- HireView wins on: fraud fingerprinting, credibility verification, calibration learning, human-in-loop trust
+- Cirot wins on: fraud fingerprinting, credibility verification, calibration learning, human-in-loop trust
 
 ## Prior Art Protection
 Calibration system and credibility checker are potentially patentable.
-Any new novel implementation must be logged in HireView_Prior_Art_Document immediately.
+Any new novel implementation must be logged in Cirot_Prior_Art_Document immediately.
 Use personal resources only — never employer equipment, credits, or infrastructure.

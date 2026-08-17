@@ -1,10 +1,10 @@
-# HireView — Database Migration Runbook
+# Cirot — Database Migration Runbook
 
-*Written 2026-07-23 as part of database migration readiness for the Brillio enterprise pilot. Goal: any DBA unfamiliar with this codebase should be able to stand up a working HireView database from scratch using only this document, in well under two hours.*
+*Written 2026-07-23 as part of database migration readiness for the Brillio enterprise pilot. Goal: any DBA unfamiliar with this codebase should be able to stand up a working Cirot database from scratch using only this document, in well under two hours.*
 
 ## 1. What you're standing up
 
-HireView uses Supabase (hosted Postgres + Auth + Storage) as its only datastore. There is no ORM — every query goes through the `@supabase/supabase-js` client, either with the service-role key (server-side, bypasses RLS — see §5) or the anon key (browser-side, Auth session handling only, never data reads/writes).
+Cirot uses Supabase (hosted Postgres + Auth + Storage) as its only datastore. There is no ORM — every query goes through the `@supabase/supabase-js` client, either with the service-role key (server-side, bypasses RLS — see §5) or the anon key (browser-side, Auth session handling only, never data reads/writes).
 
 The schema is **22 SQL files**, all in `supabase/migrations/`, run once each, in order, in the Supabase SQL editor (or any Postgres client pointed at the instance). All 22 are idempotent (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, etc.) — safe to re-run if you're ever unsure whether one already ran.
 
@@ -56,7 +56,7 @@ Both are plain `plpgsql` functions, re-creatable with `CREATE OR REPLACE FUNCTIO
 
 ## 5. Row Level Security — what's actually true
 
-**Read this before writing any RLS policies as part of a "security compliance" pass — HireView's authorization boundary is not RLS.**
+**Read this before writing any RLS policies as part of a "security compliance" pass — Cirot's authorization boundary is not RLS.**
 
 The Next.js server exclusively uses Supabase's service-role key (`lib/supabase.ts`), which bypasses RLS entirely by design. Every real access-control decision — which team's projects a recruiter can see, admin-vs-recruiter permissions, whether a given user can read/edit a specific project or screening by id — is enforced in the application layer (`lib/auth.ts`: `teamIdsFilter()`, `canAccessProject()`, `canAccessScreening()`, `canAccessCalibrationExample()`, each called explicitly from the relevant API route). The anon/public key is used only for Supabase Auth session handling (sign-in, cookie refresh) — it never touches a data table directly.
 

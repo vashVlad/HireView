@@ -2,7 +2,7 @@ import type { User } from "@supabase/supabase-js";
 import { getSupabaseClient } from "./supabase";
 
 /**
- * Fetches every registered HireView user via the Supabase Auth admin API.
+ * Fetches every registered Cirot user via the Supabase Auth admin API.
  * Shared by admin dashboards (Analytics, FunnelView) that need to attribute
  * activity to a recruiter, so both derive from one call instead of each
  * page independently calling supabase.auth.admin.listUsers(). Silently

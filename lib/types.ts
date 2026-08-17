@@ -244,6 +244,27 @@ export interface CandidateResult {
   currentTitle?: string;
   totalExperienceSummary?: string;
   linkedinUrl?: string;
+  /**
+   * Target-company score boost, 2026-08-07 (Vlad's ask: "add companies in
+   * there that would increase the score if it matches with the candidate's
+   * resume"). Set by saveScreening() (lib/screenings.ts) — a deterministic,
+   * code-computed match (lib/targetCompanyBoost.ts), NOT part of
+   * scoreCandidate.ts's own judgment, so it's auditable independent of the
+   * model. Present here (not just ScreeningRecord) for the same reason
+   * archiveReason is — the post-screening ResultCard predates a real
+   * ScreeningRecord read-back. Empty array = checked, no match. Undefined =
+   * no target companies configured for this project, boost not evaluated.
+   */
+  targetCompanyMatches?: string[];
+  /**
+   * JD checklist evaluation, 2026-08-17 (Vlad's ask) — mirrors
+   * ScreeningRecord.checklistEvaluation, present here for the same reason
+   * targetCompanyMatches is (the post-screening ResultCard predates a real
+   * ScreeningRecord read-back). Set by saveScreening() from the caller's
+   * pre-computed evaluateChecklist() result — see lib/evaluateChecklist.ts.
+   * Undefined = no checklist configured for this project, not evaluated.
+   */
+  checklistEvaluation?: ChecklistEvaluation;
   recommendation: Recommendation;
   status?: CandidateStatus;
   credibility?: CredibilityAssessment;
@@ -520,6 +541,26 @@ export interface ScreeningRecord {
    * currentCompany above.
    */
   linkedinUrl?: string;
+  /**
+   * Target-company score boost, 2026-08-07 (Vlad's ask). Which of the
+   * project's configured "score boost companies" (JD Analyzer, reuses
+   * JDAnalysis.wide/narrow.targetCompanies) matched this candidate's resume
+   * text — see lib/targetCompanyBoost.ts. Same deferred-column pattern as
+   * currentCompany above (supabase-migration-target-company-boost.sql).
+   * Written via saveScreening()'s existing best-effort secondary update,
+   * never the main insert, so a screening can never fail just because this
+   * migration hasn't run.
+   */
+  targetCompanyMatches?: string[];
+  /**
+   * JD Checklist evaluation, 2026-08-15 — which of the project's checklist
+   * items fired for this candidate, and why. Same deferred-column pattern
+   * as targetCompanyMatches above (supabase-migration-checklist.sql).
+   * Undefined for any project with no checklist configured — the whole
+   * mechanism is opt-in, a project with no checklist scores exactly as it
+   * did before this feature existed.
+   */
+  checklistEvaluation?: ChecklistEvaluation;
   jobDescription: string;
   resumeMimeType: string;
   linkedInMode: boolean;
@@ -781,6 +822,16 @@ export interface Project {
    * (not just false) means "not checked," not "confirmed included."
    */
   excludeFromFitSuggestions?: boolean;
+  /**
+   * JD checklist definition, 2026-08-17 — same "deliberately NOT in the
+   * shared select" pattern as excludeFromFitSuggestions above. Only
+   * populated when explicitly fetched via getProjectChecklist()
+   * (lib/projects.ts), e.g. app/api/projects/[id]/route.ts's GET handler.
+   * `undefined` means "not checked" (e.g. this Project came from
+   * listProjects()); `null` means genuinely checked and no checklist is
+   * configured for this project yet.
+   */
+  checklist?: ProjectChecklist | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -818,4 +869,70 @@ export interface JDAnalysis {
   wide: FilterConfig;
   narrow: FilterConfig;
   linkedInContext?: string;
+}
+
+/**
+ * JD Checklist ("Trust badge"), 2026-08-15 (Vlad's ask) — enriches the
+ * must-have/nice-to-have list into precise, individually-editable,
+ * individually-reasoned checks. Generated once per JD analysis/re-analysis
+ * by lib/generateChecklist.ts (a NEW, separate file — NOT an edit to
+ * analyzeJD.ts, which is do-not-touch), then freely editable by the
+ * recruiter on the project's Filters tab. Two categories, matching Vlad's
+ * "Decrease score" / "Add score" framing: `decrease` items are soft-signal
+ * gaps worth a deduction if genuinely unevidenced; `add` items are
+ * reinforcing signals worth a bonus if genuinely evidenced. Deliberately
+ * does NOT include a target-company-match item — that's already a separate,
+ * shipped, deterministic mechanism (lib/targetCompanyBoost.ts); a checklist
+ * item for it would double-count the same signal.
+ */
+export interface ChecklistItem {
+  /** Stable id for editing/deleting one specific item without disturbing the rest — crypto.randomUUID() at creation time. */
+  id: string;
+  category: "decrease" | "add";
+  /** Short, specific description of the check — e.g. "AWS Solutions Architect certification" or "Led a team of 3+ engineers". */
+  label: string;
+  /** Magnitude only (always positive) — category determines the sign when applied. */
+  points: number;
+}
+
+export interface ProjectChecklist {
+  items: ChecklistItem[];
+  /** ISO timestamp of the last generate/regenerate — NOT updated by a manual item edit, only by re-running generation. */
+  generatedAt: string;
+}
+
+/**
+ * Per-candidate result of evaluating an existing ProjectChecklist against
+ * one resume — lib/evaluateChecklist.ts. Deliberately NOT baked into
+ * scoreCandidate.ts's prompt (do-not-touch) — runs as its own separate,
+ * parallel call (same Promise.all pattern as generateFingerprint()) and the
+ * resulting point deltas get applied deterministically in saveScreening(),
+ * same "deterministic, not model-decided" pattern already proven by
+ * lib/targetCompanyBoost.ts. `firedItemIds` is what actually drives the
+ * score delta; `reasoning` is per-item, for the recruiter to read WHY,
+ * matching this app's "case file not scorecard" principle everywhere else.
+ */
+export interface ChecklistItemResult {
+  itemId: string;
+  fired: boolean;
+  reasoning: string;
+  /**
+   * label/category/points, 2026-08-17 — denormalized off the ChecklistItem
+   * this result was evaluated against, captured at evaluation time (see
+   * lib/evaluateChecklist.ts). Deliberate duplication, not a join: a
+   * recruiter can edit or delete checklist items on the Filters tab after a
+   * candidate was already screened against the old version — this result
+   * should keep showing exactly what it was evaluated against (ResultCard's
+   * checklist breakdown reads these fields directly, never looks the item
+   * back up by id), not silently reflect whatever the checklist says today.
+   */
+  label: string;
+  category: "decrease" | "add";
+  points: number;
+}
+
+export interface ChecklistEvaluation {
+  results: ChecklistItemResult[];
+  /** Deterministic sum of fired items' points (decrease items negative, add items positive) — computed in code, not by the model. See computeChecklistScoreDelta. */
+  scoreDelta: number;
 }

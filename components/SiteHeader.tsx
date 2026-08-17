@@ -132,7 +132,7 @@ export function SiteHeader({ active }: { active: NavHref }) {
         <Link href="/projects" className="flex shrink-0 items-center gap-3">
           <Logo size={34} />
           <h1 className="hidden text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 sm:block">
-            HireView
+            Cirot
           </h1>
         </Link>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-3">

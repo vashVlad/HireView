@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ResultCard } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
+import { ScoringLoader } from "@/components/ScoringLoader";
 import type { CandidateStatus, JDAnalysis, ScreeningRecord } from "@/lib/types";
 import { toCandidateResult } from "@/lib/toCandidateResult";
 
@@ -13,7 +14,7 @@ import { toCandidateResult } from "@/lib/toCandidateResult";
  * attempt at this used sessionStorage to restore the Screen tab's in-memory
  * results view; Vlad correctly flagged that as a dead end for a recruiter
  * who explicitly works across two machines (sessionStorage is one-browser-
- * tab-local, see CLAUDE.md's "why HireView is web-hosted, not local"). This
+ * tab-local, see CLAUDE.md's "why Cirot is web-hosted, not local"). This
  * page is the real fix: every screening saved in one screening run carries
  * the same batchId (see supabase-migration-batch-id.sql and
  * app/api/screen-resumes/route.ts's do-not-touch exception), so this is a
@@ -126,7 +127,11 @@ export default function BatchResultsPage({ params }: { params: Promise<{ id: str
           }
         />
 
-        {loading && <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>}
+        {loading && (
+          <div className="flex flex-col items-center gap-2 py-10">
+            <ScoringLoader className="h-9 w-64" />
+          </div>
+        )}
         {error && (
           <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
             {error}

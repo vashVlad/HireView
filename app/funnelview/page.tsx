@@ -420,7 +420,7 @@ export default function FunnelViewPage() {
         <PageHeader
           icon={<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3Z" strokeLinecap="round" strokeLinejoin="round" />}
           title="FunnelView"
-          subtitle="Full candidate funnel, live from HireView data. Admin only."
+          subtitle="Full candidate funnel, live from Cirot data. Admin only."
           action={
             data ? (
               <div className="flex shrink-0 items-center gap-2">

@@ -1,4 +1,4 @@
-# HireView — Project Brief
+# Cirot — Project Brief
 
 ## Session Memory — read this first
 
@@ -10,11 +10,11 @@ state). Check `memory/open-questions.md` for anything that needs Vlad's input be
 At the end of any session where real changes were made (code, decisions, or new open questions),
 append a short entry to `memory/session-log.md` and update `memory/state.md` and
 `memory/decisions-log.md` in place if the change affects them. Keep entries short — this is a
-handoff note for the next session, not a full changelog (that's what `docs/HireView-Dev-Log.docx` is for).
+handoff note for the next session, not a full changelog (that's what `docs/Cirot-Dev-Log.docx` is for).
 
-## What is HireView?
+## What is Cirot?
 
-HireView is an AI-powered recruiting assistant built to make the recruiting workflow faster, smarter, and less repetitive. The name is a double meaning: *Hire* (recruiting) + *Higher View* (bigger picture perspective on candidates).
+Cirot is an AI-powered recruiting assistant built to make the recruiting workflow faster, smarter, and less repetitive. The name is a double meaning: *Hire* (recruiting) + *Higher View* (bigger picture perspective on candidates).
 
 It is a personal productivity tool built by and for a recruiter who currently works across two machines (work computer + personal computer), which is why the app is web-hosted rather than local.
 
@@ -36,7 +36,7 @@ The two biggest pain points are:
 ## The Solution — Phased Roadmap
 
 ### Phase 0 — JD Analyzer, LinkedIn Filter Generator & Boolean Search Builder
-This is the "who am I even looking for?" step that happens before sourcing begins. The recruiter pastes a job description and HireView does the heavy lifting of interpreting the role and generating everything needed to search LinkedIn Recruiter effectively.
+This is the "who am I even looking for?" step that happens before sourcing begins. The recruiter pastes a job description and Cirot does the heavy lifting of interpreting the role and generating everything needed to search LinkedIn Recruiter effectively.
 
 **JD Analyzer**
 - Paste any job description (even vague or internally inconsistent ones like FDE)
@@ -127,7 +127,7 @@ SPOTLIGHTS: ✓ Open to work  ✓ Past applicants
 ## Project Structure
 
 ```
-hireview-v1/          ← Next.js project root (inside parent HireView/ folder)
+cirot-v1/          ← Next.js project root (inside parent Cirot/ folder)
 ├── src/
 │   ├── app/          ← App Router pages and API routes
 │   ├── components/   ← Reusable UI components

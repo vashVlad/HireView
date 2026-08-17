@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ResultCard } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
+import { ScoringLoader } from "@/components/ScoringLoader";
 import type { CandidateStatus, JDAnalysis, ScreeningRecord } from "@/lib/types";
 import { toCandidateResult } from "@/lib/toCandidateResult";
 
@@ -152,7 +153,11 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
           }
         />
 
-        {loading && <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>}
+        {loading && (
+          <div className="flex flex-col items-center gap-2 py-10">
+            <ScoringLoader className="h-9 w-64" />
+          </div>
+        )}
         {error && (
           <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-400">
             {error}

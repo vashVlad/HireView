@@ -16,7 +16,7 @@ CREATE INDEX IF NOT EXISTS calibration_examples_user_id_idx  ON calibration_exam
 -- ─────────────────────────────────────────────────────────────────────────────
 -- After running this migration:
 --
--- 1. Log in to HireView at /login (sign up at Supabase Dashboard → Auth → Users
+-- 1. Log in to Cirot at /login (sign up at Supabase Dashboard → Auth → Users
 --    → Add user, set role: admin in app_metadata).
 --
 -- 2. After creating your admin account, copy your user UUID from the Auth tab,

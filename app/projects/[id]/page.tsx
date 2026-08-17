@@ -21,12 +21,14 @@ import { StatusStageControl } from "@/components/StatusStageControl";
 import { TransferControl } from "@/components/TransferControl";
 import { CANDIDATE_STATUS_LABELS, TRACKER_STAGES } from "@/lib/types";
 import type {
-  BlacklistEntry, CandidateResult, CandidateStatus, CheckExistingResult, CredibilityAssessment, CredibilitySignal,
-  ExistingCandidateRef, FraudRiskAssessment, FullTrackerData, JDAnalysis, Project, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
+  BlacklistEntry, CandidateResult, CandidateStatus, CheckExistingResult, ChecklistItem, CredibilityAssessment, CredibilitySignal,
+  ExistingCandidateRef, FraudRiskAssessment, FullTrackerData, JDAnalysis, Project, ProjectChecklist, RejectionHistoryEntry, ScreenResumesError, ScreeningRecord, TrackerStage,
 } from "@/lib/types";
+import { ScoringLoader } from "@/components/ScoringLoader";
 import type { ScreeningAction } from "@/lib/screeningActions";
 import type { CrossProjectMatch } from "@/lib/screenings";
 import { normalizeCandidateName } from "@/lib/resumeContentHash";
+import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { computeMatchClusters, type MatchCluster } from "@/lib/matchClusters";
 import SourceIcon from "@/components/SourceIcon";
@@ -86,11 +88,14 @@ function formatStatusDate(iso: string) {
 
 // ── Filters tab ────────────────────────────────────────────────────────────
 
-function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: {
+function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, checklist, onChecklistUpdated }: {
   analysis: JDAnalysis;
   projectId: number;
   jobDescription: string;
   onAnalysisUpdated: (analysis: JDAnalysis, jobDescription: string) => void;
+  /** null = checked, no checklist configured yet. undefined = not fetched (shouldn't happen once the parent's GET response includes it, kept for defensiveness). */
+  checklist?: ProjectChecklist | null;
+  onChecklistUpdated: (checklist: ProjectChecklist) => void;
 }) {
   const [open, setOpen] = useState(true);
   const [mode, setMode] = useState<SearchMode>("narrow");
@@ -100,6 +105,163 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
   const [jdFile, setJdFile] = useState<File | null>(null);
   const [reanalyzeError, setReanalyzeError] = useState<string | null>(null);
   const jdFileRef = useRef<HTMLInputElement>(null);
+
+  // Score boost companies, 2026-08-07 (Vlad's ask) — see the card's own
+  // comment below for the full "why" and how this relates to the LinkedIn
+  // filter view's targetCompanies.
+  const [companyInput, setCompanyInput] = useState("");
+  const [savingCompanies, setSavingCompanies] = useState(false);
+  const [companiesError, setCompaniesError] = useState<string | null>(null);
+  const boostCompanies = combineTargetCompanies(analysis.wide.targetCompanies, analysis.narrow.targetCompanies);
+
+  async function saveBoostCompanies(newList: string[]) {
+    setSavingCompanies(true);
+    setCompaniesError(null);
+    try {
+      const newAnalysis: JDAnalysis = {
+        ...analysis,
+        wide: { ...analysis.wide, targetCompanies: newList },
+        narrow: { ...analysis.narrow, targetCompanies: newList },
+      };
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jdAnalysis: newAnalysis }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      onAnalysisUpdated(newAnalysis, jobDescription);
+    } catch {
+      setCompaniesError("Couldn't save — try again.");
+    } finally {
+      setSavingCompanies(false);
+    }
+  }
+
+  // Editable Keywords/Job Titles boolean fields, 2026-08-07 (Vlad's ask) —
+  // saves into whichever mode (wide/narrow) is currently selected via the
+  // toggle above, since that's the exact FilterConfig FilterSetView is
+  // rendering. Same PATCH-full-jdAnalysis pattern as saveBoostCompanies.
+  const [filterFieldError, setFilterFieldError] = useState<string | null>(null);
+  async function saveFilterField(field: "jobTitlesBoolean" | "keywords", value: string) {
+    setFilterFieldError(null);
+    try {
+      const newAnalysis: JDAnalysis = {
+        ...analysis,
+        [mode]: { ...analysis[mode], [field]: value },
+      };
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jdAnalysis: newAnalysis }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      onAnalysisUpdated(newAnalysis, jobDescription);
+    } catch {
+      setFilterFieldError("Couldn't save — try again.");
+    }
+  }
+
+  function handleAddCompany() {
+    const trimmed = companyInput.trim();
+    if (!trimmed) return;
+    if (boostCompanies.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      setCompanyInput("");
+      return;
+    }
+    setCompanyInput("");
+    saveBoostCompanies([...boostCompanies, trimmed]);
+  }
+
+  function handleRemoveCompany(company: string) {
+    saveBoostCompanies(boostCompanies.filter((c) => c.toLowerCase() !== company.toLowerCase()));
+  }
+
+  // JD checklist ("Trust badge"), 2026-08-17 (Vlad's ask) — individually
+  // editable items, not one freeform block (Vlad's explicit preference).
+  // Local `items` mirrors the checklist prop so every keystroke stays
+  // instant/local; a save (blur, or immediately for add/remove/regenerate)
+  // PATCHes the whole array, same "full replacement, not per-field" pattern
+  // FunnelView's other list-editing UIs already use.
+  const [checklistTab, setChecklistTab] = useState<"decrease" | "add">("decrease");
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>(checklist?.items ?? []);
+  const [savingChecklist, setSavingChecklist] = useState(false);
+  const [checklistError, setChecklistError] = useState<string | null>(null);
+  const [generatingChecklist, setGeneratingChecklist] = useState(false);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+
+  // Re-sync local items whenever the parent hands down a genuinely new
+  // checklist (e.g. after a regenerate finishes) — but not on every parent
+  // re-render, or an in-progress local edit would get clobbered mid-keystroke.
+  const checklistGeneratedAt = checklist?.generatedAt;
+  useEffect(() => {
+    setChecklistItems(checklist?.items ?? []);
+  }, [checklistGeneratedAt]);
+
+  async function saveChecklistItems(newItems: ChecklistItem[]) {
+    setSavingChecklist(true);
+    setChecklistError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/checklist`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: newItems }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      const data = await res.json();
+      onChecklistUpdated(data.checklist);
+    } catch {
+      setChecklistError("Couldn't save — try again.");
+    } finally {
+      setSavingChecklist(false);
+    }
+  }
+
+  function handleChecklistFieldChange(id: string, field: "label" | "points", value: string) {
+    setChecklistItems((items) =>
+      items.map((item) =>
+        item.id === id
+          ? { ...item, [field]: field === "points" ? Math.max(1, Number(value) || 1) : value }
+          : item
+      )
+    );
+  }
+
+  function handleAddChecklistItem(category: "decrease" | "add") {
+    const newItem: ChecklistItem = {
+      id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
+      category,
+      label: "",
+      points: category === "decrease" ? 10 : 5,
+    };
+    const newItems = [...checklistItems, newItem];
+    setChecklistItems(newItems);
+    saveChecklistItems(newItems);
+  }
+
+  function handleRemoveChecklistItem(id: string) {
+    const newItems = checklistItems.filter((item) => item.id !== id);
+    setChecklistItems(newItems);
+    saveChecklistItems(newItems);
+  }
+
+  async function handleGenerateChecklist() {
+    setGeneratingChecklist(true);
+    setChecklistError(null);
+    setConfirmRegenerate(false);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/checklist`, { method: "POST" });
+      if (!res.ok) throw new Error("Generation failed");
+      const data = await res.json();
+      setChecklistItems(data.checklist.items);
+      onChecklistUpdated(data.checklist);
+    } catch {
+      setChecklistError("Couldn't generate a checklist — try again.");
+    } finally {
+      setGeneratingChecklist(false);
+    }
+  }
+
+  const visibleChecklistItems = checklistItems.filter((item) => item.category === checklistTab);
 
   async function handleReanalyze() {
     if (!jdFile && !jdText.trim()) return;
@@ -172,7 +334,8 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
                 ))}
               </div>
 
-              <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} />
+              <FilterSetView config={mode === "wide" ? analysis.wide : analysis.narrow} editable onFieldChange={saveFilterField} />
+              {filterFieldError && <p className="text-xs text-rose-500">{filterFieldError}</p>}
 
               <div className="grid grid-cols-2 gap-4 border-t border-zinc-100 pt-5 dark:border-zinc-800">
                 <div className="flex flex-col gap-2">
@@ -246,6 +409,164 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated }: 
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Score boost companies, 2026-08-07 (Vlad's ask): "add companies in
+          there that would increase the score if it matches with the
+          candidate's resume." Reuses analysis.wide/narrow.targetCompanies
+          (same underlying JD Analyzer data, per Vlad's explicit choice) but
+          deliberately its OWN card, separate from the LinkedIn Recruiter
+          filters above — that view was already trimmed down to 5 filters
+          (Vlad's earlier ask, see memory/jd_filter_output_feedback.md) and
+          never showed target companies at all; this isn't un-decluttering
+          that view, it's a new purpose for otherwise-unused data. Editing
+          here writes the SAME list into both wide and narrow so the two
+          stay in sync — see lib/targetCompanyBoost.ts's combineTargetCompanies
+          for why the score-boost check still unions both (pre-existing
+          projects may have them differ until edited here). +5 to the score
+          for new screenings only — see lib/screenings.ts's saveScreening(). */}
+      <div className="rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex flex-col gap-1">
+          <span className="font-semibold text-zinc-900 dark:text-zinc-50">Score boost companies</span>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            New candidates whose resume mentions any of these get +5 added to their score. Doesn't affect already-screened candidates.
+          </p>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {boostCompanies.length === 0 && (
+            <span className="text-sm text-zinc-400 dark:text-zinc-500">No companies added yet.</span>
+          )}
+          {boostCompanies.map((c) => (
+            <span key={c} className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-300">
+              {c}
+              <button type="button" onClick={() => handleRemoveCompany(c)} disabled={savingCompanies}
+                className="text-emerald-500 hover:text-rose-500 disabled:opacity-50" aria-label={`Remove ${c}`}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            type="text"
+            value={companyInput}
+            onChange={(e) => setCompanyInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCompany(); } }}
+            placeholder="Add a company…"
+            disabled={savingCompanies}
+            className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+          />
+          <button type="button" onClick={handleAddCompany} disabled={savingCompanies || !companyInput.trim()}
+            className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            Add
+          </button>
+        </div>
+        {companiesError && <p className="mt-2 text-xs text-rose-500">{companiesError}</p>}
+      </div>
+
+      {/* JD checklist ("Trust badge"), 2026-08-17 (Vlad's ask): specific,
+          individually-checkable items derived from the JD — "decrease" items
+          dock points when a genuine gap is unevidenced, "add" items award
+          points when a reinforcing signal IS evidenced. Evaluated once per
+          candidate at screening time (lib/evaluateChecklist.ts) and applied
+          as a deterministic score delta (lib/screenings.ts's saveScreening,
+          same pattern as the boost-companies card above) — never baked into
+          scoreCandidate.ts's own judgment. Deliberately excludes
+          target-company-match items to avoid double-counting with the card
+          above — see lib/generateChecklist.ts's own comment. */}
+      <div className="rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="font-semibold text-zinc-900 dark:text-zinc-50">JD checklist</span>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Specific, checkable items scored per candidate at screening time — decrease items dock points for unevidenced must-haves, add items award points for reinforcing signals.
+            </p>
+          </div>
+          {checklistItems.length > 0 && !confirmRegenerate && (
+            <button type="button" onClick={() => setConfirmRegenerate(true)} disabled={generatingChecklist}
+              className="shrink-0 text-xs text-zinc-400 underline underline-offset-2 transition-colors hover:text-zinc-600 disabled:opacity-50 dark:text-zinc-500 dark:hover:text-zinc-300">
+              Regenerate from JD
+            </button>
+          )}
+        </div>
+
+        {confirmRegenerate && (
+          <div className="mt-3 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-500/10 dark:text-amber-300">
+            <span className="flex-1">Regenerating replaces every item below, including any manual edits. Continue?</span>
+            <button type="button" onClick={handleGenerateChecklist} className="font-semibold underline underline-offset-2">Yes, regenerate</button>
+            <button type="button" onClick={() => setConfirmRegenerate(false)} className="text-amber-600 hover:text-amber-800 dark:text-amber-400">Cancel</button>
+          </div>
+        )}
+
+        {generatingChecklist ? (
+          <div className="mt-4 flex flex-col items-center gap-2 py-6">
+            <ScoringLoader className="h-8 w-56" />
+            <span className="text-xs text-zinc-400 dark:text-zinc-500">Building checklist from the JD…</span>
+          </div>
+        ) : checklistItems.length === 0 ? (
+          <div className="mt-4 flex flex-col items-center gap-3 py-6 text-center">
+            <p className="text-sm text-zinc-400 dark:text-zinc-500">No checklist yet.</p>
+            <button type="button" onClick={handleGenerateChecklist}
+              className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
+              Generate checklist
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="mt-4 flex items-center gap-1 self-start rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+              {([
+                { key: "decrease" as const, label: "Decrease score" },
+                { key: "add" as const, label: "Add score" },
+              ]).map((t) => (
+                <button key={t.key} type="button" onClick={() => setChecklistTab(t.key)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                    checklistTab === t.key ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-50"
+                    : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"}`}>
+                  {t.label} ({checklistItems.filter((i) => i.category === t.key).length})
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-3 flex flex-col gap-2">
+              {visibleChecklistItems.length === 0 && (
+                <span className="text-sm text-zinc-400 dark:text-zinc-500">No {checklistTab === "decrease" ? "decrease" : "add"} items yet.</span>
+              )}
+              {visibleChecklistItems.map((item) => (
+                <div key={item.id} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={item.label}
+                    onChange={(e) => handleChecklistFieldChange(item.id, "label", e.target.value)}
+                    onBlur={() => saveChecklistItems(checklistItems)}
+                    placeholder="Describe the specific, checkable signal…"
+                    className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={item.points}
+                    onChange={(e) => handleChecklistFieldChange(item.id, "points", e.target.value)}
+                    onBlur={() => saveChecklistItems(checklistItems)}
+                    className={`w-16 rounded-lg border px-2 py-1.5 text-center text-sm outline-none focus:ring-2 dark:bg-zinc-900 dark:text-zinc-100 ${
+                      item.category === "decrease"
+                        ? "border-rose-200 text-rose-600 focus:border-rose-400 focus:ring-rose-100 dark:border-rose-700/50 dark:text-rose-300"
+                        : "border-emerald-200 text-emerald-600 focus:border-emerald-400 focus:ring-emerald-100 dark:border-emerald-700/50 dark:text-emerald-300"
+                    }`}
+                  />
+                  <button type="button" onClick={() => handleRemoveChecklistItem(item.id)} disabled={savingChecklist}
+                    className="shrink-0 text-zinc-400 hover:text-rose-500 disabled:opacity-50" aria-label="Remove item">
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button type="button" onClick={() => handleAddChecklistItem(checklistTab)} disabled={savingChecklist}
+                className="mt-1 self-start rounded-lg border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-400 hover:text-zinc-700 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200">
+                + Add {checklistTab === "decrease" ? "decrease" : "add"} item
+              </button>
+            </div>
+          </>
+        )}
+        {checklistError && <p className="mt-2 text-xs text-rose-500">{checklistError}</p>}
       </div>
     </div>
   );
@@ -1068,15 +1389,21 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
         </div>
       )}
 
+      {screenView === "loading" && (
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50/80 py-6 dark:border-zinc-800 dark:bg-zinc-800/40">
+          <ScoringLoader className="h-10 w-72" />
+          <span className="text-sm text-zinc-500 dark:text-zinc-400">
+            {isLinkedInMode ? "Screening profiles…" : "Screening resumes…"}
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
         <button type="button" onClick={handleSubmit}
           disabled={files.length === 0 || screenView === "loading"}
           className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-xl hover:shadow-violet-500/30 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
           {screenView === "loading" ? (
-            <>
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              {isLinkedInMode ? "Screening profiles..." : "Screening resumes..."}
-            </>
+            isLinkedInMode ? "Screening profiles..." : "Screening resumes..."
           ) : isLinkedInMode ? "Screen profiles" : "Screen resumes"}
         </button>
         {screenView === "loading" && (
@@ -1095,6 +1422,15 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
 }
 
 // ── Pipeline tab ───────────────────────────────────────────────────────────
+
+/** Reads one query param from window.location.search — guarded for SSR,
+ *  where PipelineTab's lazy useState initializers can run before `window`
+ *  exists. See those initializers' own comment for why this reads on mount
+ *  rather than reactively. */
+function readPipelineUrlParam(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get(key);
+}
 
 function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onStageChange, onScreeningFieldSaved, onDeleted, expandedId: externalExpandedId, onExpandedChange }: {
   screenings: ScreeningRecord[];
@@ -1129,23 +1465,60 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   onExpandedChange?: (id: number | null) => void;
 }) {
   const [screenings, setScreenings] = useState(initialScreenings);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(null);
+  // Filters below read their initial value from the URL (2026-08-11, Vlad's
+  // ask — pressing Back after following an internal link into this project,
+  // e.g. "Also screened in [project]", should land back on the same
+  // filtered/sorted/searched view, not a reset one). Lazy useState
+  // initializers so this only reads window.location once, on this
+  // component's own mount — PipelineTab remounts fresh every time the
+  // parent's tab switches to "pipeline" (conditionally rendered), which is
+  // exactly when a restored value should be picked back up. The write side
+  // (below, useEffect) keeps the URL in sync as these change; the parent
+  // page owns the matching sync for tab/candidate — see its own effect.
+  const [search, setSearch] = useState(() => readPipelineUrlParam("search") ?? "");
+  const [statusFilter, setStatusFilter] = useState<CandidateStatus | null>(() => {
+    const v = readPipelineUrlParam("status");
+    const valid: CandidateStatus[] = ["new_applicant", "recruiter_screen", "contacted", "screening", "archived", "transferred"];
+    return v && (valid as string[]).includes(v) ? (v as CandidateStatus) : null;
+  });
   // Recruiter filter, 2026-07-20 (Vlad's ask): screenings.user_id is now
   // surfaced as recruiterId/recruiterEmail (lib/screenings.ts, mirrors
   // FunnelView's getRecruiterEmailMap pattern), so multi-recruiter projects
   // can be narrowed to "who screened this" the same way status/score already
   // filter. null = all recruiters.
-  const [recruiterFilter, setRecruiterFilter] = useState<string | null>(null);
+  const [recruiterFilter, setRecruiterFilter] = useState<string | null>(() => readPipelineUrlParam("recruiter"));
   // Flagged filter, 2026-07-20 (Vlad's ask). Orthogonal to status, so a
   // standalone toggle pill rather than an entry in STATUS_PILLS.
-  const [flaggedFilter, setFlaggedFilter] = useState(false);
+  const [flaggedFilter, setFlaggedFilter] = useState(() => readPipelineUrlParam("flagged") === "1");
   // "newest" added 2026-07-29 (Vlad's ask: "add a recent filter to the
   // pipeline which will show the newest screenings") — sorts by
   // ScreeningRecord.createdAt descending, independent of score. Same
   // archived-sinks-to-bottom / Ring-grouping precedence as the score sorts
   // below it (see filteredScreenings' comparator).
-  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc" | "newest">("default");
+  const [sortOrder, setSortOrder] = useState<"default" | "desc" | "asc" | "newest">(() => {
+    const v = readPipelineUrlParam("sort");
+    const valid = ["default", "desc", "asc", "newest"];
+    return valid.includes(v ?? "") ? (v as "default" | "desc" | "asc" | "newest") : "default";
+  });
+  // Keeps the URL's search/status/recruiter/flagged/sort params in sync with
+  // the filters above, the same replaceState-in-place approach the parent
+  // page uses for tab/candidate (see that file's own matching comment) —
+  // merges onto whatever's already in the URL rather than clobbering it, so
+  // this and the parent's tab/candidate sync (and each other's non-filter
+  // params) don't stomp on each other.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (search) params.set("search", search); else params.delete("search");
+    if (statusFilter) params.set("status", statusFilter); else params.delete("status");
+    if (recruiterFilter) params.set("recruiter", recruiterFilter); else params.delete("recruiter");
+    if (flaggedFilter) params.set("flagged", "1"); else params.delete("flagged");
+    if (sortOrder !== "default") params.set("sort", sortOrder); else params.delete("sort");
+    const query = params.toString();
+    const newUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
+    if (newUrl !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(window.history.state, "", newUrl);
+    }
+  }, [search, statusFilter, recruiterFilter, flaggedFilter, sortOrder]);
   const [expandedId, setExpandedIdState] = useState<number | null>(externalExpandedId ?? null);
   function setExpandedId(id: number | null) {
     setExpandedIdState(id);
@@ -2212,7 +2585,25 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       <p key={m.screeningId} className="text-xs text-zinc-500 dark:text-zinc-400">
                         Also screened in{" "}
                         <Link
-                          href={`/candidates/${m.screeningId}`}
+                          // returnTo, 2026-08-11 (Vlad's ask) — without this,
+                          // /candidates/[id]'s own Back button has no idea
+                          // this click came from a DIFFERENT project's
+                          // Pipeline card, so it falls back to ITS OWN
+                          // project's Screen tab (the project THIS matched
+                          // screening belongs to — Forward Deployed Engineer
+                          // in Vlad's repro — not the CPQ pipeline card the
+                          // recruiter actually clicked from). Passing the
+                          // current, already-in-sync URL (tab/filters/
+                          // scroll — see this page's own replaceState sync
+                          // effects above) as returnTo makes tier 1 of that
+                          // page's three-tier Back logic fire instead,
+                          // landing the recruiter back on the exact card
+                          // they left, not a different project entirely.
+                          href={`/candidates/${m.screeningId}${
+                            typeof window !== "undefined"
+                              ? `?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+                              : ""
+                          }`}
                           className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
                         >
                           {m.projectName}
@@ -2386,10 +2777,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       onClick={() => handleRescreen(s.id)}
                       className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={rescreeningId === s.id ? "animate-spin" : ""}>
-                        <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      {rescreeningId === s.id ? (
+                        <ScoringLoader className="h-5 w-16" strokeWidth={8} />
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
                       {rescreeningId === s.id ? "Rescreening…" : "Rescreen"}
                     </button>
                     {rescreenErrorId === s.id && (
@@ -2544,7 +2939,20 @@ function ArchiveFitCard({ projectId, candidate, onDecided, onScreened }: {
             className="text-violet-600 underline underline-offset-2 hover:text-violet-700 dark:text-violet-400">
             View resume
           </a>
-          <Link href={`/candidates/${candidate.screeningId}`} target="_blank"
+          <Link
+            // returnTo, 2026-08-11 — lower-stakes than the same-tab cases
+            // (target="_blank" opens a fresh tab, so there's no "wrong
+            // page" surprise the way there was for CPQ→FDE), but this new
+            // tab's own Back button would otherwise still fall back to
+            // whatever project this Archive Fits candidate's OWN screening
+            // belongs to rather than back to this Archive Fits queue — same
+            // fix for consistency.
+            href={`/candidates/${candidate.screeningId}${
+              typeof window !== "undefined"
+                ? `?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+                : ""
+            }`}
+            target="_blank"
             className="text-violet-600 underline underline-offset-2 hover:text-violet-700 dark:text-violet-400">
             Open card
           </Link>
@@ -2618,20 +3026,6 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
   // app/api/projects/[id]/archive-fits/check/route.ts.
   const [checkingArchive, setCheckingArchive] = useState(false);
   const [archiveCheckResult, setArchiveCheckResult] = useState<string | null>(null);
-  // Regenerate trajectories, 2026-08-04 (Vlad's ask, added then briefly
-  // removed then re-added same day) — backfills current company/title/
-  // total experience/LinkedIn for this project's already-screened
-  // candidates, so the FunnelView Excel export's columns aren't blank. As of
-  // 2026-08-06, NEW screenings get all four automatically at scoring time
-  // (lib/scoreCandidate.ts, do-not-touch exception) — this button now exists
-  // purely to backfill candidates screened BEFORE that wiring existed, per
-  // Vlad's explicit ask to keep it right here rather than duplicate it
-  // elsewhere. The route ONLY processes candidates missing current_company/
-  // current_title/totalExperienceSummary (see app/api/screenings/regenerate-
-  // trajectories/route.ts), so it's safe/cheap to click again later — it
-  // won't re-run or re-charge for anyone already backfilled.
-  const [regeneratingTrajectories, setRegeneratingTrajectories] = useState(false);
-  const [regenerateResult, setRegenerateResult] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
 
   async function saveName() {
@@ -2692,34 +3086,6 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
       setArchiveCheckResult("Network error — please try again");
     } finally {
       setCheckingArchive(false);
-    }
-  }
-
-  async function regenerateTrajectories() {
-    setRegeneratingTrajectories(true);
-    setRegenerateResult(null);
-    try {
-      const res = await fetch("/api/screenings/regenerate-trajectories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: project.id }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 403) {
-        setRegenerateResult("Admin only — ask an admin to run this.");
-        return;
-      }
-      if (!res.ok) {
-        setRegenerateResult(data.error ?? "Regeneration failed");
-        return;
-      }
-      const errorNote = data.errors?.length > 0 ? ` (${data.errors.length} failed)` : "";
-      const skippedNote = data.skipped > 0 ? `, skipped ${data.skipped} (already had it)` : "";
-      setRegenerateResult(`Updated ${data.updated ?? 0} candidate${data.updated === 1 ? "" : "s"}${skippedNote}${errorNote}.`);
-    } catch {
-      setRegenerateResult("Network error — please try again");
-    } finally {
-      setRegeneratingTrajectories(false);
     }
   }
 
@@ -2834,30 +3200,14 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
             {archiveCheckResult ?? "Look for archived candidates who'd be a better fit for this role."}
           </p>
         </div>
-        <button type="button" onClick={checkArchiveFits} disabled={checkingArchive}
-          className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-          {checkingArchive ? "Checking..." : "Check now"}
-        </button>
-      </div>
-
-      {/* Regenerate trajectories — Vlad's ask, 2026-08-04: backfills current
-          company/title/total-experience/LinkedIn for candidates in this role
-          that don't have them yet, so the FunnelView Excel export's columns
-          aren't blank. New screenings get these automatically as of
-          2026-08-06 — this stays for candidates screened before that.
-          Only processes candidates missing current_company/current_title/
-          totalExperienceSummary — safe to click again later. */}
-      <div className="flex items-center justify-between rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
-        <div>
-          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Regenerate trajectories</p>
-          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            {regenerateResult ?? "Backfill Current Company/Title/Total Experience/LinkedIn for candidates in this role who don't have them yet (new candidates get this automatically)."}
-          </p>
-        </div>
-        <button type="button" onClick={regenerateTrajectories} disabled={regeneratingTrajectories}
-          className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-          {regeneratingTrajectories ? "Regenerating..." : "Regenerate now"}
-        </button>
+        {checkingArchive ? (
+          <ScoringLoader className="h-7 w-44" />
+        ) : (
+          <button type="button" onClick={checkArchiveFits} disabled={checkingArchive}
+            className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            Check now
+          </button>
+        )}
       </div>
 
       {/* Status */}
@@ -3286,6 +3636,15 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
   const [photoUrls, setPhotoUrls] = useState<Record<number, string>>(() =>
     Object.fromEntries(screenings.filter((s) => s.photoUrl).map((s) => [s.id, `/api/history/${s.id}/photo`]))
   );
+  // Reject column collapse, 2026-08-15 (Vlad's ask: "just looks a lot when
+  // we keep adding them there") — plain count + expand toggle, NOT the
+  // "Multiple roles" identity-clustering pattern used elsewhere in this app
+  // (computeMatchClusters groups the same real person applying to multiple
+  // roles, which doesn't apply here — rejected candidates aren't duplicates
+  // of each other). Threshold and default collapsed state are a judgment
+  // call, not something Vlad specified a number for.
+  const REJECT_COLLAPSE_THRESHOLD = 6;
+  const [showAllRejected, setShowAllRejected] = useState(false);
 
   async function handlePhotoUpload(screeningId: number, file: File) {
     const form = new FormData();
@@ -3450,7 +3809,12 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
         {/* Swimlanes */}
         <div className="flex flex-col divide-y divide-zinc-100 rounded-2xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
           {allStages.map(({ key, label, isUnplaced }) => {
-            const candidates = grouped[key] ?? [];
+            const allCandidates = grouped[key] ?? [];
+            // Reject-only collapse — see showAllRejected's declaration above
+            // for why this isn't the "Multiple roles" pattern.
+            const isCollapsedReject = key === "Reject" && !showAllRejected && allCandidates.length > REJECT_COLLAPSE_THRESHOLD;
+            const candidates = isCollapsedReject ? allCandidates.slice(0, REJECT_COLLAPSE_THRESHOLD) : allCandidates;
+            const hiddenRejectedCount = isCollapsedReject ? allCandidates.length - candidates.length : 0;
             const c = isUnplaced
               ? { bg: "bg-zinc-50 dark:bg-zinc-900/50", text: "text-zinc-400 dark:text-zinc-500", dot: "bg-zinc-300", border: "border-zinc-200 dark:border-zinc-700", rowBg: "bg-zinc-50/60 dark:bg-zinc-900/30" }
               : STAGE_COLORS[key];
@@ -3470,7 +3834,7 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                     <span className={`h-1.5 w-1.5 rounded-full ${c.dot}`} />
                     <span className={`text-xs font-bold uppercase tracking-wide ${c.text}`}>{label}</span>
                   </div>
-                  <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-600">{candidates.length} {candidates.length === 1 ? "person" : "people"}</span>
+                  <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-600">{allCandidates.length} {allCandidates.length === 1 ? "person" : "people"}</span>
                 </div>
 
                 {/* Chips */}
@@ -3556,6 +3920,24 @@ function TrackerTab({ screenings, stagesMap, onStageChange, trackerData, onTrack
                       </div>
                     );
                   })}
+                  {isCollapsedReject && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllRejected(true)}
+                      className="flex items-center gap-1.5 self-center rounded-xl border border-dashed border-rose-200 px-3 py-2 text-xs font-semibold text-rose-500 transition-colors hover:border-rose-300 hover:bg-rose-50/60 dark:border-rose-500/25 dark:text-rose-400 dark:hover:bg-rose-500/10"
+                    >
+                      +{hiddenRejectedCount} more rejected — show all
+                    </button>
+                  )}
+                  {key === "Reject" && showAllRejected && allCandidates.length > REJECT_COLLAPSE_THRESHOLD && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllRejected(false)}
+                      className="flex items-center gap-1.5 self-center rounded-xl border border-dashed border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-400 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-500 dark:hover:bg-zinc-800"
+                    >
+                      Show less
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -3870,12 +4252,82 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Write tab/candidate state back into the URL (2026-08-11, Vlad's ask —
+  // pressing browser Back after following an internal link into this page
+  // (e.g. "Also screened in [project]" on ResultCard, a FunnelView deep
+  // link, Tracker's onViewResult) landed on whatever tab/candidate the URL
+  // happened to have at that ORIGINAL link, not whatever tab the recruiter
+  // had actually switched to locally since — switching tabs here (the
+  // button below, or onViewResult) only ever called setTab()/setExpandedId,
+  // never touched the URL, so there was nothing for Back to restore.
+  // history.replaceState (not router.replace/pushState) so every tab/filter
+  // change updates the CURRENT history entry in place instead of stacking
+  // up new ones — that would make Back need repeated presses just to leave
+  // the page. The entry that exists right before navigating away is always
+  // this page's latest state, so Back after that lands here exactly as it
+  // was left. Guarded on `loading` so this can't fire before the read
+  // effect above has applied a fresh deep link's own tab/candidate params.
+  useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(window.location.search);
+    if (tab !== "filters") params.set("tab", tab); else params.delete("tab");
+    if (expandedId != null) params.set("candidate", String(expandedId)); else params.delete("candidate");
+    const query = params.toString();
+    const newUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
+    if (newUrl !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(window.history.state, "", newUrl);
+    }
+  }, [tab, expandedId, loading]);
+
+  // Scroll position, same ask — restore where the recruiter was scrolled
+  // to, not just the right tab/candidate. Tied to this history entry's own
+  // `state` object (via replaceState) rather than a separate sessionStorage
+  // key, so it can never go stale or collide across different candidates/
+  // filter combinations — it's inherently scoped to the exact entry the
+  // params above already keep in sync. `scrollRestoration = "manual"`
+  // stops the browser's own automatic restore from fighting this: it fires
+  // on its own timing, before this page's async-loaded content has
+  // necessarily rendered at its real height.
+  useEffect(() => {
+    if (typeof window === "undefined" || !("scrollRestoration" in window.history)) return;
+    const prev = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    return () => { window.history.scrollRestoration = prev; };
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    const savedY = (window.history.state as { scrollY?: number } | null)?.scrollY;
+    if (typeof savedY === "number") {
+      // One rAF so this runs after the just-loaded content has actually
+      // laid out — restoring immediately on the same tick `loading` flips
+      // can land short if the page isn't tall enough yet.
+      requestAnimationFrame(() => window.scrollTo(0, savedY));
+    }
+    let raf = 0;
+    function onScroll() {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        window.history.replaceState(
+          { ...(window.history.state ?? {}), scrollY: window.scrollY },
+          "",
+          window.location.href
+        );
+      });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [loading]);
+
   if (loading) {
     return (
       <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
         <SiteHeader active="/projects" />
-        <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-10">
-          <span className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
+        <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-2 px-6 py-10">
+          <ScoringLoader className="h-10 w-72" />
         </main>
       </div>
     );
@@ -3948,6 +4400,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             projectId={project.id}
             jobDescription={project.jobDescription}
             onAnalysisUpdated={(newAnalysis, newJd) => setProject((p) => p ? { ...p, jdAnalysis: newAnalysis, jobDescription: newJd } : p)}
+            checklist={project.checklist}
+            onChecklistUpdated={(newChecklist) => setProject((p) => p ? { ...p, checklist: newChecklist } : p)}
           />
         )}
         {tab === "filters" && !project.jdAnalysis && (

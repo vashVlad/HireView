@@ -23,7 +23,7 @@ function getServerSnapshot() {
 
 function setTheme(isDark: boolean) {
   document.documentElement.classList.toggle("dark", isDark);
-  localStorage.setItem("hireview-theme", isDark ? "dark" : "light");
+  localStorage.setItem("cirot-theme", isDark ? "dark" : "light");
   listeners.forEach((listener) => listener());
 }
 

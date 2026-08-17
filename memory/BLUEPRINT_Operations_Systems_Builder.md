@@ -32,7 +32,7 @@ These five industries are the highest-opportunity targets based on 2026 market r
 - Average time-to-hire stretching to 42 days for skilled positions
 - Hiring managers and recruiters misaligned on what good looks like
 
-**Vlad's existing proof:** HireView at Brillio — resume screener + job description analyzer — 60% throughput improvement validated in live use.
+**Vlad's existing proof:** Cirot at Brillio — resume screener + job description analyzer — 60% throughput improvement validated in live use.
 
 **Opportunity size:** Every company with more than 10 employees is recruiting. Every staffing agency, every HR consultancy, every internal talent team has this problem right now.
 
@@ -102,7 +102,7 @@ These five industries are the highest-opportunity targets based on 2026 market r
 
 **Opportunity:** Staffing agencies, boutique consulting firms, accounting practices, and marketing agencies (10–100 employees) all have these problems. AI tools for proposal generation, onboarding automation, project tracking, and knowledge management have clear ROI and short sales cycles because the pain is visible and measurable.
 
-**Vlad's existing proof:** HireView solves a staffing/recruiting operations problem. The same methodology applies across the full professional services workflow.
+**Vlad's existing proof:** Cirot solves a staffing/recruiting operations problem. The same methodology applies across the full professional services workflow.
 
 ---
 
@@ -231,7 +231,7 @@ Every solution must have a dollar value attached. Use this formula:
 
 **Time saved per person per week × hourly cost × number of people × 52 weeks = annual dollar value**
 
-Example: HireView saves a recruiter 2 hours per week. Recruiter costs $35/hour. 1 recruiter.
+Example: Cirot saves a recruiter 2 hours per week. Recruiter costs $35/hour. 1 recruiter.
 Annual value = 2 × $35 × 52 = **$3,640/year** from one user. Team of 5 = **$18,200/year**.
 
 Industry benchmarks to reference when making the case:

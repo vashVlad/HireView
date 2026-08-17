@@ -16,7 +16,7 @@
 -- Vlad's ask, 2026-07-28: sessionStorage (the first attempt at "let me get
 -- back to the results I just screened") only lives in one browser tab, which
 -- doesn't hold up for a recruiter who explicitly works across two machines
--- (see CLAUDE.md's "why HireView is web-hosted, not local") — a real,
+-- (see CLAUDE.md's "why Cirot is web-hosted, not local") — a real,
 -- bookmarkable, cross-device URL needs to be backed by the database, not
 -- browser storage.
 --

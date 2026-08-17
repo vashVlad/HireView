@@ -1,5 +1,5 @@
 // word-extractor ships no bundled types and there's no @types package —
-// minimal ambient declaration covering the only method HireView uses
+// minimal ambient declaration covering the only method Cirot uses
 // (extractResumeText's .doc branch). See morungos/node-word-extractor.
 declare module "word-extractor" {
   interface WordDocument {

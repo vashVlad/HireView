@@ -1,10 +1,14 @@
 /**
- * HireView mark — "Summit Aperture", 2026-07-15.
+ * Cirot mark — "Summit Aperture", 2026-07-15. Designed under the platform's
+ * original name, HireView — the mountain/aperture concept was a "Hire = the
+ * climb" / "Higher View = looking through a lens from the top" pun that no
+ * longer maps to the Cirot name (renamed 2026-08-11, text-only rebrand — see
+ * decisions-log.md). Visual mark left as-is; only the literal name strings
+ * changed. Worth a fresh look if the mismatch bothers Vlad, not urgent.
  *
- * A two-facet low-poly mountain (Hire = the climb; the two facets at
- * different opacity give it depth instead of reading as one flat triangle)
- * with a circular aperture cut through the summit (Higher View = looking
- * through a lens from the top). The aperture carries a 6-blade iris rim so
+ * A two-facet low-poly mountain (the two facets at different opacity give it
+ * depth instead of reading as one flat triangle) with a circular aperture cut
+ * through the summit. The aperture carries a 6-blade iris rim so
  * it reads as an actual camera aperture, not just a hole, and one blade +
  * the off-center focus dot are amber — reusing the same amber the rest of
  * the app already uses for "attention" (pending-request badge, admin role
@@ -36,7 +40,7 @@ export function Logo({
       viewBox="0 0 100 100"
       className={`${rounded} shadow-md shadow-violet-500/30 ${className}`}
       role="img"
-      aria-label="HireView"
+      aria-label="Cirot"
     >
       <defs>
         <linearGradient id="hv-logo-brand" x1="0" y1="0" x2="1" y2="1">
