@@ -66,7 +66,18 @@ export function buildLoopingPath(): string {
   return d;
 }
 
-export function ScoringLoader({ className = "h-6 w-full", strokeWidth = 2 }: { className?: string; strokeWidth?: number }) {
+export function ScoringLoader({
+  className = "h-6 w-full",
+  strokeWidth = 2,
+  // Stroke color, 2026-08-17 (added when wiring this into white-text-on-
+  // color-background buttons, e.g. "Create role"'s violet gradient — the
+  // original hardcoded Cirot blue is invisible/low-contrast there, same
+  // problem the old per-spot spinners solved by hand with
+  // border-white/40 border-t-white on colored buttons vs.
+  // border-zinc-200 border-t-violet-600 on white ones). Defaults to the
+  // established Cirot blue for every existing on-white/on-surface usage.
+  stroke = "#2563eb",
+}: { className?: string; strokeWidth?: number; stroke?: string }) {
   // Generated once per mount, not per render — a fresh random path every
   // time this loader appears is the "generative" part of the spec, but it
   // must stay fixed for the lifetime of one mount or the scroll animation
@@ -87,7 +98,7 @@ export function ScoringLoader({ className = "h-6 w-full", strokeWidth = 2 }: { c
       >
         {[0, 1].map((i) => (
           <g key={i} transform={`translate(${i * VIEW_W}, 0)`}>
-            <path d={d} fill="none" stroke="#2563eb" strokeWidth={strokeWidth} strokeLinecap="round" />
+            <path d={d} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeLinecap="round" />
           </g>
         ))}
       </svg>

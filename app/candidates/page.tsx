@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { ScoringLoader } from "@/components/ScoringLoader";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { FraudRiskChecker } from "@/components/FraudRiskChecker";
@@ -1098,8 +1099,8 @@ export default function CandidatesPage() {
 
         {/* List */}
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <span className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
+          <div className="flex flex-col items-center justify-center gap-2 py-20">
+            <ScoringLoader className="h-10 w-72" />
           </div>
         ) : screenings.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { ScoringLoader } from "@/components/ScoringLoader";
 import type { CandidateResult } from "@/lib/types";
 
 type Precheck = "idle" | "loading" | { screeningId: number; score: number } | "error";
@@ -216,7 +217,10 @@ export function TransferControl({
           </select>
 
           {precheck === "loading" && (
-            <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500">Checking…</p>
+            <div className="mt-2 flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
+              <ScoringLoader className="h-4 w-14" strokeWidth={9} />
+              Checking…
+            </div>
           )}
           {precheck === "error" && (
             <p className="mt-2 text-xs text-rose-500">Couldn't check that project — try again.</p>
@@ -238,7 +242,14 @@ export function TransferControl({
                 onClick={() => commitTransfer("existing", (precheck as { screeningId: number }).screeningId)}
                 className="inline-flex w-fit items-center gap-1.5 rounded-full bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {committing ? "Transferring…" : "Transfer to that result"}
+                {committing ? (
+                  <>
+                    <ScoringLoader className="h-4 w-14" strokeWidth={9} stroke="currentColor" />
+                    Transferring…
+                  </>
+                ) : (
+                  "Transfer to that result"
+                )}
               </button>
               {error && <p className="text-xs text-rose-500">{error}</p>}
             </div>
@@ -257,7 +268,10 @@ export function TransferControl({
                 </button>
               )}
               {preview === "loading" && (
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">Screening…</p>
+                <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
+                  <ScoringLoader className="h-4 w-14" strokeWidth={9} />
+                  Screening…
+                </div>
               )}
               {preview === "error" && (
                 <div className="flex items-center gap-2">
@@ -271,7 +285,10 @@ export function TransferControl({
                 </div>
               )}
               {previewReady && committing && (
-                <p className="text-xs text-zinc-400 dark:text-zinc-500">Transferring…</p>
+                <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
+                  <ScoringLoader className="h-4 w-14" strokeWidth={9} />
+                  Transferring…
+                </div>
               )}
               {previewReady && !committing && error && (
                 <div className="flex flex-col gap-1.5">

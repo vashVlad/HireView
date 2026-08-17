@@ -500,7 +500,7 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
 
         {generatingChecklist ? (
           <div className="mt-4 flex flex-col items-center gap-2 py-6">
-            <ScoringLoader className="h-6 w-40" />
+            <ScoringLoader className="h-8 w-56" />
             <span className="text-xs text-zinc-400 dark:text-zinc-500">Building checklist from the JD…</span>
           </div>
         ) : checklistItems.length === 0 ? (
@@ -1391,7 +1391,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
 
       {screenView === "loading" && (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-zinc-200 bg-zinc-50/80 py-6 dark:border-zinc-800 dark:bg-zinc-800/40">
-          <ScoringLoader className="h-8 w-56" />
+          <ScoringLoader className="h-10 w-72" />
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
             {isLinkedInMode ? "Screening profiles…" : "Screening resumes…"}
           </span>
@@ -2777,10 +2777,14 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       onClick={() => handleRescreen(s.id)}
                       className="inline-flex w-fit items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={rescreeningId === s.id ? "animate-spin" : ""}>
-                        <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
-                        <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      {rescreeningId === s.id ? (
+                        <ScoringLoader className="h-5 w-16" strokeWidth={8} />
+                      ) : (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
                       {rescreeningId === s.id ? "Rescreening…" : "Rescreen"}
                     </button>
                     {rescreenErrorId === s.id && (
@@ -3197,7 +3201,7 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
           </p>
         </div>
         {checkingArchive ? (
-          <ScoringLoader className="h-6 w-32" />
+          <ScoringLoader className="h-7 w-44" />
         ) : (
           <button type="button" onClick={checkArchiveFits} disabled={checkingArchive}
             className="rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
@@ -4322,8 +4326,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     return (
       <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-zinc-950">
         <SiteHeader active="/projects" />
-        <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 py-10">
-          <span className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
+        <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-2 px-6 py-10">
+          <ScoringLoader className="h-10 w-72" />
         </main>
       </div>
     );

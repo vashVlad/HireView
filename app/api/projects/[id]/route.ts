@@ -25,12 +25,26 @@ export async function GET(
     // Checklist, 2026-08-17 — same isolated-read-merged-on pattern as
     // excludeFromFitSuggestions above, and same reason (kept out of
     // getProject()'s shared select — see lib/projects.ts's
-    // getProjectChecklist comment). Unlike excludeFromFitSuggestions this
-    // does NOT fail closed to a safe default — a genuine read error here
-    // surfaces as this whole GET failing (caught below), since the Filters
-    // tab needs to know the difference between "no checklist configured
-    // yet" (null) and "couldn't load the checklist" (error).
-    const checklist = await getProjectChecklist(numId);
+    // getProjectChecklist comment).
+    //
+    // REAL BUG, fixed same day: this originally called getProjectChecklist()
+    // unguarded, letting a pre-migration error throw all the way out to this
+    // route's own catch block below — which turned EVERY project page load
+    // into "Role not found." (the frontend treats any {error} response as
+    // not-found) the moment supabase-migration-checklist.sql hadn't run yet,
+    // not just the Filters tab. This route is the general-purpose project
+    // loader every tab depends on, not a checklist-specific endpoint — a
+    // missing checklist column can never be allowed to take down the whole
+    // page. Best-effort now, degrades to null on any error (including the
+    // column not existing), same fail-closed convention as
+    // excludeFromFitSuggestions above. The dedicated
+    // /api/projects/[id]/checklist route (Filters tab's actual read/write
+    // path) is still the right place for hard-fail-on-error semantics —
+    // this shared route just isn't it.
+    const checklist = await getProjectChecklist(numId).catch((err) => {
+      console.error("Checklist read failed on project GET (degrading to null, rest of the page is unaffected):", err);
+      return null;
+    });
     return NextResponse.json({ project: { ...project, excludeFromFitSuggestions, checklist } });
   } catch (err) {
     console.error("Project GET error:", err);

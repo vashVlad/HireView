@@ -162,7 +162,7 @@ export function FraudRiskChecker({ screeningId, roleContext, currentAssessment, 
           {checkState === "checking" && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/70 dark:bg-zinc-900/70">
               <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border border-zinc-300 border-t-zinc-600 dark:border-zinc-600 dark:border-t-zinc-300" />
+                <ScoringLoader className="h-5 w-16" strokeWidth={8} />
                 {unsavedAssessment ? "Saving…" : "Re-checking…"}
               </div>
             </div>
@@ -192,7 +192,7 @@ export function FraudRiskChecker({ screeningId, roleContext, currentAssessment, 
         >
           {checkState === "checking" ? (
             <>
-              <span className="h-3 w-3 animate-spin rounded-full border border-zinc-300 border-t-zinc-600 dark:border-zinc-600 dark:border-t-zinc-300" />
+              <ScoringLoader className="h-4 w-14" strokeWidth={9} />
               Checking…
             </>
           ) : (
@@ -206,7 +206,7 @@ export function FraudRiskChecker({ screeningId, roleContext, currentAssessment, 
   if (checkState === "checking") {
     return (
       <div className="flex flex-col items-center gap-2 border-t border-zinc-100 py-6 dark:border-zinc-800">
-        <ScoringLoader className="h-8 w-56" />
+        <ScoringLoader className="h-10 w-72" />
         <span className="text-xs text-zinc-400 dark:text-zinc-500">Running fraud risk check…</span>
       </div>
     );

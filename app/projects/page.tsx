@@ -262,7 +262,7 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-500 shadow-sm transition-colors hover:border-violet-300 hover:text-violet-600 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:border-violet-500 dark:hover:text-violet-400"
               >
                 {extracting ? (
-                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-violet-500" />
+                  <ScoringLoader className="h-4 w-14" strokeWidth={9} />
                 ) : (
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -285,7 +285,7 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         {/* Step: analyzing */}
         {step === "analyzing" && (
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/80 py-10 dark:border-zinc-800 dark:bg-zinc-800/40">
-            <ScoringLoader className="h-8 w-56" />
+            <ScoringLoader className="h-10 w-72" />
             <span className="text-sm text-zinc-500 dark:text-zinc-400">Analyzing the job description…</span>
           </div>
         )}
@@ -352,7 +352,7 @@ function NewRoleModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
                 className="flex flex-[2] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/25 transition-all hover:shadow-xl hover:shadow-violet-500/30 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none">
                 {step === "saving" ? (
                   <>
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    <ScoringLoader className="h-5 w-16" strokeWidth={8} stroke="#ffffff" />
                     Creating...
                   </>
                 ) : "Create role"}
@@ -481,8 +481,8 @@ export default function ProjectsPage() {
           subtitle="Every open role and its screening pipeline, in one place."
         />
         {loading ? (
-          <div className="flex flex-1 items-center justify-center py-20">
-            <span className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-violet-600" />
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 py-20">
+            <ScoringLoader className="h-10 w-72" />
           </div>
         ) : projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
