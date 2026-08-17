@@ -1386,6 +1386,32 @@ async function attachChecklistEvaluations(records: ScreeningRecord[]): Promise<S
 }
 
 /**
+ * embedding, 2026-08-17 (roadmap 2.5.9, global talent search) — same
+ * isolated-write reasoning as attachChecklistEvaluations above: `embedding`
+ * is a brand new, not-yet-migrated column
+ * (supabase-migration-candidate-embeddings.sql) on a 1024-wide `vector`
+ * type, deliberately kept OUT of the shared SCREENING_COLUMNS select (a
+ * missing/not-yet-migrated column there would fail the WHOLE query, per the
+ * same real incident documented on that constant). Called by
+ * app/api/screen-resumes/route.ts AFTER saveScreening() already has a real
+ * screening id — embedding text depends on the AI-generated summary/
+ * strengths/concerns (see lib/embeddings.ts's buildCandidateEmbeddingText),
+ * so it can't run in the same Promise.all as scoring/fingerprinting/
+ * checklist evaluation the way those do; it's a genuine second step, not a
+ * missed parallelization opportunity.
+ *
+ * Throws on failure (unlike attachChecklistEvaluations, which swallows) —
+ * deliberately, so the caller's own best-effort .catch() at the route level
+ * is the single place this failure is handled and logged, rather than
+ * silently swallowing it here AND there.
+ */
+export async function setScreeningEmbedding(id: number, embedding: number[]): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("screenings").update({ embedding }).eq("id", id);
+  if (error) throw error;
+}
+
+/**
  * teamIds: undefined = no filter (admin, sees all). Empty array = recruiter
  * with no team membership, short-circuits to [] without hitting the DB.
  */

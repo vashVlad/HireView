@@ -4,7 +4,8 @@ import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { generateFingerprint } from "@/lib/generateFingerprint";
-import { saveScreening } from "@/lib/screenings";
+import { saveScreening, setScreeningEmbedding } from "@/lib/screenings";
+import { generateEmbedding, buildCandidateEmbeddingText } from "@/lib/embeddings";
 import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import { evaluateChecklist } from "@/lib/evaluateChecklist";
 import { getProject, getProjectChecklist } from "@/lib/projects";
@@ -320,6 +321,33 @@ export async function POST(request: NextRequest) {
           checklistEvaluation,
         });
         result.id = id;
+
+        // DO-NOT-TOUCH EXCEPTION (2026-08-17, roadmap 2.5.9 — global talent
+        // search): embedding text depends on `result`'s AI-generated
+        // summary/strengths/concerns (see lib/embeddings.ts's
+        // buildCandidateEmbeddingText), so unlike the fingerprint/checklist
+        // branches above this genuinely can't join the earlier Promise.all —
+        // it has to run after scoring produces `result`, not alongside it.
+        // Requires a real screening id too (setScreeningEmbedding writes by
+        // id), so it also can't run before saveScreening above. Awaited, not
+        // fire-and-forget, same reasoning as the "Awaited (not fire-and-
+        // forget)" comment on saveScreening itself just above — Vercel can
+        // freeze the function once the response is sent. Best-effort
+        // end-to-end: a missing VOYAGE_API_KEY, a Voyage API failure, or the
+        // embedding migration not being run yet all degrade to "this
+        // candidate isn't searchable yet," never to a failed/lost screening.
+        try {
+          const embeddingText = buildCandidateEmbeddingText({
+            summary: result.summary,
+            strengths: result.strengths,
+            concerns: result.concerns,
+            careerTrajectory: result.careerTrajectory,
+          });
+          const embedding = await generateEmbedding(embeddingText, "document");
+          if (embedding) await setScreeningEmbedding(id, embedding);
+        } catch (err) {
+          console.error("Embedding generation/save failed (screening unaffected):", err);
+        }
       } catch (err) {
         console.error("Failed to persist screening result:", err);
       }
