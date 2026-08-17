@@ -12,6 +12,66 @@ One entry per work session with real changes. Keep it short (3-6 lines). This is
 
 ---
 
+## 2026-08-17 — JD checklist ("Trust badge") built end-to-end (Cowork), real code, not just plan
+- **What changed:** full feature, not a prototype — `lib/generateChecklist.ts` (per-project generation), `lib/evaluateChecklist.ts` (per-candidate evaluation + deterministic `computeChecklistScoreDelta`), wired as a third parallel call alongside `scoreCandidate()`/`generateFingerprint()` in `app/api/screen-resumes/route.ts` (do-not-touch exception, same shape as the 2026-08-07 target-company-boost one). Score delta applied in `lib/screenings.ts`'s `saveScreening()`, same pattern as the target-company boost — confirms and supersedes the earlier open-questions.md note that this would need a `scoreCandidate.ts` exception; it doesn't. New `checklist`/`checklist_evaluation` columns (`supabase-migration-checklist.sql`, NOT YET RUN), both isolated single-purpose reads (`lib/projects.ts`'s `getProjectChecklist`, `lib/screenings.ts`'s `attachChecklistEvaluations`) — never folded into the shared `SCREENING_COLUMNS`/`listProjects` selects, per the standing Migration Sequencing rule. Filters-tab UI (two tabs, individually editable label/points, regenerate-with-confirm) and a ResultCard checklist breakdown (fired items only, denormalized label/category/points per result so a later checklist edit can't retroactively change what an old evaluation shows) both built and wired.
+- **Why:** critical-path item from the 2026-08-15 roadmap session — item 3 of the Candidate Insight roadmap, blocks item 2 (trajectory overlay) and item 5 stage 2 (archive-fit skill matching).
+- **Verified:** `npx tsc --noEmit` clean throughout. Do-not-touch files (`lib/scoreCandidate.ts`, `app/api/screen-resumes/route.ts`) confirmed zero unintended diff (`git diff --ignore-space-at-eol -b -w`). Deterministic score-delta math unit-tested (plain Node, 5 cases, all pass). Not live-tested (no network access this session) — needs the migration run, then a real generate → screen → verify-score-delta pass.
+- **What's next:** run `supabase-migration-checklist.sql`, live-test, then pick up roadmap items 2/5 (both now unblocked). Full Claude Code handoff prompt and Supabase query list written this session — see `memory/claude-code-handoff-2026-08-17.md` and `docs/Cirot-Supabase-Migrations-To-Run-2026-08-17.md`.
+
+---
+
+## 2026-08-15 (later) — Global talent search designed (Cowork, plan only): embeddings-based semantic search across all candidates, nothing built
+- **Ask (Vlad):** wanted an "experience lookup" search — type or select experience/skills, get matching candidates back. Started as a per-project checklist-driven picklist idea, but Vlad clarified he actually wants it global, across every candidate/project, which is also why he'd separately floated a recruiter chatbot before (see open-questions.md's older, still-backlogged chatbot note).
+- **Why this needs new infrastructure, not just a query:** different JDs phrase the same skill differently, so there's no shared vocabulary to filter against across projects. Checked the codebase for anything reusable first — `lib/generateFingerprint.ts`'s `responsibility_vectors` field is a **misleading name**, it's an array of short text strings compared via Jaccard word-overlap for fraud/duplicate detection, not a real embedding. No vector/embedding infrastructure exists anywhere in this codebase today.
+- **Decided design:** a real embedding call (Voyage AI, Anthropic's recommended partner — Claude itself doesn't generate embeddings), run as a third parallel call alongside the existing `scoreCandidate()`/`generateFingerprint()` pair at screening time, not merged into either. Input: concatenated `summary` + `strengths` + `concerns` + `careerTrajectory` (all already generated/saved today) — not just the one-sentence summary alone, too thin to search well. Needs a new `pgvector` column and a one-time backfill for the current 397 candidates, same deferred-column pattern already used elsewhere (`suggested_role_fits`, `blacklisted`, etc.) — no do-not-touch exception needed, embeddings live in their own new file, same relationship to `scoreCandidate.ts` as `generateFingerprint.ts` already has.
+- **Search mechanics:** query text gets embedded once, compared via vector similarity against pre-built candidate embeddings — fast and cheap regardless of pool size, no per-search AI call. Explicitly **no LLM explanation call** on top (Vlad's call, cost/simplicity) — results are ranked by vector similarity, with a cosmetic pass afterward that highlights literal query-term overlaps in the displayed result text. Flagged and accepted: a real semantic match can still show zero highlighted words if the candidate's text never uses the query's literal phrasing (e.g. "Kubernetes" vs. query "container orchestration") — highlighting is decoration, not the actual ranking signal.
+- **UI placement, All Candidates page:** the page's existing filter pills (flagged/fraud/blacklisted/score/date, `app/candidates/page.tsx` ~line 979) collapse into one "Filters" button + panel. Talent search sits as its own separate, visible control next to it, not buried in the panel, since it's a different interaction (type a query, explicit submit) than the checkbox-style filters (instant, live). Talent search results stack with whatever filters are already active (project, status, etc.) rather than always searching the full global pool, keeps the mental model consistent with the rest of the page.
+- **Not built** — plan only, per Vlad's standing instruction this session.
+
+---
+
+## 2026-08-15 — Loading animation designed (Cowork, visual prototype only): generative scrolling line graph, seamless loop, nothing built
+- **Ask (Vlad):** every wait state in the app (screening, cross-reference check, archive-fit checking, suggested-role-fit during new role creation) either has no loading indicator or a generic one. Wanted one shared animation that looks like live scoring happening, reusable at any size.
+- **Landed on:** a generative wandering line (random walk, smoothed with quadratic beziers), animated as an infinitely scrolling SVG marquee. Two bugs found and fixed while prototyping: (1) the path's random endpoint didn't match its fixed start, so the loop visibly jumped — fixed by drifting the whole path back toward its start value proportionally as it's generated, so the last point lands exactly on the first; (2) the SVG's `viewBox` only covered one segment's width while two segments were drawn inside it, causing a rendering mismatch that looked like a restart — fixed by doubling the viewBox to match the full two-segment width. Color: Cirot blue (`#2563eb`), not the generic accent token. Confirmed working at 3 sizes: inline (next to a button), card (mid-screening), full panel (cross-reference check), same component, no size-specific variants needed.
+- **Not built into the app** — this was a visual prototype only (Cowork's widget tool), not real code in the Cirot repo. Needs a real React/SVG component built from this spec, wired into wherever a loading state exists today.
+- **Next:** whoever picks this up should treat the two bug fixes above as required, not optional — an early version without them looked broken/restarting even though it was technically "looping."
+
+---
+
+## 2026-08-14 — Roadmap review (Cowork, not Claude Code): consolidated card, credibility trajectory overlay, JD checklist, Signals export — full scope decided, nothing built
+- **Ask (Vlad):** review the main agent's "Candidate Insight Roadmap" doc against the real code and against pilot scale (54 recruiters / ~18,900 candidates/month projected vs. 397 candidates / 2 recruiters actual today). Iterative scoping conversation, explicitly plan-only — no code touched.
+- **Corrections made to the roadmap doc along the way:** `CrossReferenceChecker` lives inside `components/CredibilityChecker.tsx`, there's no separate file by that name; `lib/generateTrajectory.ts` is a manual backfill path only, not live, so the real live trajectory data comes from `scoreCandidate.ts` (do-not-touch) — building the graph off real ongoing data needs an exception, contrary to the doc's framing; there are 3 hand-built chart components (`analytics/page.tsx` x2, `funnelview/page.tsx` x1), not 1.
+- **Full build-ready spec for all 5 pieces is in open-questions.md's matching 2026-08-14 entry** — consolidated card, trajectory + cross-reference overlay, JD checklist ("Trust badge"), FunnelView "Signals" column, and a deferred archive-fit-matching idea.
+- Load-neutral assessment: everything here is recruiter-triggered/one-off (credibility checks, checklist edits, exports), not batch, so none of it touches the `CONCURRENCY = 3` screening ceiling — the real cost is roughly doubling per-credibility-check AI spend, not throughput.
+- **Next:** none of this is built. Whoever picks it up (Claude Code or a future Cowork session) should start from the open-questions.md spec, and build the JD checklist (item 3) before the cross-reference comparison (item 2), since both documents need to score against the same checklist for the comparison to mean anything.
+
+---
+
+## 2026-08-11 (round 80) — Verification pass: audited every /candidates/ link, found and fixed 3 more missing returnTo
+- **Ask (Vlad):** "make sure that you didn't break any logic and applied the fix only where it's needed."
+- **Found:** `grep`-audited every `/candidates/[id]` link in the app. 2 already fixed (round 79), 1 already correct pre-existing (`AlreadyScreenedCard.tsx`), but **3 more still missing `returnTo`** — `StatusStageControl.tsx` and `TransferControl.tsx`'s "view the transferred candidate" links (the actual Transfer-button case from Vlad's original ask, not just "Also screened in") plus Archive Fits' "Open card" link (`target="_blank"`, lower stakes, fixed for consistency).
+- **Fix:** identical pattern to round 79, applied to the 3 missed spots. No new mechanism.
+- **Verified:** `npx tsc --noEmit -p .` clean, do-not-touch unchanged, diffs on both files confirmed as single-line `href` swaps only. Full detail in [[decisions-log]].
+
+---
+
+## 2026-08-11 (round 79) — Fixed the real bug round 78 didn't cover: "Also screened in" links land Back on the wrong project entirely
+- **Ask (Vlad), with screenshots:** clicking "Also screened in Forward Deployed Engineer" from a CPQ Pipeline card, then pressing that candidate page's own Back button, landed on Forward Deployed Engineer's Screen tab — not CPQ.
+- **Different root cause from round 78:** this link navigates to `/candidates/[id]`, a real separate page with its own existing 3-tier deterministic Back button (`returnTo` → sessionStorage → `/candidates` list). Neither "also screened in" link (`app/projects/[id]/page.tsx`'s Pipeline card, `ResultCard.tsx`'s already-in-project mention) was passing `returnTo`, so Back always fell to tier 2: the MATCHED screening's own project, not where the recruiter actually clicked from.
+- **Fix:** both links now append `returnTo=<current URL>`. Composes with round 78's fix — since the origin page's URL is now kept accurate (tab/filters/scroll), whatever lands in `returnTo` already has the exact view to restore. Full detail in [[decisions-log]].
+- **Verified:** `npx tsc --noEmit -p .` clean, do-not-touch untouched, hand-traced the exact 3-screenshot repro. **Not yet live-tested by Vlad.**
+
+---
+
+## 2026-08-11 (round 78) — Browser Back now restores exact project-page state, not just the right page
+- **Ask (Vlad):** clicking ResultCard's "Also screened in [project]" link then pressing Back landed on the wrong tab of the original project — wanted Back to restore tab, filters, expanded candidate, and scroll position everywhere this kind of internal link exists.
+- **Root cause + fix, full detail in [[decisions-log]]:** `app/projects/[id]/page.tsx`'s tab/expandedId and `PipelineTab`'s own filters were plain `useState`, never reflected in the URL, so Back had nothing real to restore. Now synced continuously via `history.replaceState` (not `pushState` — one entry per project view, not one per filter tweak) on both the parent (tab, expandedId) and `PipelineTab` (search/status/recruiter/flagged/sort). Scroll position rides on the same history entry's `state` object.
+- **Fixes every link into this page at once** (FunnelView deep links, Tracker's onViewResult, cross-project match links) since they all share this one destination component.
+- **Not done:** `app/candidates/page.tsx` has the identical gap, same pattern would apply — flagged in [[open-questions]], not built this round.
+- **Verified:** `npx tsc --noEmit -p .` clean, do-not-touch files untouched, hand-traced the exact repro against the new code. **Not yet live-tested by Vlad.**
+
+---
+
 ## 2026-08-11 (round 77) — Platform renamed HireView → Cirot (full text rebrand)
 - **Ask (Vlad):** "Rename the platform to Cirot."
 - **Scope, confirmed via AskUserQuestion:** full rebrand (UI + code metadata + docs/*.md + localStorage key) and rewrite CLAUDE.md + all memory/ narrative, not just the living spec. Full reasoning + exact file list in [[decisions-log]].

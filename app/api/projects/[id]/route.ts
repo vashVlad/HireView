@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteProject, getProject, getProjectFitExclusion, updateProject } from "@/lib/projects";
+import { deleteProject, getProject, getProjectChecklist, getProjectFitExclusion, updateProject } from "@/lib/projects";
 import { canAccessProject, getAuthUser, isAdmin } from "@/lib/auth";
 
 export async function GET(
@@ -22,7 +22,16 @@ export async function GET(
     // Isolated read, merged on — see getProjectFitExclusion's own comment
     // for why this is kept out of getProject()'s shared select.
     const excludeFromFitSuggestions = await getProjectFitExclusion(numId);
-    return NextResponse.json({ project: { ...project, excludeFromFitSuggestions } });
+    // Checklist, 2026-08-17 — same isolated-read-merged-on pattern as
+    // excludeFromFitSuggestions above, and same reason (kept out of
+    // getProject()'s shared select — see lib/projects.ts's
+    // getProjectChecklist comment). Unlike excludeFromFitSuggestions this
+    // does NOT fail closed to a safe default — a genuine read error here
+    // surfaces as this whole GET failing (caught below), since the Filters
+    // tab needs to know the difference between "no checklist configured
+    // yet" (null) and "couldn't load the checklist" (error).
+    const checklist = await getProjectChecklist(numId);
+    return NextResponse.json({ project: { ...project, excludeFromFitSuggestions, checklist } });
   } catch (err) {
     console.error("Project GET error:", err);
     return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });

@@ -21,7 +21,7 @@ import { getRecruiterEmailMap } from "./recruiters";
 import { computeTargetCompanyBoost } from "./targetCompanyBoost";
 import { detectLinkedIn } from "./assessCredibility";
 import type {
-  BlacklistEntry, CandidateResult, CandidateStatus, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
+  BlacklistEntry, CandidateResult, CandidateStatus, ChecklistEvaluation, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
   Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage,
 } from "./types";
 import { DEFAULT_AUTO_ARCHIVE_REASON } from "./types";
@@ -849,8 +849,21 @@ export async function saveScreening(params: {
    * linkedInContext/scoreThreshold/teamId — zero extra DB round trips.
    */
   targetCompanies?: string[];
+  /**
+   * Pre-computed checklist evaluation, 2026-08-17 (Vlad's ask: JD checklist
+   * / "Trust badge"). Same precomputed-by-caller pattern as `fingerprint`
+   * above, not `targetCompanies` — evaluateChecklist() needs a real Claude
+   * call (unlike the plain substring match in targetCompanyBoost.ts), so
+   * app/api/screen-resumes/route.ts runs it in the same Promise.all as
+   * scoreCandidate()/generateFingerprint() and passes the finished result
+   * straight through here. Optional — omit for callers with no project
+   * checklist configured (save-one/route.ts, or a project with none set).
+   * Pass explicit `null` when the caller attempted evaluation and it failed,
+   * matching fingerprint's null-vs-omit convention.
+   */
+  checklistEvaluation?: ChecklistEvaluation | null;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies, checklistEvaluation } = params;
   const supabase = getSupabaseClient();
 
   // Real bug found 2026-07-20 (Vlad: "FunnelView didn't save the recruiter
@@ -961,6 +974,22 @@ export async function saveScreening(params: {
     result.targetCompanyMatches = boost.matchedCompanies;
   }
 
+  // JD checklist score delta, 2026-08-17 (Vlad's ask). Same deterministic-
+  // application pattern as the target-company boost directly above — the
+  // per-item point values and fired/not-fired decisions are already fully
+  // resolved by the time this runs (see lib/evaluateChecklist.ts, called by
+  // the route BEFORE saveScreening, in parallel with scoreCandidate()). This
+  // block only applies the already-computed delta and clamps — same [0,100]
+  // bound as the auto-archive threshold check below relies on. Runs after
+  // the target-company boost so both adjustments stack on the model's raw
+  // score, in the order they happened to be computed — order between the
+  // two doesn't matter since both are plain addition before the single
+  // clamp here.
+  if (checklistEvaluation) {
+    result.score = Math.max(0, Math.min(100, result.score + checklistEvaluation.scoreDelta));
+    result.checklistEvaluation = checklistEvaluation;
+  }
+
   const resumePath = `${randomUUID()}/${sanitizeStorageFileName(result.fileName)}`;
   const upload = await supabase.storage
     .from(RESUME_BUCKET)
@@ -1050,6 +1079,11 @@ export async function saveScreening(params: {
       // company-boost.sql), only set when the boost was actually evaluated
       // above (undefined = no target companies configured, skip entirely).
       ...(result.targetCompanyMatches !== undefined ? { targetCompanyMatches: result.targetCompanyMatches } : {}),
+      // Same deferred-migration reasoning as targetCompanyMatches directly
+      // above (supabase-migration-checklist.sql) — only set when a checklist
+      // was actually configured+evaluated for this project (undefined = no
+      // checklist, skip entirely, same convention as targetCompanyMatches).
+      ...(result.checklistEvaluation !== undefined ? { checklistEvaluation: result.checklistEvaluation } : {}),
     });
   } catch {
     /* pre-migration or other non-fatal failure — the screening itself already saved above */
@@ -1319,6 +1353,39 @@ async function enrichHistoryAlerts(records: ScreeningRecord[]): Promise<Screenin
 }
 
 /**
+ * checklist_evaluation, 2026-08-17 (Vlad's ask) — deliberately a SEPARATE,
+ * scoped, best-effort query, NOT folded into SCREENING_COLUMNS/rowToRecord.
+ * This follows a real incident already documented in
+ * lib/funnelview/data.ts's fetchCurrentRoleColumn (2026-08-06): bundling a
+ * not-yet-migrated column into the shared select made the WHOLE query fail,
+ * silently wiping out unrelated already-populated columns for every
+ * screening on the page, not just the missing one. Scoped with `.in("id",
+ * ...)` to just the records already being returned (unlike
+ * fetchCurrentRoleColumn's whole-table fetch) since this runs on every
+ * Pipeline/All Candidates load, not just FunnelView's export.
+ */
+async function attachChecklistEvaluations(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  if (records.length === 0) return records;
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase
+      .from("screenings")
+      .select("id, checklist_evaluation")
+      .in("id", records.map((r) => r.id))
+      .returns<{ id: number; checklist_evaluation: ChecklistEvaluation | null }[]>();
+    if (error) throw error;
+    const byId = new Map((data ?? []).map((r) => [r.id, r.checklist_evaluation]));
+    return records.map((r) => {
+      const ev = byId.get(r.id);
+      return ev ? { ...r, checklistEvaluation: ev } : r;
+    });
+  } catch (err) {
+    console.error("checklist_evaluation unavailable (migration likely not run yet) — degrading to undefined for this field only:", err);
+    return records;
+  }
+}
+
+/**
  * teamIds: undefined = no filter (admin, sees all). Empty array = recruiter
  * with no team membership, short-circuits to [] without hitting the DB.
  */
@@ -1359,7 +1426,9 @@ export async function listScreenings(
   const { data, error } = await request.returns<ScreeningRow[]>();
   if (error) throw error;
 
-  return attachRecruiterEmails(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))));
+  return attachRecruiterEmails(
+    await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))
+  );
 }
 
 export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord[]> {
@@ -1370,7 +1439,9 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
     .in("id", ids)
     .returns<ScreeningRow[]>();
   if (error) throw error;
-  return attachRecruiterEmails(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))));
+  return attachRecruiterEmails(
+    await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))
+  );
 }
 
 /**
@@ -1630,6 +1701,15 @@ export async function updateScreening(
     linkedinUrl?: string;
     /** Same deferred-column pattern as currentCompany above — see lib/types.ts's ScreeningRecord.targetCompanyMatches. Added 2026-08-07. */
     targetCompanyMatches?: string[];
+    /**
+     * JD checklist per-candidate result, 2026-08-17 (Vlad's ask). Same
+     * deferred-column pattern as targetCompanyMatches above — requires
+     * supabase-migration-checklist.sql, NOT YET CONFIRMED RUN. Written by
+     * saveScreening()'s best-effort call only when the project had a
+     * checklist configured (see that function's own comment). See
+     * lib/types.ts's ChecklistEvaluation for shape.
+     */
+    checklistEvaluation?: ChecklistEvaluation;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1650,6 +1730,10 @@ export async function updateScreening(
   if (fields.totalExperienceSummary !== undefined) update.total_experience_summary = fields.totalExperienceSummary;
   if (fields.linkedinUrl !== undefined) update.linkedin_url = fields.linkedinUrl;
   if (fields.targetCompanyMatches !== undefined) update.target_company_matches = fields.targetCompanyMatches;
+  // checklist_evaluation requires supabase-migration-checklist.sql — NOT YET
+  // CONFIRMED RUN. Same deferred-wiring pattern as target_company_matches
+  // above.
+  if (fields.checklistEvaluation !== undefined) update.checklist_evaluation = fields.checklistEvaluation;
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   // cross_ref_is_linkedin requires supabase-migration-cross-ref-doc-type.sql

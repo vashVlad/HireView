@@ -1,5 +1,5 @@
 import { getSupabaseClient } from "./supabase";
-import type { JDAnalysis, Project, ProjectStatus, ProjectSummary } from "./types";
+import type { JDAnalysis, Project, ProjectChecklist, ProjectStatus, ProjectSummary } from "./types";
 
 interface ProjectRow {
   id: number;
@@ -150,6 +150,37 @@ export async function getFitExclusionMap(projectIds: number[]): Promise<Set<numb
 export async function getProjectFitExclusion(id: number): Promise<boolean> {
   const set = await getFitExclusionMap([id]);
   return set.has(id);
+}
+
+/**
+ * JD checklist, 2026-08-17 (Vlad's ask) — isolated, single-purpose read/
+ * write, kept OUT of listProjects()/getProject()/updateProject()'s shared
+ * select+payload, same Migration Sequencing rule as
+ * getFitExclusionMap/excludeFromFitSuggestions above (requires
+ * supabase-migration-checklist.sql, NOT YET CONFIRMED RUN). Unlike
+ * getFitExclusionMap (best-effort, fails closed to "nothing excluded"),
+ * getProjectChecklist/updateProjectChecklist do NOT swallow errors — a
+ * checklist read/write is always a deliberate, foreground recruiter action
+ * (viewing or generating the checklist on the Filters tab), so a missing
+ * migration should surface as a real error the API route can report, not
+ * silently degrade to "no checklist" the way a background enrichment field
+ * would.
+ */
+export async function getProjectChecklist(id: number): Promise<ProjectChecklist | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("projects")
+    .select("checklist")
+    .eq("id", id)
+    .maybeSingle<{ checklist: ProjectChecklist | null }>();
+  if (error) throw error;
+  return data?.checklist ?? null;
+}
+
+export async function updateProjectChecklist(id: number, checklist: ProjectChecklist): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("projects").update({ checklist }).eq("id", id);
+  if (error) throw error;
 }
 
 export async function deleteProject(id: number): Promise<void> {

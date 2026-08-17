@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ScoringLoader } from "@/components/ScoringLoader";
 import { FRAUD_PATTERN_TYPE_LABELS, type FraudRiskAssessment, type FraudRiskLevel } from "@/lib/types";
 
 const RISK_CONFIG: Record<FraudRiskLevel, { label: string; className: string; dot: string }> = {
@@ -202,23 +203,24 @@ export function FraudRiskChecker({ screeningId, roleContext, currentAssessment, 
     );
   }
 
+  if (checkState === "checking") {
+    return (
+      <div className="flex flex-col items-center gap-2 border-t border-zinc-100 py-6 dark:border-zinc-800">
+        <ScoringLoader className="h-8 w-56" />
+        <span className="text-xs text-zinc-400 dark:text-zinc-500">Running fraud risk check…</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
       {error && <p className="text-xs text-rose-500 dark:text-rose-400">{error}</p>}
       <button
         type="button"
         onClick={runCheck}
-        disabled={checkState === "checking"}
         className="flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
       >
-        {checkState === "checking" ? (
-          <>
-            <span className="h-3 w-3 animate-spin rounded-full border border-white/40 border-t-white dark:border-zinc-900/40 dark:border-t-zinc-900" />
-            Checking…
-          </>
-        ) : (
-          "Run fraud risk check"
-        )}
+        Run fraud risk check
       </button>
     </div>
   );

@@ -399,6 +399,28 @@ export function ResultCard({
                 Target company match
               </span>
             )}
+            {/* JD checklist net delta, 2026-08-17 (Vlad's ask) — only shown
+                when the checklist was actually evaluated (undefined =
+                project has no checklist) and produced a nonzero net effect
+                on the score; a zero delta (nothing fired either way, or
+                decrease/add items cancelled out) renders nothing, same
+                "only surface a signal" convention as the badges above. Full
+                per-item breakdown (which items fired and why) renders below
+                near Strengths/Concerns, not here — this is just the
+                at-a-glance total.  */}
+            {result.checklistEvaluation && result.checklistEvaluation.scoreDelta !== 0 && (
+              <span
+                title="Net effect of the JD checklist on this score — see the Checklist breakdown below for which items fired"
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                  result.checklistEvaluation.scoreDelta > 0
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+                    : "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400"
+                }`}
+              >
+                Checklist {result.checklistEvaluation.scoreDelta > 0 ? "+" : ""}
+                {result.checklistEvaluation.scoreDelta}
+              </span>
+            )}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} contentIsLinkedIn={result.resumeIsLinkedIn} />
             {/* Visible agency name, added 2026-07-27 (Vlad's ask: "also show
                 agency name when it's given") — previously only surfaced as a
@@ -598,7 +620,17 @@ export function ResultCard({
             <p key={p.projectId} className="text-xs text-zinc-500 dark:text-zinc-400">
               Also screened in{" "}
               <Link
-                href={`/candidates/${p.screeningId}`}
+                // returnTo, 2026-08-11 (Vlad's ask, same fix as the matching
+                // link in app/projects/[id]/page.tsx) — without this,
+                // /candidates/[id]'s Back button falls back to the MATCHED
+                // screening's own project, not wherever this ResultCard was
+                // actually being viewed from (Screen tab results, a batch
+                // page, or the standalone candidate page itself).
+                href={`/candidates/${p.screeningId}${
+                  typeof window !== "undefined"
+                    ? `?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+                    : ""
+                }`}
                 className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
               >
                 {p.projectName}
@@ -697,6 +729,38 @@ export function ResultCard({
       <div className={`flex flex-col ${solo ? "mt-6 gap-4" : "mt-4 gap-3"}`}>
         <InsightList label="Strengths" items={result.strengths} variant="positive" />
         <InsightList label="Concerns" items={result.concerns} variant="warning" screeningId={savedId} />
+        {/* JD checklist breakdown, 2026-08-17 (Vlad's ask) — only FIRED items
+            shown (not the whole checklist), so a long checklist with few
+            hits doesn't clutter every card; a recruiter can always see the
+            full item list on the Filters tab. Reads label/category/points
+            straight off each result (denormalized at evaluation time — see
+            ChecklistItemResult's comment in lib/types.ts) rather than
+            looking the item back up in the project's current checklist, so
+            this always shows exactly what the candidate was evaluated
+            against, even if the checklist has since been edited. */}
+        {result.checklistEvaluation && result.checklistEvaluation.results.some((r) => r.fired) && (
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Checklist</p>
+            <ul className="flex flex-col gap-1">
+              {result.checklistEvaluation.results
+                .filter((r) => r.fired)
+                .map((r) => {
+                  const signedPoints = r.category === "decrease" ? -r.points : r.points;
+                  return (
+                    <li key={r.itemId} className="flex items-start gap-2 text-sm">
+                      <span className={`mt-0.5 shrink-0 font-mono text-xs font-semibold ${signedPoints > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                        {signedPoints > 0 ? "+" : ""}{signedPoints}
+                      </span>
+                      <span className="text-zinc-600 dark:text-zinc-300">
+                        <span className="font-medium text-zinc-800 dark:text-zinc-100">{r.label}</span>
+                        {r.reasoning && <span className="text-zinc-400 dark:text-zinc-500"> — {r.reasoning}</span>}
+                      </span>
+                    </li>
+                  );
+                })}
+            </ul>
+          </div>
+        )}
         {canCheck && (
           <CrossReferenceChecker
             screeningId={savedId!}

@@ -6,7 +6,8 @@ import { scoreCandidate } from "@/lib/scoreCandidate";
 import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening } from "@/lib/screenings";
 import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
-import { getProject } from "@/lib/projects";
+import { evaluateChecklist } from "@/lib/evaluateChecklist";
+import { getProject, getProjectChecklist } from "@/lib/projects";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
@@ -152,12 +153,24 @@ export async function POST(request: NextRequest) {
   // lib/targetCompanyBoost.ts. Does not touch the scoreCandidate() call or
   // any of its inputs.
   let targetCompanies: string[] = [];
+  // DO-NOT-TOUCH EXCEPTION (2026-08-17, Vlad's explicit ask — JD checklist):
+  // read via getProjectChecklist(), NOT off the `project` object above —
+  // deliberately isolated from listProjects()/getProject()'s shared select
+  // (see lib/projects.ts's own comment on why: the exact same "one
+  // not-yet-migrated column kills the whole query" incident already hit
+  // current_company/current_title once, documented in
+  // lib/funnelview/data.ts's fetchCurrentRoleColumn). Best-effort here
+  // (.catch(() => null)) — a checklist read failure at screening time
+  // degrades to "no checklist configured," it must never block scoring
+  // itself, unlike the Filters-tab's own read/write of this same data.
+  let checklist: Awaited<ReturnType<typeof getProjectChecklist>> = null;
   if (projectId) {
     const project = await getProject(projectId).catch(() => null);
     linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
     scoreThreshold = project?.scoreThreshold ?? 45;
     teamId = project?.teamId ?? null;
     targetCompanies = combineTargetCompanies(project?.jdAnalysis?.wide?.targetCompanies, project?.jdAnalysis?.narrow?.targetCompanies);
+    checklist = await getProjectChecklist(projectId).catch(() => null);
   }
 
   if (files.length === 0) {
@@ -218,7 +231,19 @@ export async function POST(request: NextRequest) {
       // scoring half of this Promise.all — saveScreening treats an explicit
       // `null` as "don't retry, just skip duplicate/history matching for this
       // save," same as its pre-existing best-effort behavior.
-      const [result, fingerprint] = await Promise.all([
+      // DO-NOT-TOUCH EXCEPTION (2026-08-17, Vlad's explicit ask — JD
+      // checklist): a third parallel branch, same shape as the fingerprint
+      // branch directly below — evaluateChecklist() needs its own Claude
+      // call (checking checklist-item evidence needs real reading
+      // comprehension, unlike the plain substring match in
+      // targetCompanyBoost.ts), so it runs concurrently with scoring rather
+      // than sequentially after it. Skipped entirely (resolves to `null`,
+      // not a rejection) when this project has no checklist configured —
+      // the common case for most projects until the recruiter opts in via
+      // the Filters tab. A genuine evaluation failure also resolves to
+      // `null`, same best-effort convention as the fingerprint branch — a
+      // checklist miss must never block the candidate's actual score/save.
+      const [result, fingerprint, checklistEvaluation] = await Promise.all([
         scoreCandidate(
           jobDescription,
           resume.fileName,
@@ -232,6 +257,12 @@ export async function POST(request: NextRequest) {
           console.error("Fingerprint generation failed (scoring unaffected):", err);
           return null;
         }),
+        checklist
+          ? evaluateChecklist({ resumeText: resume.text, checklist }).catch((err) => {
+              console.error("Checklist evaluation failed (scoring unaffected):", err);
+              return null;
+            })
+          : Promise.resolve(null),
       ]);
       results.push(result);
 
@@ -284,6 +315,9 @@ export async function POST(request: NextRequest) {
           // DO-NOT-TOUCH EXCEPTION (2026-08-07 — see decisions-log.md and
           // the comment where targetCompanies is resolved above).
           targetCompanies,
+          // DO-NOT-TOUCH EXCEPTION (2026-08-17 — see the comment on the
+          // Promise.all above where checklistEvaluation is computed).
+          checklistEvaluation,
         });
         result.id = id;
       } catch (err) {
