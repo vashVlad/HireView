@@ -87,6 +87,18 @@ export async function POST(
         strengths: result.strengths,
         concerns: result.concerns,
         careerTrajectory: result.careerTrajectory,
+        // Real gap found and fixed 2026-08-17 (roadmap 2.5.2 verification
+        // pass): scoreCandidate() has returned trajectoryEntries since the
+        // do-not-touch exception landed, and updateScreening() has
+        // supported writing it since the same round — but this route's own
+        // payload was never updated to actually pass it through, so
+        // rescreening an existing candidate silently dropped it. This is
+        // the ONLY path (short of a real re-upload) that lets an
+        // already-screened candidate pick up structured trajectory data
+        // without a dedicated backfill script, which deliberately doesn't
+        // exist for this column — see supabase-migration-trajectory-
+        // entries.sql's own comment.
+        trajectoryEntries: result.trajectoryEntries,
         recommendation: result.recommendation,
       },
       user.id
@@ -101,6 +113,7 @@ export async function POST(
         strengths: result.strengths,
         concerns: result.concerns,
         careerTrajectory: result.careerTrajectory,
+        trajectoryEntries: result.trajectoryEntries,
         recommendation: result.recommendation,
       },
     });

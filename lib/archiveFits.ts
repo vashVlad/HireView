@@ -1,4 +1,7 @@
 import { getSupabaseClient } from "./supabase";
+import { getProjectChecklist } from "./projects";
+import { matchCandidateToChecklist } from "./matchArchiveFitToChecklist";
+import type { ChecklistItem } from "./types";
 
 /**
  * Archive Fits, 2026-07-30 (Vlad's ask) — reusing archived candidates for
@@ -102,6 +105,19 @@ export interface ArchiveFitQueueRow {
   candidateName: string;
   score: number;
   suggestedRoleFit: string | null;
+  /**
+   * Archive Fits Stage 2, 2026-08-17 (Vlad's ask, open-questions.md's
+   * 2026-08-14 entry item 5) — which of the NEW project's checklist items
+   * this candidate's existing strengths[]/concerns[] actually backs up, so
+   * the recruiter sees real skill evidence, not just Stage 1's generic
+   * suggested-role-fit title. Computed LIVE on every read (see below), not
+   * persisted — deliberately so it never goes stale if the checklist gets
+   * edited on the Filters tab after this match was first suggested. Empty
+   * array = either no checklist configured for this project yet, or
+   * genuinely no matching evidence found (both render the same way in the
+   * UI: no evidence chips, Stage 1's plain suggested-fit text still shows).
+   */
+  matchedChecklistItems: ChecklistItem[];
 }
 
 /**
@@ -119,22 +135,46 @@ export interface ArchiveFitQueueRow {
  */
 export async function listPendingArchiveFits(projectId: number): Promise<ArchiveFitQueueRow[]> {
   const supabase = getSupabaseClient();
+  // strengths/concerns, 2026-08-17 — original scoreCandidate.ts output
+  // fields (required since that tool schema's first version), same "safe to
+  // pull in a required select" reasoning as lib/funnelview/data.ts's own
+  // comment on the exact same two fields — not a later deferred-migration
+  // column, so no isolated-query treatment needed here.
   const { data, error } = await supabase
     .from("archive_fit_candidates")
-    .select("id, screening_id, suggested_role_fit, screenings!screening_id(id, candidate_name, score)")
+    .select("id, screening_id, suggested_role_fit, screenings!screening_id(id, candidate_name, score, strengths, concerns)")
     .eq("project_id", projectId)
     .eq("status", "pending")
     .order("created_at", { ascending: false })
     .returns<
-      { id: number; screening_id: number; suggested_role_fit: string | null; screenings: { id: number; candidate_name: string; score: number } }[]
+      {
+        id: number;
+        screening_id: number;
+        suggested_role_fit: string | null;
+        screenings: { id: number; candidate_name: string; score: number; strengths: string[] | null; concerns: string[] | null };
+      }[]
     >();
   if (error || !data) return [];
+
+  // Best-effort, isolated from the main query above — a checklist read
+  // failure (e.g. supabase-migration-checklist.sql not run yet) must never
+  // break the Archive Fits queue itself, it just means every row's
+  // matchedChecklistItems comes back empty, same as "no checklist
+  // configured." See lib/projects.ts's getProjectChecklist comment for why
+  // IT doesn't swallow errors — this caller is the one that adds the
+  // best-effort wrapper, since this queue's core value (Stage 1's matches)
+  // must survive regardless.
+  const checklist = await getProjectChecklist(projectId).catch(() => null);
+
   return data.map((row) => ({
     id: row.id,
     screeningId: row.screening_id,
     candidateName: row.screenings.candidate_name,
     score: row.screenings.score,
     suggestedRoleFit: row.suggested_role_fit,
+    matchedChecklistItems: checklist
+      ? matchCandidateToChecklist(row.screenings.strengths ?? [], row.screenings.concerns ?? [], checklist.items)
+      : [],
   }));
 }
 

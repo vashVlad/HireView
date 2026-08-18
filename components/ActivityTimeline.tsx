@@ -3,6 +3,7 @@
 import type { ActionType, ScreeningAction } from "@/lib/screeningActions";
 import { CANDIDATE_STATUS_LABELS, type CandidateStatus } from "@/lib/types";
 import { avatarColor, avatarInitial } from "@/lib/avatarColor";
+import { ScoringLoader } from "@/components/ScoringLoader";
 
 // Extracted 2026-07-29 from app/projects/[id]/page.tsx's inline "Attribution
 // timeline" block (Pipeline tab only) — this was the only place a
@@ -101,7 +102,10 @@ export function ActivityTimeline({
     <div className="flex flex-col gap-1.5">
       <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{label}</p>
       {actions === undefined || actions === "loading" ? (
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">Loading…</p>
+        <div className="flex items-center gap-2 text-xs text-zinc-400 dark:text-zinc-500">
+          <ScoringLoader className="h-3.5 w-10" strokeWidth={9} />
+          Loading…
+        </div>
       ) : actions.length === 0 ? (
         <p className="text-xs text-zinc-400 dark:text-zinc-500">No activity recorded yet.</p>
       ) : (

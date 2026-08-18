@@ -93,3 +93,25 @@ body {
 .animate-reveal-down {
   animation: reveal-down 0.6s ease-out both;
 }
+
+/* ScoringLoader, 2026-08-15 (Vlad's ask) — one shared loading animation for
+   every wait state (screening, cross-reference check, archive-fit check,
+   suggested-role-fit), several of which had no indicator at all before this.
+   Two identical copies of the same generated path sit side by side inside
+   an SVG twice the container's width; translating the whole thing left by
+   exactly one copy's width loops with no visible seam, since position 0%
+   and position -50% render pixel-identical content. See
+   components/ScoringLoader.tsx for the path generation (which is the part
+   that has to close its own loop — this animation alone isn't enough). */
+@keyframes scoring-loader-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-scoring-loader {
+  animation: scoring-loader-scroll 6s linear infinite;
+}

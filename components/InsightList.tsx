@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { ScoringLoader } from "@/components/ScoringLoader";
 
 const ICON_STYLES = {
   positive: "text-emerald-600 dark:text-emerald-400",
@@ -119,9 +120,16 @@ function ConcernItem({ item, screeningId }: { item: string; screeningId?: number
             type="button"
             onClick={elaborate}
             disabled={loading}
-            className="self-start text-[11px] font-medium text-amber-600 underline-offset-2 hover:underline disabled:opacity-50 dark:text-amber-400"
+            className="inline-flex w-fit items-center gap-1.5 self-start text-[11px] font-medium text-amber-600 underline-offset-2 hover:underline disabled:opacity-50 dark:text-amber-400"
           >
-            {loading ? "Loading…" : "More"}
+            {loading ? (
+              <>
+                <ScoringLoader className="h-3.5 w-10" strokeWidth={9} stroke="currentColor" />
+                Loading…
+              </>
+            ) : (
+              "More"
+            )}
           </button>
         )}
       </div>

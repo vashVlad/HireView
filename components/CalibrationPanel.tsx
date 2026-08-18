@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CalibrationExample } from "@/lib/types";
+import { ScoringLoader } from "@/components/ScoringLoader";
 
 export function CalibrationPanel({ projectId }: { projectId?: number }) {
   const [examples, setExamples] = useState<CalibrationExample[]>([]);
@@ -124,7 +125,7 @@ export function CalibrationPanel({ projectId }: { projectId?: number }) {
           }`}>
           {uploading ? (
             <>
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-violet-300 border-t-violet-600" />
+              <ScoringLoader className="h-5 w-16" strokeWidth={8} />
               Uploading&hellip;
             </>
           ) : (

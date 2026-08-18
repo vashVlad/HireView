@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals } from "@/lib/types";
+import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals, GithubCorroboration, TrajectoryEntry } from "@/lib/types";
+import { mapTrajectoryRowToCredibilityRow } from "@/lib/matchTrajectoryEntries";
+import { TrajectoryGraph } from "@/components/TrajectoryGraph";
 
 const SIGNAL_CONFIG: Record<CredibilitySignal, { label: string; className: string }> = {
   clean: {
@@ -49,6 +51,36 @@ function LinkedInSignalsPanel({ signals }: { signals: LinkedInSignals }) {
       <span className="text-zinc-300 dark:text-zinc-600">·</span>
       <span className="text-xs text-zinc-500 dark:text-zinc-400">{chips.join(" · ")}</span>
     </div>
+  );
+}
+
+// GitHub corroboration panel, 2026-08-17 (roadmap 2.5.3) — plain public
+// facts, not an AI verdict (see lib/githubCorroboration.ts's header comment
+// and CredibilityAssessment.githubSignal). Deliberately styled as neutral
+// info, not a pass/fail signal like the LinkedIn activity panel above —
+// this hasn't been reasoned about by anything, it's just what the profile
+// says, so the recruiter reads and judges it themselves.
+function GithubSignalPanel({ signal }: { signal: GithubCorroboration }) {
+  const chips: string[] = [];
+  chips.push(`${signal.publicRepos} public repo${signal.publicRepos !== 1 ? "s" : ""}`);
+  chips.push(`${signal.followers} follower${signal.followers !== 1 ? "s" : ""}`);
+  if (signal.accountCreatedYear) chips.push(`joined ${signal.accountCreatedYear}`);
+  if (signal.company) chips.push(signal.company);
+
+  return (
+    <a
+      href={signal.profileUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 transition-colors hover:border-zinc-200 dark:border-zinc-800 dark:bg-zinc-800/30 dark:hover:border-zinc-700"
+    >
+      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+        GitHub
+      </span>
+      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">@{signal.username}</span>
+      <span className="text-zinc-300 dark:text-zinc-600">·</span>
+      <span className="text-xs text-zinc-500 dark:text-zinc-400">{chips.join(" · ")}</span>
+    </a>
   );
 }
 
@@ -140,11 +172,32 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<"flags" | "matches" | "resolved">("flags");
 
-  const rows = assessment.rows ?? [];
+  // Roadmap 2.5.2, 2026-08-17 — when trajectoryComparison is present (a
+  // credibility check run after this feature shipped, against a candidate
+  // with stored trajectoryEntries), employment rows come from there instead
+  // of assessment.rows (which now only ever carries the education row for
+  // these assessments). Mapped into the same CredibilityRow shape so every
+  // line below — flags/matches counts, tabs, CredibilityRowItem rendering —
+  // is completely unchanged code, just fed from a combined list. Older
+  // assessments (trajectoryComparison absent) render exactly as before,
+  // straight from assessment.rows.
+  const rows: CredibilityRow[] = assessment.trajectoryComparison
+    ? [...(assessment.rows ?? []), ...assessment.trajectoryComparison.map(mapTrajectoryRowToCredibilityRow)]
+    : assessment.rows ?? [];
   const flags = rows.filter((r) => r.status === "discrepancy");
   const materialFlags = flags.filter((r) => r.severity === "material");
   const matches = rows.filter((r) => r.status === "match");
   const isLinkedIn = !!assessment.linkedInSignals;
+  // Graph entries derived from the resume side of each paired comparison row
+  // — covers exactly the roles this credibility check actually compared, not
+  // necessarily every role on the resume (a role with no cross-reference
+  // counterpart at all is deliberately excluded from trajectoryComparison,
+  // see lib/matchTrajectoryEntries.ts). A graph independent of any
+  // credibility check (every role, always) is a distinct future increment
+  // — roadmap 2.5.4's consolidated card.
+  const graphEntries: TrajectoryEntry[] = (assessment.trajectoryComparison ?? [])
+    .filter((r) => r.kind === "paired" && r.resumeEntry)
+    .map((r) => r.resumeEntry!);
   // Resolved concerns — added 2026-07-29, Vlad's ask: credit the candidate
   // when the cross-reference document actually clears something the
   // original JD-fit screening flagged, not just penalize discrepancies.
@@ -213,6 +266,17 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
       {/* Expandable content */}
       {open && (
         <div className="flex flex-col gap-3 border-t border-zinc-100 px-4 pb-4 pt-3 dark:border-zinc-800">
+          {/* Trajectory graph — roadmap 2.5.2, 2026-08-17. Only renders when
+              this assessment used the new comparison flow AND actually had
+              at least one paired role to plot (both empty for an old-style
+              assessment, or a candidate with no stored trajectoryEntries at
+              screening time — see assessCredibility.ts's fallback branch). */}
+          {graphEntries.length > 0 && (
+            <div className="rounded-lg border border-zinc-100 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <TrajectoryGraph entries={graphEntries} comparisonRows={assessment.trajectoryComparison} />
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex gap-4 border-b border-zinc-200 dark:border-zinc-700">
             <button
@@ -296,6 +360,9 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
           {isLinkedIn && assessment.linkedInSignals && (
             <LinkedInSignalsPanel signals={assessment.linkedInSignals} />
           )}
+
+          {/* GitHub corroboration panel — only when a GitHub URL was found in the resume and the lookup succeeded */}
+          {assessment.githubSignal && <GithubSignalPanel signal={assessment.githubSignal} />}
 
           {/* Summary — only shown when not lifted into parent */}
           {showSummary && (
