@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals, GithubCorroboration } from "@/lib/types";
+import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals, GithubCorroboration, TrajectoryEntry } from "@/lib/types";
+import { mapTrajectoryRowToCredibilityRow } from "@/lib/matchTrajectoryEntries";
+import { TrajectoryGraph } from "@/components/TrajectoryGraph";
 
 const SIGNAL_CONFIG: Record<CredibilitySignal, { label: string; className: string }> = {
   clean: {
@@ -170,11 +172,32 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
   const [open, setOpen] = useState(true);
   const [tab, setTab] = useState<"flags" | "matches" | "resolved">("flags");
 
-  const rows = assessment.rows ?? [];
+  // Roadmap 2.5.2, 2026-08-17 — when trajectoryComparison is present (a
+  // credibility check run after this feature shipped, against a candidate
+  // with stored trajectoryEntries), employment rows come from there instead
+  // of assessment.rows (which now only ever carries the education row for
+  // these assessments). Mapped into the same CredibilityRow shape so every
+  // line below — flags/matches counts, tabs, CredibilityRowItem rendering —
+  // is completely unchanged code, just fed from a combined list. Older
+  // assessments (trajectoryComparison absent) render exactly as before,
+  // straight from assessment.rows.
+  const rows: CredibilityRow[] = assessment.trajectoryComparison
+    ? [...(assessment.rows ?? []), ...assessment.trajectoryComparison.map(mapTrajectoryRowToCredibilityRow)]
+    : assessment.rows ?? [];
   const flags = rows.filter((r) => r.status === "discrepancy");
   const materialFlags = flags.filter((r) => r.severity === "material");
   const matches = rows.filter((r) => r.status === "match");
   const isLinkedIn = !!assessment.linkedInSignals;
+  // Graph entries derived from the resume side of each paired comparison row
+  // — covers exactly the roles this credibility check actually compared, not
+  // necessarily every role on the resume (a role with no cross-reference
+  // counterpart at all is deliberately excluded from trajectoryComparison,
+  // see lib/matchTrajectoryEntries.ts). A graph independent of any
+  // credibility check (every role, always) is a distinct future increment
+  // — roadmap 2.5.4's consolidated card.
+  const graphEntries: TrajectoryEntry[] = (assessment.trajectoryComparison ?? [])
+    .filter((r) => r.kind === "paired" && r.resumeEntry)
+    .map((r) => r.resumeEntry!);
   // Resolved concerns — added 2026-07-29, Vlad's ask: credit the candidate
   // when the cross-reference document actually clears something the
   // original JD-fit screening flagged, not just penalize discrepancies.
@@ -243,6 +266,17 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
       {/* Expandable content */}
       {open && (
         <div className="flex flex-col gap-3 border-t border-zinc-100 px-4 pb-4 pt-3 dark:border-zinc-800">
+          {/* Trajectory graph — roadmap 2.5.2, 2026-08-17. Only renders when
+              this assessment used the new comparison flow AND actually had
+              at least one paired role to plot (both empty for an old-style
+              assessment, or a candidate with no stored trajectoryEntries at
+              screening time — see assessCredibility.ts's fallback branch). */}
+          {graphEntries.length > 0 && (
+            <div className="rounded-lg border border-zinc-100 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
+              <TrajectoryGraph entries={graphEntries} comparisonRows={assessment.trajectoryComparison} />
+            </div>
+          )}
+
           {/* Tabs */}
           <div className="flex gap-4 border-b border-zinc-200 dark:border-zinc-700">
             <button

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { assessCredibility, detectLinkedIn } from "@/lib/assessCredibility";
 import { extractResumeText } from "@/lib/parseResume";
-import { getScreeningConcerns, getScreeningResume, updateScreening } from "@/lib/screenings";
+import { getScreeningConcerns, getScreeningResume, getScreeningTrajectoryEntries, updateScreening } from "@/lib/screenings";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
@@ -152,21 +152,28 @@ export async function POST(request: NextRequest) {
   let crossRefText: string;
   let crossRefPath: string | undefined;
   let originalConcerns: string[];
+  let candidateTrajectoryEntries: Awaited<ReturnType<typeof getScreeningTrajectoryEntries>>;
   try {
     // originalConcerns (added 2026-07-29, positive-scoring feature) is an
     // independent read, same reasoning as the main-resume/cross-ref split
     // above — folded into the same Promise.all rather than awaited after,
     // and never allowed to fail the whole request (see getScreeningConcerns'
-    // own comment: fails closed to [], not thrown).
-    const [main, crossRef, concerns] = await Promise.all([
+    // own comment: fails closed to [], not thrown). candidateTrajectoryEntries
+    // (roadmap 2.5.2, 2026-08-17) is the same shape of independent, never-
+    // fails-the-request read — getScreeningTrajectoryEntries fails closed to
+    // null (not thrown), which assessCredibility() reads as "fall back to
+    // the legacy single-call comparison," never as a request failure.
+    const [main, crossRef, concerns, trajectoryEntries] = await Promise.all([
       loadMainResume(),
       loadCrossRef(),
       getScreeningConcerns(screeningId),
+      getScreeningTrajectoryEntries(screeningId),
     ]);
     resumeText = main;
     crossRefText = crossRef.crossRefText;
     crossRefPath = crossRef.crossRefPath;
     originalConcerns = concerns;
+    candidateTrajectoryEntries = trajectoryEntries;
   } catch (err) {
     if (err instanceof RouteError) return err.response;
     throw err;
@@ -198,6 +205,10 @@ export async function POST(request: NextRequest) {
     roleContext: typeof roleContext === "string" ? roleContext : undefined,
     isLinkedIn,
     originalConcerns,
+    // undefined (not null) matches assessCredibility()'s param type — null
+    // here just means "no stored trajectory yet," same "fall back to legacy
+    // flow" outcome as undefined, so the conversion is purely a type nicety.
+    candidateTrajectoryEntries: candidateTrajectoryEntries ?? undefined,
   });
   if (githubSignal) {
     assessment.githubSignal = githubSignal;

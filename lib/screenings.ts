@@ -22,7 +22,7 @@ import { computeTargetCompanyBoost } from "./targetCompanyBoost";
 import { detectLinkedIn } from "./assessCredibility";
 import type {
   BlacklistEntry, CandidateResult, CandidateStatus, ChecklistEvaluation, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
-  Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage,
+  Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage, TrajectoryEntry,
 } from "./types";
 import { DEFAULT_AUTO_ARCHIVE_REASON } from "./types";
 
@@ -1074,6 +1074,14 @@ export async function saveScreening(params: {
       currentTitle: result.currentTitle,
       totalExperienceSummary: result.totalExperienceSummary,
       linkedinUrl: result.linkedinUrl,
+      // Structured trajectory, 2026-08-17 (roadmap 2.5.2) — same deferred-
+      // migration reasoning as the four fields above (supabase-migration-
+      // trajectory-entries.sql), folded into this same best-effort call.
+      // Only set when scoreCandidate.ts actually returned it (undefined for
+      // any older code path that hasn't picked up the do-not-touch exception
+      // — shouldn't happen post-deploy, but kept conditional to match every
+      // other field in this same call).
+      ...(result.trajectoryEntries !== undefined ? { trajectoryEntries: result.trajectoryEntries } : {}),
       // Folded into this same best-effort call rather than a second one —
       // same deferred-migration reasoning (supabase-migration-target-
       // company-boost.sql), only set when the boost was actually evaluated
@@ -1539,6 +1547,30 @@ export async function getScreeningConcerns(id: number): Promise<string[]> {
 }
 
 /**
+ * Roadmap 2.5.2, 2026-08-17 — isolated read for the credibility check route:
+ * the candidate's OWN structured trajectory, to diff against a cross-
+ * reference document's freshly-extracted one (lib/matchTrajectoryEntries.ts).
+ * Same isolated-select pattern as getScreeningConcerns above — trajectory_entries
+ * requires supabase-migration-trajectory-entries.sql, NOT YET CONFIRMED RUN,
+ * so this is its own query rather than mixed into any shared select. Returns
+ * null (not []) when absent — callers must tell "no trajectory data to
+ * compare against yet" apart from "compared, found nothing," since the
+ * former should fall back to the old rows-based comparison entirely (see
+ * lib/types.ts's CredibilityAssessment.trajectoryComparison comment) while
+ * the latter is a real, meaningful empty result.
+ */
+export async function getScreeningTrajectoryEntries(id: number): Promise<TrajectoryEntry[] | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("trajectory_entries")
+    .eq("id", id)
+    .maybeSingle<{ trajectory_entries: TrajectoryEntry[] | null }>();
+  if (error || !data || !data.trajectory_entries) return null;
+  return data.trajectory_entries;
+}
+
+/**
  * Archive Fits, 2026-07-30 — isolated read for lib/generateRoleFit.ts's
  * input plus the current suggested_role_fits array. summary/strengths/
  * career_trajectory are already in the shared SCREENING_COLUMNS select, but
@@ -1728,6 +1760,15 @@ export async function updateScreening(
     /** Same deferred-column pattern as currentCompany above — see lib/types.ts's ScreeningRecord.targetCompanyMatches. Added 2026-08-07. */
     targetCompanyMatches?: string[];
     /**
+     * Structured trajectory, 2026-08-17 (roadmap 2.5.2). Same deferred-
+     * column pattern as currentCompany above — requires
+     * supabase-migration-trajectory-entries.sql, NOT YET CONFIRMED RUN.
+     * Written by saveScreening()'s best-effort call for new screenings; no
+     * backfill route exists yet for already-screened candidates (see that
+     * migration's own comment). See lib/types.ts's TrajectoryEntry.
+     */
+    trajectoryEntries?: TrajectoryEntry[];
+    /**
      * JD checklist per-candidate result, 2026-08-17 (Vlad's ask). Same
      * deferred-column pattern as targetCompanyMatches above — requires
      * supabase-migration-checklist.sql, NOT YET CONFIRMED RUN. Written by
@@ -1756,6 +1797,10 @@ export async function updateScreening(
   if (fields.totalExperienceSummary !== undefined) update.total_experience_summary = fields.totalExperienceSummary;
   if (fields.linkedinUrl !== undefined) update.linkedin_url = fields.linkedinUrl;
   if (fields.targetCompanyMatches !== undefined) update.target_company_matches = fields.targetCompanyMatches;
+  // trajectory_entries requires supabase-migration-trajectory-entries.sql —
+  // NOT YET CONFIRMED RUN. Same deferred-wiring pattern as
+  // target_company_matches above.
+  if (fields.trajectoryEntries !== undefined) update.trajectory_entries = fields.trajectoryEntries;
   // checklist_evaluation requires supabase-migration-checklist.sql — NOT YET
   // CONFIRMED RUN. Same deferred-wiring pattern as target_company_matches
   // above.

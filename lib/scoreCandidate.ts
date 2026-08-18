@@ -22,6 +22,13 @@ const LINKEDIN_SCORING_NOTE = `LINKEDIN PROFILE NOTE: This document is a LinkedI
 - Weight career trajectory signals heavily: company types, scope of responsibilities, progression pace
 - Focus scoring on depth and relevance of Experience entries, not keyword density`;
 
+// DO-NOT-TOUCH EXCEPTION (2026-08-15, Vlad's explicit ask — see
+// memory/open-questions.md's 2026-08-15 Signals-export entry): strengths'
+// description below now tells the model to lead with the strongest match.
+// Purely an ordering instruction, no new field, no schema change —
+// FunnelView's "Signals" export column (lib/funnelview/data.ts,
+// app/funnelview/page.tsx) reads strengths[0] as the lead signal, so the
+// first item has to reliably be the best one.
 const SCORE_TOOL = {
   name: "submit_score",
   description: "Submit the candidate's score and evaluation against the job description.",
@@ -51,7 +58,7 @@ const SCORE_TOOL = {
       strengths: {
         type: "array",
         items: { type: "string" },
-        description: "Each item: 'Skill/area: evidence in 5 words or fewer.' Example: 'FHIR/HL7: implemented at Abridge with audit logging.' No full sentences, no elaboration. Score <30: 0-1. 30-50: 1-2. 50+: 2-4.",
+        description: "Each item: 'Skill/area: evidence in 5 words or fewer.' Example: 'FHIR/HL7: implemented at Abridge with audit logging.' No full sentences, no elaboration. Order matters: list the single strongest, most confident match FIRST — FunnelView's Signals export (2026-08-15, Vlad's ask) reads strengths[0] as the lead signal, so the first item must genuinely be the best one, not just whichever came to mind first. Score <30: 0-1. 30-50: 1-2. 50+: 2-4.",
       },
       concerns: {
         type: "array",
@@ -61,6 +68,51 @@ const SCORE_TOOL = {
       careerTrajectory: {
         type: "string",
         description: `Career arc narrative covering every role. Start with a short opening paragraph (3–4 sentences, same brevity as the closing paragraph) summarizing the shape of the candidate's career: call out concrete progression signals — promotions, seniority/title jumps, expanding scope or ownership — or regressions — steps down in level, lateral moves, gaps — and where they've landed now. Specific and factual (e.g. "promoted from Associate to Senior Engineer within 18 months" beats "grew in responsibility"), no verdict or recommendation language — save that for the end. Then list roles in reverse chronological order — most recent role first, oldest last. For each role, write a bold header line in this exact format: **[Company Name] — [Title], [full-time or contract], [date range]**. Employment type is inferred from tenure length, title signals like "Consultant"/"Contract"/"via [staffing agency]", or consecutive short stints at different companies. Do not add a sentence after the header — go straight to 3 tight bullet points: (1) what the company does and whether its domain aligns with the role being hired for (use training knowledge; if unknown say "company not found" and infer from title/description), (2) the key signal this role adds to the candidate's story, (3) whether the transition into or out of this role makes sense. Keep bullets to one line each. After all roles, add a final short paragraph (3–4 sentences max): the clear recommendation on whether this candidate is worth a conversation and why — this is the only place the verdict belongs, not the opening paragraph.`,
+      },
+      // DO-NOT-TOUCH EXCEPTION (2026-08-17, Vlad's explicit ask — see
+      // memory/decisions-log.md's 2026-08-17 entry for the full reasoning
+      // trail, roadmap 2.5.2). Structured sibling of careerTrajectory above —
+      // same call, same underlying read of the resume, so generating this
+      // alongside it costs nothing extra (identical "no extra API cost"
+      // reasoning the 2026-08-06 currentCompany/currentTitle exception used).
+      // Exists because careerTrajectory is, and has only ever been, freeform
+      // markdown prose — there is no structured per-role data anywhere in
+      // this codebase to plot as a real graph or diff in code against a
+      // cross-reference document's own trajectory. This field is that
+      // missing structured skeleton. It must describe the SAME roles as
+      // careerTrajectory, not a second independent pass at reading the
+      // resume — the prompt instruction says so explicitly.
+      trajectoryEntries: {
+        type: "array",
+        description:
+          "Structured, one entry per role — the SAME roles and same reverse-chronological order as careerTrajectory above, just as machine-comparable fields instead of prose. Every role in careerTrajectory must have exactly one matching entry here (same company/title/dates), and vice versa — this is the structured skeleton of the same narrative, not a second independent read of the resume.",
+        items: {
+          type: "object",
+          properties: {
+            company: {
+              type: "string",
+              description: "Company name only, as written on the resume — no city/location, no legal-entity suffix invented if the resume doesn't include one.",
+            },
+            title: {
+              type: "string",
+              description: "Job title as written on the resume for this role.",
+            },
+            employmentType: {
+              type: "string",
+              enum: ["full-time", "contract", "unknown"],
+              description: "Same inference rule as careerTrajectory's header line: tenure length, title signals like 'Consultant'/'Contract'/'via [staffing agency]', or consecutive short stints. 'unknown' only if genuinely no signal either way.",
+            },
+            startDate: {
+              type: "string",
+              description: "YYYY-MM if the resume gives a month, YYYY if only a year is shown. Never invent a month the resume doesn't state.",
+            },
+            endDate: {
+              type: "string",
+              description: "YYYY-MM or YYYY matching startDate's precision, or the literal string 'present' for the candidate's current role.",
+            },
+          },
+          required: ["company", "title", "employmentType", "startDate", "endDate"],
+        },
       },
       // Added 2026-08-06 — do-not-touch exception, Vlad's explicit ask: these
       // four fields used to only exist via a separate post-hoc call
@@ -91,7 +143,7 @@ const SCORE_TOOL = {
         description: `The candidate's LinkedIn profile URL, exactly as it appears in the resume's contact info/header (e.g. "linkedin.com/in/janedoe" or a full https:// URL). If the resume genuinely doesn't list one, use an empty string — do not guess or construct one from the candidate's name.`,
       },
     },
-    required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory", "currentCompany", "currentTitle", "totalExperienceSummary", "linkedinUrl"],
+    required: ["candidateName", "score", "mustHaveScore", "niceToHaveScore", "summary", "strengths", "concerns", "careerTrajectory", "trajectoryEntries", "currentCompany", "currentTitle", "totalExperienceSummary", "linkedinUrl"],
   },
 };
 
