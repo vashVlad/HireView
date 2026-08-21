@@ -371,7 +371,10 @@ export default function FunnelViewPage() {
       // on-screen table below; this is now the only remaining place it renders.
       "Past Stage": pastStageLabel(c) === "—" ? "" : pastStageLabel(c),
       "Screened Date": new Date(c.createdAt).toLocaleDateString(),
-      "Total experience": c.totalExperienceSummary ?? "",
+      // "Signals" replaces "Total experience", 2026-08-15 (Vlad's ask) —
+      // strongest strength + weakest concern instead of a longer prose
+      // sentence. See lib/funnelview/types.ts's topStrength/topConcern.
+      Signals: [c.topStrength, c.topConcern].filter(Boolean).join(" · ") || "",
       Recruiter: c.recruiterEmail ?? "",
     }));
     const candidateSheet = XLSX.utils.json_to_sheet(candidateRows);

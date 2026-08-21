@@ -80,3 +80,94 @@ export function looksLikeMissingName(name: string | undefined | null): boolean {
   if (trimmed.length < 2) return true;
   return /unknown|not provided|not found|\bn\/a\b|no name/i.test(trimmed);
 }
+
+/**
+ * Text-based name extraction, 2026-08-19 (Phase 2.6 — Gate 1 architecture,
+ * see decisions-log.md's 2026-08-19 entries). For a gate-1-only candidate,
+ * scoreCandidate() never runs at all — so there's no other source for
+ * candidateName. Deliberately NOT extractCandidateNameFromPdf above — that
+ * solves a narrower, different problem (some PDF exports hide the header
+ * text layer even though it's visibly there), requires a second raw-document
+ * upload, and doesn't apply to .docx at all. Ordinary plain-text extraction
+ * (lib/parseResume.ts, already run before Gate 1 evaluates the checklist)
+ * reliably includes the name in the normal case for every file type — this
+ * only needs a cheap read of text that's already sitting in memory.
+ *
+ * Pure heuristic first (free, no AI call at all) — a resume's name is
+ * almost always one of the first few non-empty lines: short, no digits, no
+ * "resume"/"cv" boilerplate, 2-4 capitalized words. Exported separately so
+ * it's directly unit-testable without a live API key.
+ */
+export function extractNameHeuristic(resumeText: string): string | null {
+  const firstLines = resumeText
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+
+  for (const line of firstLines) {
+    if (line.length < 2 || line.length > 60) continue;
+    if (/[@\d]/.test(line)) continue; // emails, phone numbers, street addresses
+    if (/resume|curriculum vitae|\bcv\b/i.test(line)) continue;
+    const words = line.split(/\s+/);
+    if (
+      words.length >= 2 &&
+      words.length <= 4 &&
+      words.every((w) => /^[A-Z][a-zA-Z'.-]*$/.test(w))
+    ) {
+      return line;
+    }
+  }
+  return null;
+}
+
+const NAME_FROM_TEXT_TOOL = {
+  name: "submit_candidate_name",
+  description: "Submit the candidate's full name as it appears in this resume text.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      candidateName: {
+        type: "string",
+        description: "The candidate's full name, exactly as written in the text below. Empty string only if genuinely no name is present anywhere.",
+      },
+    },
+    required: ["candidateName"],
+  },
+};
+
+/**
+ * Falls back to a tiny text-only Claude call only when the free heuristic
+ * above can't confidently find a name. Deliberately does NOT escalate
+ * further to extractCandidateNameFromPdf on failure — this is a purely
+ * cosmetic label on a Gate-1-archived candidate's card (which never got a
+ * real AI read), not a scored field, so "Unknown" is an acceptable final
+ * fallback rather than justifying a second, more expensive document-vision
+ * call for every candidate who fails Gate 1.
+ */
+export async function extractCandidateNameFromText(resumeText: string): Promise<string | null> {
+  const heuristic = extractNameHeuristic(resumeText);
+  if (heuristic) return heuristic;
+
+  try {
+    const message = await getAnthropicClient().messages.create({
+      model: CLAUDE_MODEL,
+      max_tokens: 100,
+      tools: [NAME_FROM_TEXT_TOOL],
+      tool_choice: { type: "tool", name: "submit_candidate_name" },
+      messages: [
+        {
+          role: "user",
+          content: `What is the candidate's full name? Read only the resume text below.\n\n${resumeText.slice(0, 2000)}`,
+        },
+      ],
+    });
+    const toolUse = message.content.find((block) => block.type === "tool_use");
+    if (!toolUse || toolUse.type !== "tool_use") return null;
+    const name = (toolUse.input as { candidateName?: string }).candidateName?.trim();
+    return name && name.length > 1 ? name : null;
+  } catch (err) {
+    console.error("Text-based candidate name fallback failed:", err);
+    return null;
+  }
+}

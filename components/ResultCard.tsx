@@ -15,6 +15,8 @@ import { TrajectoryRenderer } from "./TrajectoryRenderer";
 import { ActivityTimeline } from "./ActivityTimeline";
 import SourceIcon from "./SourceIcon";
 import { getSourceType } from "@/lib/sourceType";
+import { isGate1OnlyResult } from "@/lib/isGate1OnlyResult";
+import { Gate1ChecklistBreakdown } from "./Gate1ChecklistBreakdown";
 import type { JDAnalysis } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
 
@@ -63,6 +65,7 @@ export function ResultCard({
   onCheckCrossProjectPromise,
   onTransferToProject,
   otherActiveCount,
+  suggestedRoleFits,
   nameMatch,
   rejectionHistory,
   blacklistMatch,
@@ -117,6 +120,22 @@ export function ResultCard({
   onTransferToProject?: (suggestion: FitSuggestion) => Promise<void>;
   /** Count of other active projects across every team this recruiter belongs to. undefined = not checked yet, 0 = nothing to suggest against. */
   otherActiveCount?: number;
+  /**
+   * Archive Fits' JD-independent role-title suggestions (2026-07-30,
+   * `screenings.suggested_role_fits`) — genuinely different from the
+   * onFindBetterFit box above (that one only ever names a project this
+   * recruiter is CURRENTLY hiring for; this is a bare "what role would this
+   * person suit" guess based on their own background, generated even when
+   * nothing open matches, and is exactly what powers the Archive Fits
+   * new-role-creation matching flow — 2026-08-20, Vlad: "the only reason I
+   * want the system to suggest a better fit and save it is because when I
+   * apply archived fits during new role creation, the system identifies a
+   * similar role." Only ever fetched/populated by app/candidates/[id]/page.tsx
+   * today (via the new lazy POST /api/history/[id]/role-fit route) — the
+   * other two ResultCard call sites simply never pass this prop, so it's
+   * undefined there and this block doesn't render, no behavior change.
+   */
+  suggestedRoleFits?: string[];
   /**
    * Post-score name match against an already-saved candidate in this
    * project — the one case exact-content hashing can't catch (two genuinely
@@ -400,28 +419,14 @@ export function ResultCard({
                 Target company match
               </span>
             )}
-            {/* JD checklist net delta, 2026-08-17 (Vlad's ask) — only shown
-                when the checklist was actually evaluated (undefined =
-                project has no checklist) and produced a nonzero net effect
-                on the score; a zero delta (nothing fired either way, or
-                decrease/add items cancelled out) renders nothing, same
-                "only surface a signal" convention as the badges above. Full
-                per-item breakdown (which items fired and why) renders below
-                near Strengths/Concerns, not here — this is just the
-                at-a-glance total.  */}
-            {result.checklistEvaluation && result.checklistEvaluation.scoreDelta !== 0 && (
-              <span
-                title="Net effect of the JD checklist on this score — see the Checklist breakdown below for which items fired"
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                  result.checklistEvaluation.scoreDelta > 0
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
-                    : "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-400"
-                }`}
-              >
-                Checklist {result.checklistEvaluation.scoreDelta > 0 ? "+" : ""}
-                {result.checklistEvaluation.scoreDelta}
-              </span>
-            )}
+            {/* JD checklist net-delta badge REMOVED 2026-08-18 (Vlad, direct
+                card-density feedback: "don't show the checklist at all" —
+                asked specifically whether that meant dropping just the
+                itemized breakdown below or this badge too, answer was drop
+                both). The checklist still drives the SCORE itself
+                (lib/screenings.ts's saveScreening(), see decisions-log.md's
+                2026-08-17 checklist-scoring entry) — this is purely about
+                not calling it out as a separate visible line on the card. */}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} contentIsLinkedIn={result.resumeIsLinkedIn} />
             {/* Visible agency name, added 2026-07-27 (Vlad's ask: "also show
                 agency name when it's given") — previously only surfaced as a
@@ -710,6 +715,31 @@ export function ResultCard({
         </div>
       )}
 
+      {/* Archive Fits role-type suggestion, 2026-08-20 (Vlad's ask: connect
+          the open-role fit-suggestion above with the older, JD-independent
+          suggested_role_fits mechanism, on the same card). Genuinely
+          different signal from the box above — that one only ever names a
+          project this recruiter is CURRENTLY hiring for; this one is a bare
+          role/title suggestion based on the candidate's own background,
+          shown even when nothing open matches. Real gap fixed alongside
+          this: suggestedRoleFits already existed on every screening (Archive
+          Fits, 2026-07-30) but was never actually rendered anywhere as a
+          readable list before now — it only ever fed the separate Archive
+          Fits matching queue behind the scenes. */}
+      {suggestedRoleFits && suggestedRoleFits.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs dark:border-zinc-800 dark:bg-zinc-800/40">
+          <span className="text-zinc-500 dark:text-zinc-400">Might also fit:</span>
+          {suggestedRoleFits.map((roleFit) => (
+            <span
+              key={roleFit}
+              className="rounded-full bg-zinc-200 px-2 py-0.5 font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200"
+            >
+              {roleFit}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Transferred confirmation — replaces the fit-suggestion block once a transfer succeeds */}
       {transferredTo && (
         <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
@@ -740,43 +770,38 @@ export function ResultCard({
       <div className={`flex flex-col ${solo ? "mt-6 gap-4" : "mt-4 gap-3"}`}>
         <InsightList label="Strengths" items={result.strengths} variant="positive" />
         <InsightList label="Concerns" items={result.concerns} variant="warning" screeningId={savedId} />
-        {/* JD checklist breakdown, 2026-08-17 (Vlad's ask) — only FIRED items
-            shown (not the whole checklist), so a long checklist with few
-            hits doesn't clutter every card; a recruiter can always see the
-            full item list on the Filters tab. Reads label/category/points
-            straight off each result (denormalized at evaluation time — see
-            ChecklistItemResult's comment in lib/types.ts) rather than
-            looking the item back up in the project's current checklist, so
-            this always shows exactly what the candidate was evaluated
-            against, even if the checklist has since been edited. */}
-        {result.checklistEvaluation && result.checklistEvaluation.results.some((r) => r.fired) && (
-          <div className="flex flex-col gap-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Checklist</p>
-            <ul className="flex flex-col gap-1">
-              {result.checklistEvaluation.results
-                .filter((r) => r.fired)
-                .map((r) => {
-                  const signedPoints = r.category === "decrease" ? -r.points : r.points;
-                  return (
-                    <li key={r.itemId} className="flex items-start gap-2 text-sm">
-                      <span className={`mt-0.5 shrink-0 font-mono text-xs font-semibold ${signedPoints > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                        {signedPoints > 0 ? "+" : ""}{signedPoints}
-                      </span>
-                      <span className="text-zinc-600 dark:text-zinc-300">
-                        <span className="font-medium text-zinc-800 dark:text-zinc-100">{r.label}</span>
-                        {r.reasoning && <span className="text-zinc-400 dark:text-zinc-500"> — {r.reasoning}</span>}
-                      </span>
-                    </li>
-                  );
-                })}
-            </ul>
-          </div>
+        {/* JD checklist itemized breakdown REMOVED 2026-08-18 (Vlad, card-
+            density feedback: "don't show the checklist at all"). The full
+            fired/unfired item list with reasoning is still visible on the
+            project's Filters tab and drives the score under the hood
+            (lib/screenings.ts) — it just no longer renders on this card.
+            Sign-display bug (category-derived negative points) that was
+            fixed here earlier the same round is moot now that this block is
+            gone; kept the fix in git history via decisions-log.md, not
+            reintroducing dead code for it.
+
+            RE-ADDED, narrowly, 2026-08-19 (Phase 2.6) — for a gate-1-only
+            candidate this IS the only real content that exists (no AI
+            summary/strengths/concerns/trajectory ever got generated), so
+            hiding it here too would leave the card looking broken/empty
+            rather than intentionally simplified. Gated strictly on
+            isGate1OnlyResult() — a normal Gate-2 candidate still shows none
+            of this, exactly as decided 2026-08-18. */}
+        {/* Extracted 2026-08-20 into components/Gate1ChecklistBreakdown.tsx —
+            same JSX, now shared with the Pipeline tab's own card markup
+            (app/projects/[id]/page.tsx), which never had this block and
+            showed a blank, unexplained card for every Gate-1-archived
+            candidate (Claude Code's full-system audit, 2026-08-20). See
+            that file's doc comment for the full story. */}
+        {isGate1OnlyResult(result) && result.checklistEvaluation && (
+          <Gate1ChecklistBreakdown checklistEvaluation={result.checklistEvaluation} />
         )}
         {canCheck && (
           <CrossReferenceChecker
             screeningId={savedId!}
             roleContext={roleContext}
             currentAssessment={credibility ?? undefined}
+            checklistEvaluation={result.checklistEvaluation}
             onComplete={async (assessment) => {
               try {
                 const res = await fetch(`/api/history/${savedId}`, {

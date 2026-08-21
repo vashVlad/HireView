@@ -1,5 +1,7 @@
 import { getAnthropicClient, CLAUDE_MODEL } from "./anthropic";
-import type { CredibilityAssessment, CredibilityRow } from "./types";
+import type { CredibilityAssessment, CredibilityRow, TrajectoryEntry, TrajectoryComparisonRow } from "./types";
+import { matchTrajectoryEntries, rowsNeedingJudgment, formatTrajectoryEntry, mapTrajectoryRowToCredibilityRow } from "./matchTrajectoryEntries";
+import { compareEducationYear } from "./compareEducationYear";
 
 /**
  * Heuristic LinkedIn PDF detector — runs on extracted text before the
@@ -151,6 +153,181 @@ const CREDIBILITY_TOOL = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// Roadmap 2.5.2, 2026-08-17 — structured trajectory comparison. ONLY used
+// when the candidate already has their own structured trajectoryEntries
+// stored (lib/screenings.ts's getScreeningTrajectoryEntries) — i.e. a
+// screening saved after this feature shipped, or later regenerated. Every
+// other case (no cross-reference document at all, or a cross-reference
+// document but no stored trajectoryEntries yet — the ~397 candidates
+// screened before this date) falls back to the original CREDIBILITY_TOOL
+// single-call flow above, completely unchanged. See decisions-log.md's
+// 2026-08-17 entry for the full design and why this couldn't be built
+// without scoreCandidate.ts's new trajectoryEntries field existing first.
+//
+// Two calls instead of one for this path: a small EXTRACTION call (below)
+// pulls the cross-reference document's own structured trajectory plus both
+// documents' education years — no judgment, just what's written. Then
+// lib/matchTrajectoryEntries.ts (pure code, zero AI cost) pairs the
+// candidate's stored trajectoryEntries against the freshly-extracted
+// crossRefTrajectoryEntries and flags which pairs actually differ. Only
+// THOSE flagged pairs go to the JUDGMENT call (further below) — a paired
+// entry with zero differences is already a confident match, sending it to
+// Claude to re-decide would be pure waste.
+// ─────────────────────────────────────────────────────────────────────────
+
+const TRAJECTORY_ENTRY_ITEM_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    company: { type: "string", description: "Company name only, as written in the document — no city/location, no invented legal-entity suffix." },
+    title: { type: "string", description: "Job title as written in the document for this role." },
+    employmentType: {
+      type: "string",
+      enum: ["full-time", "contract", "unknown"],
+      description: "Inferred from tenure length, title signals like 'Consultant'/'Contract'/'via [staffing agency]', or consecutive short stints. 'unknown' only if genuinely no signal either way.",
+    },
+    startDate: { type: "string", description: "YYYY-MM if the document gives a month, YYYY if only a year is shown. Never invent a month the document doesn't state." },
+    endDate: { type: "string", description: "YYYY-MM or YYYY matching startDate's precision, or the literal string 'present' for a current role." },
+    // Phase 2.6 Tier 4 (2026-08-20) — MUST stay word-for-word in sync with
+    // the identical stepDirection/stepReasoning field pair in
+    // lib/scoreCandidate.ts's SCORE_TOOL (do-not-touch — see that file's own
+    // comment for why this can't be a shared import instead). Needed here
+    // because TrajectoryGraph.tsx's cross-reference line is only meaningful
+    // as "a full second trajectory on the same axis" (2026-08-19 design) if
+    // the cross-reference document's own extraction produces the same
+    // stepDirection judgment the resume side gets — without this, the two
+    // lines couldn't be plotted on the same Y-axis at all.
+    stepDirection: {
+      type: "string",
+      enum: ["up", "down", "lateral", "first"],
+      description:
+        "Career-trajectory direction of THIS role relative to the PREVIOUS entry in this array (one entry back = the role immediately before this one chronologically) — judged from title, scope, and responsibilities together, not a title-keyword match. 'up' = a real step up (promotion, more scope/seniority, a materially better company/role). 'down' = a real step down (demotion, narrower scope, a materially lesser role) — do not use for a lateral move at similar level even if the company changed. 'lateral' = same level, similar scope, a sideways move. 'first' = this is the earliest role in the array — there is nothing before it to compare against, always use 'first' for that one entry, never guess a direction for it.",
+    },
+    stepReasoning: {
+      type: "string",
+      description: "One short sentence (max 20 words) explaining the stepDirection call — the specific title/scope/responsibility signal that drove it. Omit or leave empty for stepDirection: 'first'.",
+    },
+  },
+  required: ["company", "title", "employmentType", "startDate", "endDate"],
+};
+
+const TRAJECTORY_EXTRACTION_TOOL = {
+  name: "submit_trajectory_extraction",
+  description: "Extract structured employment and education data from the cross-reference document (and, for education, the resume too) — no scoring, no judgment, just what's written.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      crossRefTrajectoryEntries: {
+        type: "array",
+        description: "One entry per employment role shown in the CROSS-REFERENCE document only (not the resume) — reverse chronological, most recent first. Same rules as any resume trajectory extraction: read only what's written, don't infer roles that aren't there.",
+        items: TRAJECTORY_ENTRY_ITEM_SCHEMA,
+      },
+      resumeEducationYear: {
+        type: "number",
+        description: "The RESUME's bare graduation year for its primary/most relevant degree (e.g. 'Expected 2029' → 2029, treated exactly like a confirmed year). Omit entirely if the resume states no year for any degree.",
+      },
+      crossRefEducationStartYear: {
+        type: "number",
+        description: "The CROSS-REFERENCE document's stated start year for the same degree the resume claims. Omit entirely if the cross-reference document shows no education record at all, or the degree doesn't match the resume's.",
+      },
+      crossRefEducationEndYear: {
+        type: "number",
+        description: "The CROSS-REFERENCE document's stated end year for the same degree. Omit entirely if not shown.",
+      },
+    },
+    required: ["crossRefTrajectoryEntries"],
+  },
+};
+
+const TRAJECTORY_JUDGMENT_TOOL = {
+  name: "submit_trajectory_judgment",
+  description: "Judge the employment comparisons a deterministic code pass already flagged as different, plus produce the usual narrative fields.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      trajectoryJudgments: {
+        type: "array",
+        description:
+          "One entry per flagged comparison provided below, in the SAME order — do not skip, reorder, or merge any, even if you conclude one is a false positive. Every row provided to you already differs on at least one field per a deterministic check, OR is an employment entry the cross-reference shows with no resume counterpart at all ('undisclosed'). Your job is to decide, per row: is this a real discrepancy worth surfacing, or a false positive the deterministic check couldn't tell apart from a real one (e.g. a company-name variant it didn't recognize as the same employer)?",
+        items: {
+          type: "object",
+          properties: {
+            rowIndex: {
+              type: "number",
+              description: "0-based index matching this comparison's position in the flagged-comparisons list provided in the prompt below.",
+            },
+            reasoning: {
+              type: "string",
+              description: "Fill this in BEFORE deciding status — one short sentence stating the key fact driving your decision. Same 'work it out first, decide second' purpose as the original schema's row-level reasoning field.",
+            },
+            status: {
+              type: "string",
+              enum: ["match", "discrepancy", "cannot_verify"],
+              description:
+                "match = the flagged difference is explainable by one of the tolerance rules below and isn't worth surfacing as a discrepancy at all (reclassifies the deterministic check's provisional flag). discrepancy = a real difference worth surfacing, tagged material or minor via severity. cannot_verify = the cross-reference document doesn't have enough information to confirm either way.",
+            },
+            severity: {
+              type: "string",
+              enum: ["material", "minor"],
+              description:
+                "Required when status is 'discrepancy'. Omit for match/cannot_verify.\n" +
+                "material = a real, hard-to-explain mismatch worth a direct follow-up question: a genuinely different employer with no plausible shared-entity or staffing relationship, a role-level change (e.g. individual contributor vs manager) not explained by a title-phrasing difference, an unexplained gap or overlap beyond ~2 months for employment dates, or undisclosed employment that OVERLAPS another already-listed role in time (concurrent, undisclosed full-time work — the real fraud-relevant pattern).\n" +
+                "minor = explainable by common resume-vs-LinkedIn differences, not worth treating as a red flag on its own: (1) staffing/consulting pattern — same title and overlapping dates but the company name differs because one document lists the client site and the other lists the staffing/consulting agency of record (very common in IT consulting/staffing, which is this recruiter's own industry); (2) company name variants — a legal-entity suffix, parent/subsidiary naming, or a short form vs a fuller name for what is plausibly the same organization, even without a known rebrand; (3) title phrasing — the SAME role (same company, overlapping dates) described with a simplified, self-styled, or differently-leveled-sounding title, as long as the seniority/function isn't genuinely contradicted; (4) date rounding — end-date differences of about 2 months or less are formatting noise, not a real gap (note: the deterministic pass already treats these as confident matches and would not have flagged them to you at all — this bucket is for date differences the deterministic pass flagged as ambiguous edge cases, if any reach you); (5) undisclosed employment that does NOT overlap any other listed role — an older job that simply predates or postdates the resume's listed history cleanly is completely normal resume trimming, not concealment — mark these minor, reserving material specifically for undisclosed roles that overlap a period the resume already accounts for; (6) an undisclosed-employment row where the resume already surfaces the same activity in a non-employment section (portfolio, projects, freelance work mentioned in passing) — real to flag, but not a hard red flag.",
+            },
+            note: {
+              type: "string",
+              description: "Required for discrepancy rows only: one short sentence (max 20 words) stating the factual difference. Skip for match and cannot_verify.",
+            },
+          },
+          required: ["rowIndex", "reasoning", "status"],
+        },
+      },
+      trajectoryNote: {
+        type: "string",
+        description: "One sentence only. State the single most notable fact about the RESUME's own trajectory — logical progression or biggest red flag. No filler, no elaboration.",
+      },
+      industryNote: {
+        type: "string",
+        description: "One sentence only. Name the sectors. Do not explain relevance beyond a single clause.",
+      },
+      resumeDelta: {
+        type: "string",
+        description: "Only include if the cross-reference document is a second version of the resume. Max 2 sentences: what specifically changed and whether it looks like honest tailoring or manipulation.",
+      },
+      resolvedConcerns: {
+        type: "array",
+        description:
+          "Only populate when ORIGINAL SCREENING CONCERNS are listed in the prompt below (omit entirely, don't emit an empty array, if none were provided). For each original concern that this cross-reference document actually resolves with CONCRETE evidence, add one entry. Apply the same rigor as discrepancy detection — silence on a topic, or the cross-reference merely not contradicting a concern, does NOT count as resolving it. When in doubt, leave it out.",
+        items: {
+          type: "object",
+          properties: {
+            concern: { type: "string", description: "The exact original concern text this resolves — copy verbatim, don't paraphrase." },
+            explanation: { type: "string", description: "One sentence, max 20 words: what specific evidence resolves this concern." },
+          },
+          required: ["concern", "explanation"],
+        },
+      },
+      linkedInSignals: {
+        type: "object" as const,
+        description: "Populate ONLY when the cross-reference is a LinkedIn profile PDF. Omit entirely for resume-vs-resume comparisons — do not emit null or empty objects.",
+        properties: {
+          activity: {
+            type: "string" as const,
+            enum: ["active", "moderate", "minimal"],
+            description: "active = 500+ connections OR 3+ recommendations OR (summary present AND recent cert/course within the last 12 months). minimal = under 100 connections AND 0 recommendations AND no summary. moderate = everything else.",
+          },
+          connectionCount: { type: "string" as const, description: "Connection count as shown, e.g. '500+' or '47'. Omit if not visible." },
+          recommendationCount: { type: "number" as const, description: "Number of written recommendations received. 0 if the section is absent or empty." },
+          hasSummary: { type: "boolean" as const, description: "True if the About/Summary section exists and has meaningful content." },
+          recentCertDate: { type: "string" as const, description: "Most recent certification or course date, YYYY-MM. Omit if none." },
+        },
+        required: ["activity", "recommendationCount", "hasSummary"],
+      },
+    },
+    required: ["trajectoryJudgments", "trajectoryNote", "industryNote"],
+  },
+};
+
 /**
  * Deterministic, not model-decided — keeps the score deduction consistent
  * and auditable across runs of the same underlying facts, rather than
@@ -182,6 +359,308 @@ export function computeCredibilityScoreBonus(resolvedConcerns: { concern: string
   return Math.min(15, resolvedConcerns.length * 5);
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Roadmap 2.5.2, 2026-08-17 — helpers for the new trajectory-comparison
+// path. See the TRAJECTORY_EXTRACTION_TOOL/TRAJECTORY_JUDGMENT_TOOL comment
+// block above for the full design.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Small, structured-extraction-only call — no scoring, no severity
+ * judgment. Pulls the cross-reference document's own employment history
+ * (as the same TrajectoryEntry shape scoreCandidate.ts generates for the
+ * resume) plus both documents' education years, so lib/matchTrajectoryEntries.ts
+ * can run its deterministic diff against the candidate's already-stored
+ * trajectoryEntries and lib/compareEducationYear.ts can run its pure
+ * integer-math check — neither needs a second full read of either document.
+ */
+async function extractCrossRefTrajectory(
+  resumeText: string,
+  crossRefText: string
+): Promise<{
+  crossRefTrajectoryEntries: TrajectoryEntry[];
+  resumeEducationYear?: number;
+  crossRefEducationStartYear?: number;
+  crossRefEducationEndYear?: number;
+}> {
+  const message = await getAnthropicClient().messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 2048,
+    tools: [{ ...TRAJECTORY_EXTRACTION_TOOL, cache_control: { type: "ephemeral" } }],
+    tool_choice: { type: "tool", name: "submit_trajectory_extraction" },
+    messages: [
+      {
+        role: "user",
+        content: `Extract structured data from these two documents — no scoring, no judgment, just what's written.
+
+RESUME (for education year only — its employment history is already known separately):
+${resumeText}
+
+CROSS-REFERENCE DOCUMENT:
+${crossRefText}`,
+      },
+    ],
+  });
+
+  const toolUse = message.content.find((block) => block.type === "tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    throw new Error("Claude did not return a trajectory extraction");
+  }
+  const input = toolUse.input as {
+    crossRefTrajectoryEntries?: TrajectoryEntry[];
+    resumeEducationYear?: number;
+    crossRefEducationStartYear?: number;
+    crossRefEducationEndYear?: number;
+  };
+  return {
+    crossRefTrajectoryEntries: input.crossRefTrajectoryEntries ?? [],
+    resumeEducationYear: input.resumeEducationYear,
+    crossRefEducationStartYear: input.crossRefEducationStartYear,
+    crossRefEducationEndYear: input.crossRefEducationEndYear,
+  };
+}
+
+function describeFlaggedRow(row: TrajectoryComparisonRow, index: number): string {
+  if (row.kind === "undisclosed") {
+    return `[${index}] UNDISCLOSED EMPLOYMENT — cross-reference shows: ${formatTrajectoryEntry(row.crossRefEntry!)}. Resume does not list this as employment at all (check whether it's mentioned elsewhere on the resume in a non-employment section, e.g. portfolio/projects/freelance work).`;
+  }
+  const diffFields = Object.entries(row.fieldDiffs ?? {})
+    .filter(([, v]) => v)
+    .map(([k]) => k)
+    .join(", ");
+  return `[${index}] Resume: ${formatTrajectoryEntry(row.resumeEntry!)} | Cross-reference: ${formatTrajectoryEntry(row.crossRefEntry!)} | Field(s) a deterministic check found different: ${diffFields || "(none — re-verify)"}`;
+}
+
+/**
+ * The judgment call — takes only the rows the deterministic pass could NOT
+ * already resolve to a confident match (rowsNeedingJudgment()), applies the
+ * SAME tolerance rules CredibilityRow's severity field used to apply to
+ * every row, plus produces the usual narrative fields (trajectoryNote,
+ * industryNote, resumeDelta, resolvedConcerns, linkedInSignals) that have
+ * nothing to do with trajectory comparison specifically.
+ */
+async function judgeTrajectoryComparison(params: {
+  flaggedRows: TrajectoryComparisonRow[];
+  resumeText: string;
+  crossRefText: string;
+  crossRefLabel: string;
+  isLinkedIn?: boolean;
+  originalConcerns?: string[];
+  roleContext?: string;
+}): Promise<{
+  judgedRows: TrajectoryComparisonRow[];
+  trajectoryNote: string;
+  industryNote: string;
+  resumeDelta?: string;
+  resolvedConcerns?: { concern: string; explanation: string }[];
+  linkedInSignals?: CredibilityAssessment["linkedInSignals"];
+}> {
+  const { flaggedRows, resumeText, crossRefText, crossRefLabel, isLinkedIn, originalConcerns, roleContext } = params;
+
+  const hasOriginalConcerns = Boolean(originalConcerns && originalConcerns.length > 0);
+  const flaggedRowsBlock =
+    flaggedRows.length > 0
+      ? flaggedRows.map((row, i) => describeFlaggedRow(row, i)).join("\n")
+      : "(none — every employment entry paired cleanly with zero differences; leave trajectoryJudgments empty)";
+
+  const linkedInStep =
+    isLinkedIn
+      ? `Since the cross-reference is a LinkedIn profile PDF, populate linkedInSignals with profile activity signals. Extract the connection count if visible, the number of written recommendations received (0 if absent), whether the About/Summary section exists and has meaningful content, and the most recent certification/course date if visible. Derive activity: active = 500+ connections OR 3+ recommendations OR (summary present AND recent cert/course within the last 12 months); minimal = under 100 connections AND 0 recommendations AND no summary; moderate = everything else.`
+      : "";
+
+  const resolvedConcernsStep = hasOriginalConcerns
+    ? `The ORIGINAL JD-fit screening flagged these concerns about the candidate:\n${(originalConcerns ?? []).map((c) => `   - ${c}`).join("\n")}\nFor each one the ${crossRefLabel} actually resolves with concrete, specific evidence, add an entry to resolvedConcerns. Apply the same rigor as discrepancy detection — silence, or the document merely not contradicting a concern, does NOT count as resolving it. When genuinely unsure, leave it out.`
+    : "";
+
+  const roleNote = roleContext
+    ? `The recruiter is screening for: ${roleContext}. Use this to contextualize whether the candidate's industry background is relevant.`
+    : "";
+
+  const todayNote = `Today is ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. Use this as ground truth for any date reasoning.`;
+
+  const userContent = `You are a recruiting assistant judging a set of employment comparisons a deterministic check already flagged as different, between a resume and a ${crossRefLabel}. This recruiter works in IT staffing/consulting, so staffing-agency-vs-client-site naming patterns are common and expected — do not treat them as suspicious on their own.
+
+${todayNote}
+
+${roleNote}
+
+FLAGGED COMPARISONS:
+${flaggedRowsBlock}
+
+Your job:
+1. For each flagged comparison above, decide status/severity/note per the tool schema's tolerance rules. Be precise — over-flagging stylistic differences as full discrepancies erodes trust in this tool as much as missing a real one does.
+2. Read the RESUME's own trajectory for consistency and signs of inflation — trajectoryNote, one sentence.
+3. Note what sectors the candidate has actually worked in — industryNote, one sentence.
+4. If the cross-reference document appears to be a second resume version, include resumeDelta describing what changed. Otherwise omit it.
+${linkedInStep}
+${resolvedConcernsStep}
+
+Be precise and brief. trajectoryNote and industryNote must be one sentence each — no exceptions.
+
+RESUME:
+${resumeText}
+
+CROSS-REFERENCE DOCUMENT:
+${crossRefText}`;
+
+  const message = await getAnthropicClient().messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 8192,
+    tools: [{ ...TRAJECTORY_JUDGMENT_TOOL, cache_control: { type: "ephemeral" } }],
+    tool_choice: { type: "tool", name: "submit_trajectory_judgment" },
+    messages: [{ role: "user", content: userContent }],
+  });
+
+  const toolUse = message.content.find((block) => block.type === "tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    throw new Error("Claude did not return a trajectory judgment");
+  }
+  if (message.stop_reason === "max_tokens") {
+    throw new Error(
+      "Credibility check response was cut off before completing — this can happen with an unusually long resume or cross-reference document. Try again, or with a shorter document."
+    );
+  }
+
+  const output = toolUse.input as {
+    trajectoryJudgments?: { rowIndex: number; status: "match" | "discrepancy" | "cannot_verify"; severity?: "material" | "minor"; note?: string }[];
+    trajectoryNote: string;
+    industryNote: string;
+    resumeDelta?: string;
+    resolvedConcerns?: { concern: string; explanation: string }[];
+    linkedInSignals?: CredibilityAssessment["linkedInSignals"];
+  };
+
+  const judgmentsByIndex = new Map((output.trajectoryJudgments ?? []).map((j) => [j.rowIndex, j]));
+  const judgedRows = flaggedRows.map((row, i) => {
+    const judgment = judgmentsByIndex.get(i);
+    if (!judgment) return row; // model skipped this index — keep the provisional "discrepancy" status rather than silently dropping it
+    return { ...row, status: judgment.status, severity: judgment.severity, note: judgment.note };
+  });
+
+  return {
+    judgedRows,
+    trajectoryNote: output.trajectoryNote,
+    industryNote: output.industryNote,
+    resumeDelta: output.resumeDelta,
+    resolvedConcerns: output.resolvedConcerns,
+    linkedInSignals: output.linkedInSignals,
+  };
+}
+
+/**
+ * Builds the single education CredibilityRow for the new trajectory-
+ * comparison path — same integer-year-math rule as before, now pure code
+ * (lib/compareEducationYear.ts) instead of an AI judgment. Returns null when
+ * the resume states no graduation year at all — nothing to verify, so no row
+ * (matches the old system's behavior of simply not producing an education
+ * row when the resume has no education claim to check).
+ */
+function buildEducationRow(
+  resumeEducationYear: number | undefined,
+  crossRefEducationStartYear: number | undefined,
+  crossRefEducationEndYear: number | undefined
+): CredibilityRow | null {
+  if (resumeEducationYear === undefined) return null;
+
+  const comparison = compareEducationYear(
+    resumeEducationYear,
+    crossRefEducationStartYear ?? null,
+    crossRefEducationEndYear ?? null
+  );
+  const crossRefText =
+    crossRefEducationStartYear !== undefined || crossRefEducationEndYear !== undefined
+      ? `${crossRefEducationStartYear ?? "?"}–${crossRefEducationEndYear ?? "?"}`
+      : "Not shown";
+
+  return {
+    field: "Education",
+    resume: String(resumeEducationYear),
+    crossRef: crossRefText,
+    status: comparison.status,
+    severity: comparison.severity,
+    note: comparison.status === "discrepancy" ? `Resume states ${resumeEducationYear}; cross-reference shows ${crossRefText}.` : undefined,
+  };
+}
+
+/**
+ * The new trajectory-comparison flow — extraction call, deterministic code
+ * diff, then a judgment call scoped to only what the diff flagged. Only
+ * called when the candidate already has stored trajectoryEntries; see
+ * assessCredibility()'s branch below. See the TRAJECTORY_EXTRACTION_TOOL/
+ * TRAJECTORY_JUDGMENT_TOOL comment block above for the full design.
+ */
+async function assessCredibilityWithTrajectoryComparison(params: {
+  resumeText: string;
+  crossRefText: string;
+  candidateTrajectoryEntries: TrajectoryEntry[];
+  roleContext?: string;
+  isLinkedIn?: boolean;
+  originalConcerns?: string[];
+}): Promise<CredibilityAssessment> {
+  const { resumeText, crossRefText, candidateTrajectoryEntries, roleContext, isLinkedIn, originalConcerns } = params;
+  const crossRefLabel = isLinkedIn ? "LinkedIn profile" : "cross-reference document";
+
+  const extraction = await extractCrossRefTrajectory(resumeText, crossRefText);
+
+  const comparisonRows = matchTrajectoryEntries(candidateTrajectoryEntries, extraction.crossRefTrajectoryEntries);
+  const flaggedRows = rowsNeedingJudgment(comparisonRows);
+
+  const judgment = await judgeTrajectoryComparison({
+    flaggedRows,
+    resumeText,
+    crossRefText,
+    crossRefLabel,
+    isLinkedIn,
+    originalConcerns,
+    roleContext,
+  });
+
+  // Merge judged rows back into the full set, by position — flaggedRows was
+  // comparisonRows filtered down to status !== "match" (rowsNeedingJudgment),
+  // and judgment.judgedRows is that same filtered array with each entry's
+  // status/severity/note overwritten, in the SAME order. Re-applying the
+  // identical filter predicate here and consuming judgedRows in order is a
+  // plain index correspondence — deliberately NOT an object-identity Map,
+  // since judgeTrajectoryComparison spreads each row into a new object
+  // ({...row, status: ...}), which would never match its original reference.
+  let judgedIndex = 0;
+  const finalTrajectoryComparison = comparisonRows.map((row) =>
+    row.status === "match" ? row : judgment.judgedRows[judgedIndex++]
+  );
+
+  const educationRow = buildEducationRow(
+    extraction.resumeEducationYear,
+    extraction.crossRefEducationStartYear,
+    extraction.crossRefEducationEndYear
+  );
+  const rows = educationRow ? [educationRow] : [];
+
+  // Same "deterministic, not model-decided" scoring/signal computation as
+  // the legacy path below — just fed from the combined education + mapped
+  // trajectory rows instead of one flat AI-produced array.
+  const allRowsForScoring: CredibilityRow[] = [...rows, ...finalTrajectoryComparison.map(mapTrajectoryRowToCredibilityRow)];
+  const hasMaterial = allRowsForScoring.some((r) => r.status === "discrepancy" && r.severity === "material");
+  const hasDiscrepancy = allRowsForScoring.some((r) => r.status === "discrepancy");
+  const overallSignal = hasMaterial ? "significant_concerns" : hasDiscrepancy ? "minor_concerns" : "clean";
+
+  const deduction = computeCredibilityScoreDelta(allRowsForScoring);
+  const bonus = computeCredibilityScoreBonus(judgment.resolvedConcerns ?? []);
+
+  return {
+    rows,
+    trajectoryComparison: finalTrajectoryComparison,
+    trajectoryNote: judgment.trajectoryNote,
+    industryNote: judgment.industryNote,
+    resumeDelta: judgment.resumeDelta,
+    overallSignal,
+    scoreDeduction: deduction,
+    scoreBonus: bonus,
+    scoreDelta: deduction + bonus,
+    resolvedConcerns: judgment.resolvedConcerns,
+    linkedInSignals: judgment.linkedInSignals,
+  };
+}
+
 export async function assessCredibility(params: {
   resumeText: string;
   crossRefText?: string;
@@ -198,8 +677,33 @@ export async function assessCredibility(params: {
    * entirely in that case, matching the pre-2026-07-29 behavior exactly.
    */
   originalConcerns?: string[];
+  /**
+   * Roadmap 2.5.2, 2026-08-17 — the candidate's own structured trajectory
+   * (lib/screenings.ts's getScreeningTrajectoryEntries). When present AND a
+   * cross-reference document was provided, employment comparison uses the
+   * new code-diff + scoped-judgment flow (see
+   * assessCredibilityWithTrajectoryComparison above) instead of asking one
+   * big call to compare every field itself. When absent — a screening saved
+   * before this feature shipped and never regenerated, which is every
+   * existing candidate as of this migration, since no backfill script exists
+   * yet for this column — falls straight through to the original single-call
+   * flow below, completely unchanged. Same graceful-degradation convention
+   * every deferred field in this codebase already follows.
+   */
+  candidateTrajectoryEntries?: TrajectoryEntry[];
 }): Promise<CredibilityAssessment> {
-  const { resumeText, crossRefText, roleContext, isLinkedIn, originalConcerns } = params;
+  const { resumeText, crossRefText, roleContext, isLinkedIn, originalConcerns, candidateTrajectoryEntries } = params;
+
+  if (crossRefText && candidateTrajectoryEntries && candidateTrajectoryEntries.length > 0) {
+    return assessCredibilityWithTrajectoryComparison({
+      resumeText,
+      crossRefText,
+      candidateTrajectoryEntries,
+      roleContext,
+      isLinkedIn,
+      originalConcerns,
+    });
+  }
 
   const roleNote = roleContext
     ? `The recruiter is screening for: ${roleContext}. Use this to contextualize whether the candidate's industry background is relevant.`

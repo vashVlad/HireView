@@ -1,3 +1,4 @@
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Migration: Candidate blacklist
 -- Run this in Supabase SQL editor → Run

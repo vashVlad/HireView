@@ -1,0 +1,43 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: Gate 1 lazy fit-suggestion persistence — screenings.gate1_fit_suggestion
+-- Run this in Supabase SQL editor → Run
+--
+-- Phase 2.6 Tier 2 (2.6.4), 2026-08-20 — Vlad's ask: a gate-1-archived
+-- candidate (checklist score below this project's own threshold, never
+-- reached scoreCandidate() — see supabase-migration-checklist.sql) should
+-- still get a "would this candidate fit somewhere else on the team" check,
+-- same Cross-Project Fit Suggestion feature already live for Gate 2
+-- candidates (app/api/cross-project-fit/route.ts), but computed LAZILY (on
+-- first card open, not automatically at archive time — Vlad: "when the
+-- recruiter opens the card") and PERSISTED, not recomputed on every
+-- subsequent open (Vlad: "once").
+--
+-- This single jsonb column stores the exact response shape POST
+-- /api/cross-project-fit already returns — { suggestion: {...} | null,
+-- alreadyIn: [...] } — see lib/types.ts's StoredFitSuggestion. A stored
+-- value of SQL NULL means "not computed yet"; a stored JSON object (even
+-- one whose own `suggestion` field is null, meaning "checked, nothing
+-- cleared the bar") means "already computed, never recompute" — see
+-- lib/screenings.ts's getGate1FitSuggestion, which relies on exactly this
+-- distinction to decide whether to call POST /api/cross-project-fit again.
+--
+-- Additive only, defaults to nothing (column absent = read as null by
+-- getGate1FitSuggestion's best-effort catch, same as every other
+-- deferred column here) — no existing scoring, saving, or reading path is
+-- affected either way until this migration runs and the reading code is
+-- deployed.
+--
+-- IMPORTANT — run this BEFORE deploying the code that reads/writes it. Kept
+-- OUT of the shared SCREENING_COLUMNS select (same Migration Sequencing
+-- rule as every other deferred column here — see current_company's
+-- migration for the 2026-08-06 incident that rule exists to prevent). All
+-- reads/writes go through the isolated getGate1FitSuggestion /
+-- updateScreening({ gate1FitSuggestion }) path only.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE screenings
+  ADD COLUMN IF NOT EXISTS gate1_fit_suggestion jsonb;
+
+-- No backfill needed — every existing screening predates this feature and
+-- simply has no suggestion computed yet (null), which getGate1FitSuggestion
+-- already treats as "not computed," not an error state.

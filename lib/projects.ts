@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { DEFAULT_SCORE_THRESHOLD } from "./scoreThreshold";
 import type { JDAnalysis, Project, ProjectChecklist, ProjectStatus, ProjectSummary } from "./types";
 
 interface ProjectRow {
@@ -20,7 +21,7 @@ function rowToProject(row: ProjectRow): Project {
     jobDescription: row.job_description,
     jdAnalysis: row.jd_analysis,
     status: row.status,
-    scoreThreshold: row.score_threshold ?? 45,
+    scoreThreshold: row.score_threshold ?? DEFAULT_SCORE_THRESHOLD,
     ...(row.team_id != null ? { teamId: row.team_id } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

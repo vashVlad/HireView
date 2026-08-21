@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment, use, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlreadyScreenedCard } from "@/components/AlreadyScreenedCard";
+import { BlacklistedPreScoreCard } from "@/components/BlacklistedPreScoreCard";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
@@ -12,6 +13,9 @@ import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
 import { RejectionCard } from "@/components/RejectionCard";
 import { ResultCard, type FitSuggestion, type AlreadyInProject } from "@/components/ResultCard";
+import { Gate1ChecklistBreakdown } from "@/components/Gate1ChecklistBreakdown";
+import { isGate1OnlyResult } from "@/lib/isGate1OnlyResult";
+import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
@@ -63,6 +67,15 @@ interface ArchiveFitCandidate {
   candidateName: string;
   score: number;
   suggestedRoleFit: string | null;
+  /**
+   * Stage 2, 2026-08-17 — see lib/archiveFits.ts's ArchiveFitQueueRow
+   * comment for the full "why." Real checklist items this candidate's
+   * strengths/concerns already back up, computed live (not persisted) so
+   * it can never go stale against a since-edited checklist. Empty array
+   * either way (no checklist configured, or genuinely no evidence found) —
+   * the card just shows Stage 1's plain suggested-fit text in that case.
+   */
+  matchedChecklistItems: ChecklistItem[];
 }
 type ScreenView = "form" | "loading" | "results";
 
@@ -182,7 +195,15 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
   // instant/local; a save (blur, or immediately for add/remove/regenerate)
   // PATCHes the whole array, same "full replacement, not per-field" pattern
   // FunnelView's other list-editing UIs already use.
-  const [checklistTab, setChecklistTab] = useState<"decrease" | "add">("decrease");
+  //
+  // Single list, 2026-08-17 (Vlad's direct feedback, same round as the
+  // trajectory overlay) — used to be two tabs ("Decrease score" / "Add
+  // score"), removed: a plainly positive-sounding item sitting under
+  // "Decrease score" made no sense at a glance, and the checklist never
+  // actually needs to subtract points at all (see lib/evaluateChecklist.ts's
+  // computeChecklistScoreDelta — real deductions live entirely in the
+  // credibility check now). No `checklistTab` state anymore; every item
+  // renders in one list, in whatever order the checklist already has them.
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>(checklist?.items ?? []);
   const [savingChecklist, setSavingChecklist] = useState(false);
   const [checklistError, setChecklistError] = useState<string | null>(null);
@@ -226,12 +247,12 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
     );
   }
 
-  function handleAddChecklistItem(category: "decrease" | "add") {
+  function handleAddChecklistItem() {
     const newItem: ChecklistItem = {
       id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
-      category,
+      category: "add", // legacy field, always "add" going forward — see ChecklistItem's own comment
       label: "",
-      points: category === "decrease" ? 10 : 5,
+      points: 5,
     };
     const newItems = [...checklistItems, newItem];
     setChecklistItems(newItems);
@@ -260,8 +281,6 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
       setGeneratingChecklist(false);
     }
   }
-
-  const visibleChecklistItems = checklistItems.filter((item) => item.category === checklistTab);
 
   async function handleReanalyze() {
     if (!jdFile && !jdText.trim()) return;
@@ -465,21 +484,25 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
       </div>
 
       {/* JD checklist ("Trust badge"), 2026-08-17 (Vlad's ask): specific,
-          individually-checkable items derived from the JD — "decrease" items
-          dock points when a genuine gap is unevidenced, "add" items award
-          points when a reinforcing signal IS evidenced. Evaluated once per
-          candidate at screening time (lib/evaluateChecklist.ts) and applied
-          as a deterministic score delta (lib/screenings.ts's saveScreening,
-          same pattern as the boost-companies card above) — never baked into
-          scoreCandidate.ts's own judgment. Deliberately excludes
-          target-company-match items to avoid double-counting with the card
-          above — see lib/generateChecklist.ts's own comment. */}
+          individually-checkable items derived from the JD, each one adding
+          points when the resume shows real evidence of it. Evaluated once
+          per candidate at screening time (lib/evaluateChecklist.ts) and
+          applied as a deterministic score delta (lib/screenings.ts's
+          saveScreening, same pattern as the boost-companies card above) —
+          never baked into scoreCandidate.ts's own judgment. Deliberately
+          excludes target-company-match items to avoid double-counting with
+          the card above — see lib/generateChecklist.ts's own comment.
+          Single list, no decrease/add split (removed 2026-08-17, same round
+          as the trajectory overlay — see lib/evaluateChecklist.ts's
+          computeChecklistScoreDelta comment for the full reasoning): this
+          checklist only ever builds score up. Real deductions live entirely
+          in the credibility/cross-reference check below. */}
       <div className="rounded-2xl border border-zinc-200 px-5 py-4 dark:border-zinc-800">
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-1">
             <span className="font-semibold text-zinc-900 dark:text-zinc-50">JD checklist</span>
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Specific, checkable items scored per candidate at screening time — decrease items dock points for unevidenced must-haves, add items award points for reinforcing signals.
+              Specific, checkable signals scored per candidate at screening time — each one adds points when the resume shows real evidence of it.
             </p>
           </div>
           {checklistItems.length > 0 && !confirmRegenerate && (
@@ -490,11 +513,25 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
           )}
         </div>
 
+        {/* Real warning, not a generic one-liner — 2026-08-19 (Phase 2.6,
+            Vlad's ask: "give a warning to the recruiter what will be
+            dropped"). Target companies are a completely separate feature
+            (this project's jdAnalysis.wide/narrow.targetCompanies, its own
+            card elsewhere on this tab) and were never touched by this
+            button — nothing to call out about them here, they're simply
+            unaffected either way. */}
         {confirmRegenerate && (
-          <div className="mt-3 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-500/10 dark:text-amber-300">
-            <span className="flex-1">Regenerating replaces every item below, including any manual edits. Continue?</span>
-            <button type="button" onClick={handleGenerateChecklist} className="font-semibold underline underline-offset-2">Yes, regenerate</button>
-            <button type="button" onClick={() => setConfirmRegenerate(false)} className="text-amber-600 hover:text-amber-800 dark:text-amber-400">Cancel</button>
+          <div className="mt-3 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700/50 dark:bg-amber-500/10 dark:text-amber-300">
+            <span className="font-semibold">Regenerating will drop these {checklistItems.length} item{checklistItems.length === 1 ? "" : "s"}, including any manual edits:</span>
+            <ul className="ml-4 list-disc">
+              {checklistItems.map((item) => (
+                <li key={item.id}>{item.label}</li>
+              ))}
+            </ul>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={handleGenerateChecklist} className="font-semibold underline underline-offset-2">Yes, regenerate</button>
+              <button type="button" onClick={() => setConfirmRegenerate(false)} className="text-amber-600 hover:text-amber-800 dark:text-amber-400">Cancel</button>
+            </div>
           </div>
         )}
 
@@ -512,59 +549,54 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
             </button>
           </div>
         ) : (
-          <>
-            <div className="mt-4 flex items-center gap-1 self-start rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
-              {([
-                { key: "decrease" as const, label: "Decrease score" },
-                { key: "add" as const, label: "Add score" },
-              ]).map((t) => (
-                <button key={t.key} type="button" onClick={() => setChecklistTab(t.key)}
-                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
-                    checklistTab === t.key ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-50"
-                    : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"}`}>
-                  {t.label} ({checklistItems.filter((i) => i.category === t.key).length})
+          <div className="mt-4 flex flex-col gap-2">
+            {/* Must-have-first display order, 2026-08-19 (Phase 2.6) — a
+                separate, purely-for-render sort, not a mutation of
+                checklistItems itself (edit/save/reorder-by-drag, if that
+                ever exists, should still operate on the real underlying
+                array/order, not this display-only view of it). A missing
+                tier (checklist generated before this field existed) sorts
+                as nice-to-have, same graceful-degradation convention as
+                everywhere else this app has a deferred field. */}
+            {[...checklistItems]
+              .sort((a, b) => (a.tier === "must-have" ? 0 : 1) - (b.tier === "must-have" ? 0 : 1))
+              .map((item) => (
+              <div key={item.id} className="flex items-center gap-2">
+                {item.tier === "must-have" && (
+                  <span
+                    title="Must-have"
+                    className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
+                  >
+                    must
+                  </span>
+                )}
+                <input
+                  type="text"
+                  value={item.label}
+                  onChange={(e) => handleChecklistFieldChange(item.id, "label", e.target.value)}
+                  onBlur={() => saveChecklistItems(checklistItems)}
+                  placeholder="Describe the specific, checkable signal…"
+                  className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  value={item.points}
+                  onChange={(e) => handleChecklistFieldChange(item.id, "points", e.target.value)}
+                  onBlur={() => saveChecklistItems(checklistItems)}
+                  className="w-16 rounded-lg border border-emerald-200 px-2 py-1.5 text-center text-sm text-emerald-600 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 dark:border-emerald-700/50 dark:bg-zinc-900 dark:text-emerald-300"
+                />
+                <button type="button" onClick={() => handleRemoveChecklistItem(item.id)} disabled={savingChecklist}
+                  className="shrink-0 text-zinc-400 hover:text-rose-500 disabled:opacity-50" aria-label="Remove item">
+                  ×
                 </button>
-              ))}
-            </div>
-
-            <div className="mt-3 flex flex-col gap-2">
-              {visibleChecklistItems.length === 0 && (
-                <span className="text-sm text-zinc-400 dark:text-zinc-500">No {checklistTab === "decrease" ? "decrease" : "add"} items yet.</span>
-              )}
-              {visibleChecklistItems.map((item) => (
-                <div key={item.id} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={item.label}
-                    onChange={(e) => handleChecklistFieldChange(item.id, "label", e.target.value)}
-                    onBlur={() => saveChecklistItems(checklistItems)}
-                    placeholder="Describe the specific, checkable signal…"
-                    className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  />
-                  <input
-                    type="number"
-                    min={1}
-                    value={item.points}
-                    onChange={(e) => handleChecklistFieldChange(item.id, "points", e.target.value)}
-                    onBlur={() => saveChecklistItems(checklistItems)}
-                    className={`w-16 rounded-lg border px-2 py-1.5 text-center text-sm outline-none focus:ring-2 dark:bg-zinc-900 dark:text-zinc-100 ${
-                      item.category === "decrease"
-                        ? "border-rose-200 text-rose-600 focus:border-rose-400 focus:ring-rose-100 dark:border-rose-700/50 dark:text-rose-300"
-                        : "border-emerald-200 text-emerald-600 focus:border-emerald-400 focus:ring-emerald-100 dark:border-emerald-700/50 dark:text-emerald-300"
-                    }`}
-                  />
-                  <button type="button" onClick={() => handleRemoveChecklistItem(item.id)} disabled={savingChecklist}
-                    className="shrink-0 text-zinc-400 hover:text-rose-500 disabled:opacity-50" aria-label="Remove item">
-                    ×
-                  </button>
-                </div>
-              ))}
-              <button type="button" onClick={() => handleAddChecklistItem(checklistTab)} disabled={savingChecklist}
-                className="mt-1 self-start rounded-lg border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-400 hover:text-zinc-700 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200">
-                + Add {checklistTab === "decrease" ? "decrease" : "add"} item
-              </button>
-            </div>
-          </>
+              </div>
+            ))}
+            <button type="button" onClick={handleAddChecklistItem} disabled={savingChecklist}
+              className="mt-1 self-start rounded-lg border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:border-zinc-400 hover:text-zinc-700 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200">
+              + Add item
+            </button>
+          </div>
         )}
         {checklistError && <p className="mt-2 text-xs text-rose-500">{checklistError}</p>}
       </div>
@@ -602,6 +634,8 @@ function batchStorageKey(projectId: number): string {
 interface PersistedBatch {
   results: CandidateResult[];
   existingMatches: { match: CheckExistingResult }[];
+  /** Blacklist pre-score skips, 2026-08-20 — see blacklistedPreMatches state below. */
+  blacklistedPreMatches: { match: CheckExistingResult }[];
   existingCandidates: ExistingCandidateRef[];
   nameMatches: [string, ExistingCandidateRef][];
   rejectionHistoryBaseline: RejectionHistoryEntry[];
@@ -718,6 +752,16 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
   const [existingMatches, setExistingMatches] = useState<
     { match: CheckExistingResult; file?: File }[]
   >(() => initialBatch?.existingMatches ?? []);
+  // Blacklist pre-score gate, 2026-08-20 — set aside by check-existing's
+  // free extractNameHeuristic() match against the system-wide blacklist,
+  // same "never reaches the scoring route" precedent as existingMatches
+  // above (that one catches exact-content duplicates; this one catches a
+  // blacklisted candidate before a real Claude call is ever made). See
+  // components/BlacklistedPreScoreCard.tsx and CheckExistingResult.blacklistMatch's
+  // doc comment (lib/types.ts) for the full story.
+  const [blacklistedPreMatches, setBlacklistedPreMatches] = useState<
+    { match: CheckExistingResult; file?: File }[]
+  >(() => initialBatch?.blacklistedPreMatches ?? []);
   // Candidates already saved in this project, by normalized name — the one
   // signal exact-content hashing can't catch (two different resume files
   // for the same person). Populated during the pre-check, compared against
@@ -789,6 +833,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
     const toPersist: PersistedBatch = {
       results,
       existingMatches: existingMatches.map(({ match }) => ({ match })),
+      blacklistedPreMatches: blacklistedPreMatches.map(({ match }) => ({ match })),
       existingCandidates,
       nameMatches: [...nameMatches.entries()],
       rejectionHistoryBaseline,
@@ -803,7 +848,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
     } catch {
       // Storage full/unavailable — non-fatal, just means Back won't restore this time.
     }
-  }, [screenView, results, existingMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, blacklistBaseline, blacklistMatches, fileErrors, currentBatchId, project.id]);
+  }, [screenView, results, existingMatches, blacklistedPreMatches, existingCandidates, nameMatches, rejectionHistoryBaseline, rejectionMatches, blacklistBaseline, blacklistMatches, fileErrors, currentBatchId, project.id]);
 
   async function handleStatusChange(id: number, status: CandidateStatus) {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -923,11 +968,17 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
       const byFileName = new Map(classifications.map((c) => [c.fileName, c]));
       const newFiles: File[] = [];
       const matched: { match: CheckExistingResult; file: File }[] = [];
+      // Blacklist pre-score gate, 2026-08-20 — see blacklistedPreMatches
+      // state above. Checked before "new" is assumed, same as the duplicate
+      // branch, so a blacklisted candidate never reaches scoreFiles below.
+      const blacklistedSkips: { match: CheckExistingResult; file: File }[] = [];
       for (const f of files) {
         const c = byFileName.get(f.name);
         if (c && c.existing && c.status === "duplicate") {
           // Exact content match — genuinely nothing new to learn, safe to skip scoring.
           matched.push({ match: c, file: f });
+        } else if (c && c.status === "blacklisted" && c.blacklistMatch) {
+          blacklistedSkips.push({ match: c, file: f });
         } else {
           newFiles.push(f);
         }
@@ -950,6 +1001,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
       setResults(scored);
       setFileErrors(errors);
       setExistingMatches(matched);
+      setBlacklistedPreMatches(blacklistedSkips);
       setExistingCandidates(candidates);
       setNameMatches(findNameMatches(scored, candidates));
       setRejectionHistoryBaseline(rejections);
@@ -1093,12 +1145,40 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
     }
   }
 
+  // A recruiter overriding a pre-score "blacklisted" skip — forces a real
+  // score for that one file, same shape as handleForceRescore above (which
+  // handles the "duplicate" skip case), just sourced from
+  // blacklistedPreMatches instead of existingMatches. The post-score
+  // findBlacklistMatches safety net (matched against the real AI-extracted
+  // name) still fires on the result below, same as for any other candidate —
+  // overriding the pre-score gate doesn't silently drop the warning, it just
+  // no longer blocks scoring.
+  async function handleForceScoreBlacklisted(file: File) {
+    const priorHash = blacklistedPreMatches.find((m) => m.file === file)?.match.resumeContentHash;
+    const hashByFileName = priorHash ? new Map([[file.name, priorHash]]) : new Map<string, string>();
+
+    setBlacklistedPreMatches((prev) => prev.filter((m) => m.file !== file));
+    try {
+      const { results: scored, errors } = await scoreFiles([file]);
+      const merged = [...results, ...scored].sort((a, b) => b.score - a.score);
+      setResults(merged);
+      setNameMatches(findNameMatches(merged, existingCandidates));
+      setRejectionMatches(findRejectionMatches(merged, rejectionHistoryBaseline, hashByFileName));
+      setBlacklistMatches(findBlacklistMatches(merged, blacklistBaseline, hashByFileName));
+      if (errors.length > 0) setFileErrors((prev) => [...prev, ...errors]);
+      if (scored.length > 0) onScreeningsSaved();
+    } catch (err) {
+      setFileErrors((prev) => [...prev, { fileName: file.name, error: err instanceof Error ? err.message : "Score failed" }]);
+    }
+  }
+
   function handleReset() {
     setScreenView("form");
     setResults([]);
     setFileErrors([]);
     setFiles([]);
     setExistingMatches([]);
+    setBlacklistedPreMatches([]);
     setExistingCandidates([]);
     setNameMatches(new Map());
     setRejectionHistoryBaseline([]);
@@ -1121,6 +1201,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
             <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
               {results.length} candidate{results.length !== 1 ? "s" : ""} ranked by fit
               {existingMatches.length > 0 && ` · ${existingMatches.length} already screened, skipped`}
+              {blacklistedPreMatches.length > 0 && ` · ${blacklistedPreMatches.length} blacklisted, skipped`}
               {fileErrors.length > 0 && ` · ${fileErrors.length} file${fileErrors.length !== 1 ? "s" : ""} failed`}
             </p>
           </div>
@@ -1247,11 +1328,14 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
                   fd.set("resumeFile", file);
                   fd.set("currentProjectId", String(project.id));
                   fd.set("candidateName", result.candidateName);
-                  // Vlad's ask, 2026-07-30: the suggestion is labeled
-                  // "stronger fit," so the server needs this project's own
-                  // score to actually enforce that — see cross-project-fit's
-                  // matching comment on the `best` filter.
-                  fd.set("currentScore", String(result.score));
+                  // currentScore no longer sent — Phase 2.6 Tier 2
+                  // (2026-08-20): the server-side "stronger fit" bar is now a
+                  // flat threshold + FIT_ACCEPT_MARGIN on the OTHER project's
+                  // own score, not a comparison against what this candidate
+                  // scored here (see cross-project-fit/route.ts's
+                  // FIT_ACCEPT_MARGIN comment for why — that comparison broke
+                  // down for Gate 1 candidates, whose score is a checklist
+                  // percentage, not a real scoreCandidate() score).
                   const res = await fetch("/api/cross-project-fit", { method: "POST", body: fd });
                   if (!res.ok) {
                     const body = await res.json().catch(() => null);
@@ -1301,6 +1385,15 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
               onStatusChange={handleStatusChange}
               onArchiveReasonChange={handleArchiveReasonChange}
               returnTo={currentBatchId ? `/projects/${project.id}/batches/${currentBatchId}` : undefined}
+            />
+          ))}
+          {blacklistedPreMatches.map(({ match, file }) => (
+            <BlacklistedPreScoreCard
+              key={match.fileName}
+              fileName={match.fileName}
+              blacklistMatch={match.blacklistMatch!}
+              file={file}
+              onForceScore={handleForceScoreBlacklisted}
             />
           ))}
         </ul>
@@ -2614,7 +2707,30 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   </div>
                 )}
 
+                {/* ── Gate 1 only — checklist result ────────────────────── */}
+                {/* Added 2026-08-20 — this tab has its own hand-rolled card
+                    markup (separate from components/ResultCard.tsx), which
+                    never learned about Gate 1: every section below this one
+                    (Career story, Assessment, Strengths, Concerns) is gated
+                    on or reads fields that are genuinely empty for a
+                    gate1Only candidate (no AI summary/strengths/trajectory
+                    ever ran), so this tab — the default way anyone browses
+                    archived candidates — showed a blank, unexplained card
+                    for every one of them. Shared component, same one
+                    ResultCard.tsx now uses, so the two card implementations
+                    can't drift again the way they just did. */}
+                {isGate1OnlyResult(s) && s.checklistEvaluation && (
+                  <Gate1ChecklistBreakdown checklistEvaluation={s.checklistEvaluation} />
+                )}
+
                 {/* ── Career story ──────────────────────────────────────── */}
+                {/* Gated on actual content existing, 2026-08-20 — previously
+                    unconditional, so a gate1Only candidate (empty
+                    careerTrajectory AND empty summary) rendered a "Career
+                    story" header with nothing under it, part of the same
+                    blank-card bug fixed above. Matches ResultCard.tsx's own
+                    trajectoryText gate (only renders when there's text). */}
+                {(s.careerTrajectory || s.summary) && (
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career story</p>
@@ -2647,11 +2763,13 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* ── Cross-reference check ─────────────────────────────── */}
                 <CrossReferenceChecker
                   screeningId={s.id}
                   currentAssessment={credibilityMap[s.id]}
+                  checklistEvaluation={s.checklistEvaluation}
                   onComplete={async (assessment) => {
                     try {
                       const res = await fetch(`/api/history/${s.id}`, {
@@ -2931,6 +3049,26 @@ function ArchiveFitCard({ projectId, candidate, onDecided, onScreened }: {
             Suggested fit: <span className="font-medium text-violet-700 dark:text-violet-400">{candidate.suggestedRoleFit}</span>
           </p>
         )}
+        {/* Stage 2 evidence, 2026-08-17 (Vlad's ask) — real checklist items
+            this candidate's own strengths/concerns already back up, not just
+            Stage 1's generic suggested-role-fit title. Only rendered when
+            there's actual evidence (empty array = no checklist configured,
+            or genuinely nothing matched) — same "only surface a signal"
+            convention used across this app's other badges. */}
+        {candidate.matchedChecklistItems.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">Evidence:</span>
+            {candidate.matchedChecklistItems.map((item) => (
+              <span
+                key={item.id}
+                title={item.label}
+                className="max-w-[220px] truncate rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-500/10 dark:text-sky-400"
+              >
+                {item.label}
+              </span>
+            ))}
+          </div>
+        )}
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
           Scored {candidate.score} on original role
         </p>
@@ -3014,7 +3152,7 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
   const [statusError, setStatusError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [threshold, setThreshold] = useState(project.scoreThreshold ?? 45);
+  const [threshold, setThreshold] = useState(project.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD);
   const [savingThreshold, setSavingThreshold] = useState(false);
   // Cross-Project Fit Suggestion opt-out — Vlad's ask, 2026-07-30. See
   // Project.excludeFromFitSuggestions (lib/types.ts) for the deferred-
@@ -3164,7 +3302,7 @@ function SettingsTab({ project, onNameSaved, onStatusToggled, onDeleted, onThres
         <button
           type="button"
           onClick={saveThreshold}
-          disabled={savingThreshold || threshold === (project.scoreThreshold ?? 45)}
+          disabled={savingThreshold || threshold === (project.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD)}
           className="self-end rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {savingThreshold ? "Saving…" : "Save threshold"}

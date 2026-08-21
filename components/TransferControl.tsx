@@ -192,7 +192,18 @@ export function TransferControl({
             <p className="mb-2 flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
               Currently transferred to <span className="font-semibold text-zinc-700 dark:text-zinc-200">{alreadyTransferred.projectName ?? "another project"}</span>
               {alreadyTransferred.screeningId != null && (
-                <Link href={`/candidates/${alreadyTransferred.screeningId}`} onClick={(e) => e.stopPropagation()} className="underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200">
+                <Link
+                  // returnTo, 2026-08-11 (Vlad's ask — the other actual
+                  // "transfer button" case, alongside StatusStageControl's
+                  // matching link). Same fix, same reasoning.
+                  href={`/candidates/${alreadyTransferred.screeningId}${
+                    typeof window !== "undefined"
+                      ? `?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+                      : ""
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200"
+                >
                   · View
                 </Link>
               )}

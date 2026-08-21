@@ -612,3 +612,50 @@ Full detail and reasoning in `session-log.md`'s matching 2026-07-23 entry. Five 
 ## Fixed same day (2026-08-02, round 55) — review pass on round 54
 
 Vlad reviewed round 54 with screenshots and flagged 6 things, all fixed: (1) Tracker drawer couldn't scroll to reach Save once the fraud-claims form grew tall — real layout bug, the stage picker + RejectionCard rendered outside the drawer's only scroll container; now all share one. (2) The stage-move confirm block shrunk to match `StatusStageControl`'s compact icon style. (3) All Candidates' collapsed cards had no Resume/Notes buttons at all (Pipeline's collapsed row does) — added. (4) Blacklist filter checkbox restyled from a heavy black "must pop" box to a plain checkbox/label. (5) Transferred-and-archived pill reordered to "status | Transferred | project" per Vlad's spec. (6) **Real bug fixed:** `showArchiveReason` was keyed off the stale confirmed `status` instead of the pending `displayStatus`, so moving an already-archived candidate to Screening showed both the stage picker and a leftover archive-reason dropdown at once. Full detail in `session-log.md`'s round 55 entry. `npx tsc --noEmit -p .` clean, do-not-touch files zero diff, left uncommitted.
+
+## Built 2026-08-19/20 — Phase 2.6 (two-gate screening architecture) — Tiers 1, 2, 3
+
+Full detail lives in `memory/Cirot_Roadmap.md`'s Phase 2.6 table and `memory/claude-code-handoff-2026-08-19-phase-2.6-architecture.md`, not duplicated here — this is the short pointer per session-memory convention.
+
+- **Tier 1 (gate wiring, built):** `evaluateChecklist()` is now a hard pass/fail gate BEFORE `scoreCandidate()`/fingerprint/embedding — a checklist score below the project's threshold archives immediately with a lightweight stand-in result (`lib/buildGate1ArchivedResult.ts`), skipping the expensive pipeline entirely. Archived-card UI shows a matched/unmatched checklist breakdown instead of the normal AI-summary layout, gated on `lib/isGate1OnlyResult.ts`.
+- **Tier 2 (lazy fit-suggestion, built 2026-08-20):** a Gate-1-archived candidate gets a "would this fit better elsewhere on the team" check computed once, on first card open, and persisted (`screenings.gate1_fit_suggestion`, new migration NOT YET RUN) — never recomputed. `POST /api/cross-project-fit` now accepts a `screeningId` alternative to `resumeFile`, adds a per-project checklist pre-filter before the real scoring fan-out, and replaced its old `currentScore`-beat-comparison acceptance rule with a flat `threshold + 15` bar (both flows). Wired into `/candidates/[id]` (the reopened-candidate page).
+- **Tier 3 (independent fixes, built):** checklist `tier` field (must-have/nice-to-have, sorts and badges on the Filters tab), regenerate-checklist warning banner, `stripLegalSuffix()` for target-company alias matching.
+- **Real bug found and fixed along the way (2026-08-20):** `lib/toCandidateResult.ts` never mapped `checklistEvaluation` through from `ScreeningRecord` to `CandidateResult` — the Tier 1 archived-card breakdown silently never rendered on `/candidates/[id]`, only in the same-session live results view. Fixed.
+- **Verified:** `npx tsc --noEmit -p .` clean, all 9 `test_*.mjs` files pass, do-not-touch diff clean except `screen-resumes/route.ts`'s already-flagged Tier 1 exception.
+- **Not live-tested, not migrated, left uncommitted, per standing instruction.** Needs from Vlad: run `supabase-migration-gate1-fit-suggestion.sql` (and `supabase-migration-checklist.sql` if not already run), then live-test the full Gate 1 → lazy-fit-suggestion flow end to end.
+- **Not yet built:** "Transfer to project" wiring for the lazy fit-suggestion path (needs a `screeningId` path on `app/api/screenings/save-one/route.ts`, do-not-touch).
+
+## Built 2026-08-20 (same day, continued) — Phase 2.6 Tier 4: trajectory graph redesign
+
+Full detail in `Cirot_Roadmap.md`'s 2.6.7-2.6.10 rows, `decisions-log.md`, and the architecture handoff doc's "Tier 4 — BUILT" section — short pointer here per convention.
+
+- **Y-axis is now career trajectory/seniority** (accumulated per-role step up/down/lateral, an AI judgment on `scoreCandidate.ts`/`assessCredibility.ts`, new do-not-touch exception on the former), **not checklist points** — supersedes the 2026-08-18 design. A real employment gap (new `lib/detectEmploymentGaps.ts`, pure date math) forces a visible dip regardless of the step-direction call. Checklist evidence is now hover/click-only detail on `components/TrajectoryGraph.tsx` (7th revision), not what drives the line's height.
+- **Cross-reference (secondary) line** computed the exact same way, independently, off its own extracted `trajectoryEntries` — genuinely overlaps the resume line when the two agree, same rendering mechanism already proven 2026-08-18.
+- **Real cleanup along the way:** the old Gantt-duration-bar fallback (only reachable when no checklist was configured) was deleted, not left unreachable — the redesign has no equivalent gate, chart mode is now unconditional.
+- **Verified:** `npx tsc --noEmit -p .` clean (incl. `--noUnusedLocals --noUnusedParameters`). All 11 test files pass (27 new test cases across 2 new files). Do-not-touch diff clean except the two flagged exceptions (`screen-resumes/route.ts` from Tier 1, `scoreCandidate.ts` new this round).
+- **Not live-tested, not migrated (`supabase-migration-gate1-fit-suggestion.sql` from Tier 2 still pending), left uncommitted**, per standing instruction.
+- **Phase 2.6 status: Tiers 1-4 all built.** Only Tier 5 remains (blocked/backlog, not sequenced).
+
+## 2026-08-20 (continued) — Claude Code live-verified Tiers 1-4; two real follow-up gaps found and fixed
+
+Claude Code's live-verification pass (real Supabase/Anthropic calls) confirmed all four tiers work as designed and measurably cut cost (3 fewer Claude/Voyage calls per checklist-failed candidate). Nothing committed yet — waiting on Vlad's final go-ahead, branching fresh off `main` (origin's checklist feature is already merged; local `feat/jd-checklist` carries 5 unrelated commits not part of this work).
+
+Vlad then clarified the actual point of the lazy fit-suggestion — feeding the existing Archive Fits new-role-matching flow — which surfaced two real gaps, both fixed:
+- **Gate-1-only candidates never got an Archive Fits role suggestion** (the mechanism needs a summary Gate 1 skips, and only ever triggered manually). New lazy route (`POST /api/history/[id]/role-fit`), resume-text fallback mode on `generateRoleFit()`, reuses the existing `suggested_role_fits` column. Also fixed: this data was never rendered anywhere as a readable list before — now shown on `/candidates/[id]`.
+- **Archive Fits' "screen" decision bypassed Gate 1 entirely** (called `scoreCandidate()` directly). `transferScreeningToProject()` gained gate-1 passthrough; the decide route now runs the checklist gate first, same shape as the main screening route.
+- **`TrajectoryGraph.tsx`'s cross-reference line changed from violet to red**, per direct ask.
+
+`tsc` clean, all 11 tests pass, do-not-touch diff unchanged (only the two already-flagged files — neither new change touched a do-not-touch file). Not live-tested, not migrated (reused an existing column), left uncommitted.
+
+## 2026-08-20 (continued) — Claude Code's full-system audit: all four authorized fixes built
+
+Claude Code's full-system audit (`memory/claude-code-handoff-2026-08-20-full-system-audit.md`) found 7/8 constraint checks PASS (one real FAIL: blacklist not a pre-score gate) plus a live-found urgent bug (Pipeline tab blank cards) and several maintainability findings. Vlad authorized all four actionable items ("Yes, all four"). Full detail in `decisions-log.md` and `session-log.md`'s matching 2026-08-20 entries — short pointer here per convention.
+
+- **Pipeline tab blank cards, fixed** — new shared `components/Gate1ChecklistBreakdown.tsx` (extracted from `ResultCard.tsx`'s inline JSX), now imported by both `ResultCard.tsx` and `PipelineTab` (`app/projects/[id]/page.tsx`). Career story section there also gated on real content existing.
+- **Blacklist is now a real pre-score gate** — `app/api/screen-resumes/check-existing/route.ts` runs the existing free `extractNameHeuristic()` against the system-wide blacklist before scoring; new `"blacklisted"` status + `blacklistMatch` on `CheckExistingResult`; new `components/BlacklistedPreScoreCard.tsx` with a "Score anyway" override. Post-score fallback check (AI-extracted name) untouched, still runs as a safety net. Also unified the route's two branches into one `classifyFile` helper, closing a latent gap where ad-hoc screening skipped the blacklist check.
+- **Gate-1 branching logic extracted** into new `lib/evaluateGate1.ts` (the evaluate+decide part only, not the stand-in build) — used by `screen-resumes/route.ts` (new DO-NOT-TOUCH EXCEPTION), `cross-project-fit/route.ts`'s pre-filter, and `archive-fits/[screeningId]/decide/route.ts`.
+- **Score-threshold default consolidated** into new `lib/scoreThreshold.ts`'s `DEFAULT_SCORE_THRESHOLD` — replaced 10 literal-`45` fallbacks across 6 files (`lib/projects.ts`, `app/api/screen-resumes/route.ts` ×2, `app/api/screenings/save-one/route.ts`, `app/api/analytics/route.ts` ×2, `lib/funnelview/data.ts` ×2, `app/projects/[id]/page.tsx` ×2).
+
+**Verified:** `npx tsc --noEmit -p .` clean (incl. `--noUnusedLocals --noUnusedParameters`). All 11 `test_*.mjs` files pass. Do-not-touch diff: `scoreCandidate.ts`/`screen-resumes/route.ts` carry this round's new flagged exceptions alongside the prior ones; `screenings/save-one/route.ts` carries its own first diff this session (fully flagged).
+
+**Not live-tested, not migrated (no schema changes), left uncommitted**, per standing instruction. Next: a Claude Code handoff for live verification of these four (especially the blacklist pre-score skip flow and the Pipeline tab fix — need real browser confirmation, not just a code read), then the commit/branch/PR that's been pending across the last two verification rounds.

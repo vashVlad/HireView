@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser, isAdmin } from "@/lib/auth";
 import { getSupabaseClient } from "@/lib/supabase";
 import { getAuthUsers } from "@/lib/recruiters";
+import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
 
 // Live-count rewrite, 2026-07-17 (mirrors lib/funnelview/data.ts's fix,
 // session-log follow-on #37/#38) — deliberately no `screening_batches`
@@ -9,11 +10,13 @@ import { getAuthUsers } from "@/lib/recruiters";
 // and never updated on later deletion, so sourcing stats from it means
 // deleting a screening can never move any number on this page. Switched to
 // live queries off `screenings` itself, joined against `projects` for each
-// candidate's own score_threshold (defaults to 45, matching lib/projects.ts)
-// so "Passed to Pipeline" reflects the real per-project bar, not a single
-// global cutoff — every screened resume gets a row now regardless of score
-// (2026-07-15 auto-archive/save-all decision), so this can't just be
-// `screenings.length` filtered by status.
+// candidate's own score_threshold (defaults to DEFAULT_SCORE_THRESHOLD,
+// matching lib/projects.ts — consolidated 2026-08-20, see
+// lib/scoreThreshold.ts's own doc comment) so "Passed to Pipeline" reflects
+// the real per-project bar, not a single global cutoff — every screened
+// resume gets a row now regardless of score (2026-07-15 auto-archive/
+// save-all decision), so this can't just be `screenings.length` filtered by
+// status.
 
 type ScreeningRow = {
   id: number;
@@ -69,7 +72,7 @@ export async function GET(request: NextRequest) {
   const screenings = screeningsRes.data ?? [];
   const projects = projectsRes.data ?? [];
   const projectMap = new Map(projects.map((p) => [p.id, p.name]));
-  const thresholdMap = new Map(projects.map((p) => [p.id, p.score_threshold ?? 45]));
+  const thresholdMap = new Map(projects.map((p) => [p.id, p.score_threshold ?? DEFAULT_SCORE_THRESHOLD]));
 
   // ── Flatten all scores (includes below-threshold candidates — every
   //    screened resume is saved regardless of score) ────────────────────────
@@ -80,7 +83,7 @@ export async function GET(request: NextRequest) {
 
   const totalScreened = screenings.length;
   const passedToPipeline = screenings.filter((s) => {
-    const threshold = s.project_id != null ? (thresholdMap.get(s.project_id) ?? 45) : 45;
+    const threshold = s.project_id != null ? (thresholdMap.get(s.project_id) ?? DEFAULT_SCORE_THRESHOLD) : DEFAULT_SCORE_THRESHOLD;
     return s.score >= threshold;
   }).length;
   const passRate = totalScreened > 0 ? Math.round((passedToPipeline / totalScreened) * 100) : 0;

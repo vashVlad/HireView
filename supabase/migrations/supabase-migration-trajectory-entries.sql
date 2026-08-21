@@ -1,0 +1,40 @@
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: trajectory_entries on screenings
+-- Run this in Supabase SQL editor → Run
+--
+-- Roadmap 2.5.2 (credibility trajectory overlay), 2026-08-17. Structured,
+-- machine-comparable sibling of the existing career_trajectory column (a
+-- freeform markdown string — see that column's own comment). Before this
+-- migration, there was no structured per-role employment data anywhere in
+-- this schema, so neither a real trajectory graph nor a real code-level diff
+-- between a candidate's own history and a cross-reference document's history
+-- was possible — both need this.
+--
+-- Populated by lib/scoreCandidate.ts itself (do-not-touch exception, Vlad's
+-- explicit sign-off — see memory/decisions-log.md's 2026-08-17 entry) for
+-- every NEW screening going forward, generated in the exact same call as
+-- career_trajectory — no extra AI cost, same reasoning as the 2026-08-06
+-- current_company/current_title addition. Written only through
+-- updateScreening()'s best-effort call (lib/screenings.ts's saveScreening),
+-- NOT added to the shared SCREENING_COLUMNS read path — same deferred
+-- pattern as archive_reason/current_company/checklist_evaluation, so nothing
+-- breaks pre-migration.
+--
+-- Existing (already-screened) candidates will have NULL here until they're
+-- rescreened or a future backfill script is built for this column
+-- specifically — none exists yet as of this migration, unlike current_role's
+-- "Regenerate trajectories" button. A credibility check against a candidate
+-- with a NULL trajectory_entries falls back to the pre-2026-08-17 rows-based
+-- comparison (see lib/types.ts's CredibilityAssessment.trajectoryComparison
+-- comment) rather than failing outright.
+--
+-- jsonb, not a normalized child table — same reasoning credibility/
+-- checklist_evaluation already used for structured per-screening data: this
+-- is read/written as one whole unit per screening (never queried by
+-- individual entry), and Cirot's actual scale (hundreds, not millions, of
+-- screenings) doesn't need row-level normalization here. Shape is
+-- TrajectoryEntry[] — see lib/types.ts.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE screenings
+  ADD COLUMN IF NOT EXISTS trajectory_entries jsonb;

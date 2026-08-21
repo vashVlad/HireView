@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getScreeningsByIds, getScreeningResume, updateScreening } from "@/lib/screenings";
-import { getProject } from "@/lib/projects";
+import { getProject, getProjectChecklist } from "@/lib/projects";
 import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
+import { evaluateChecklist, computeChecklistPercentageScore } from "@/lib/evaluateChecklist";
+import { computeTargetCompanyBoost, combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
+import type { ChecklistEvaluation } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -77,6 +80,44 @@ export async function POST(
       screening.linkedInMode
     );
 
+    // Real gap found 2026-08-17 (checklist-only-scoring round): this route
+    // called scoreCandidate() directly and wrote its raw result.score with
+    // no checklist or target-company adjustment at all — the ONLY caller of
+    // saveScreening() (app/api/screen-resumes/route.ts, do-not-touch) got
+    // both, but a rescreen bypasses saveScreening() entirely (it patches an
+    // existing row via updateScreening() instead), so neither ever applied
+    // here. Harmless under the old additive model (a rescore just missed a
+    // small bonus), but a real correctness bug now that a project WITH a
+    // checklist configured is supposed to have score computed ENTIRELY from
+    // it (Vlad's explicit ask — see lib/evaluateChecklist.ts's
+    // computeChecklistPercentageScore comment) — rescreening such a
+    // candidate would have silently reverted them to the AI's own 0-100
+    // judgment instead. Mirrors lib/screenings.ts's saveScreening() ordering
+    // exactly: checklist sets the base score first (falls back to the AI's
+    // own score if no checklist, or the checklist has zero total points),
+    // target-company boost stacks on top of whichever base that leaves.
+    let checklistEvaluation: ChecklistEvaluation | null = null;
+    const checklist = await getProjectChecklist(project.id).catch(() => null);
+    if (checklist) {
+      checklistEvaluation = await evaluateChecklist({ resumeText, checklist }).catch((err) => {
+        console.error("Checklist evaluation failed during rescreen (score falls back to the AI's own judgment):", err);
+        return null;
+      });
+      if (checklistEvaluation) {
+        const checklistScore = computeChecklistPercentageScore(checklistEvaluation.results);
+        if (checklistScore !== null) result.score = checklistScore;
+      }
+    }
+
+    const targetCompanies = combineTargetCompanies(project.jdAnalysis?.wide?.targetCompanies, project.jdAnalysis?.narrow?.targetCompanies);
+    if (targetCompanies.length > 0) {
+      const boost = computeTargetCompanyBoost(resumeText, targetCompanies);
+      if (boost.matched) {
+        result.score = Math.min(100, result.score + boost.bonus);
+      }
+      result.targetCompanyMatches = boost.matchedCompanies;
+    }
+
     await updateScreening(
       screeningId,
       {
@@ -87,7 +128,21 @@ export async function POST(
         strengths: result.strengths,
         concerns: result.concerns,
         careerTrajectory: result.careerTrajectory,
+        // Real gap found and fixed 2026-08-17 (roadmap 2.5.2 verification
+        // pass): scoreCandidate() has returned trajectoryEntries since the
+        // do-not-touch exception landed, and updateScreening() has
+        // supported writing it since the same round — but this route's own
+        // payload was never updated to actually pass it through, so
+        // rescreening an existing candidate silently dropped it. This is
+        // the ONLY path (short of a real re-upload) that lets an
+        // already-screened candidate pick up structured trajectory data
+        // without a dedicated backfill script, which deliberately doesn't
+        // exist for this column — see supabase-migration-trajectory-
+        // entries.sql's own comment.
+        trajectoryEntries: result.trajectoryEntries,
         recommendation: result.recommendation,
+        ...(checklistEvaluation !== null ? { checklistEvaluation } : {}),
+        ...(result.targetCompanyMatches !== undefined ? { targetCompanyMatches: result.targetCompanyMatches } : {}),
       },
       user.id
     );
@@ -101,7 +156,10 @@ export async function POST(
         strengths: result.strengths,
         concerns: result.concerns,
         careerTrajectory: result.careerTrajectory,
+        trajectoryEntries: result.trajectoryEntries,
         recommendation: result.recommendation,
+        checklistEvaluation: checklistEvaluation ?? undefined,
+        targetCompanyMatches: result.targetCompanyMatches,
       },
     });
   } catch (err) {

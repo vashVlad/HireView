@@ -3,12 +3,14 @@
 import { useRef, useState } from "react";
 import { CredibilitySection } from "@/components/CredibilitySection";
 import { ScoringLoader } from "@/components/ScoringLoader";
-import type { CredibilityAssessment } from "@/lib/types";
+import type { CredibilityAssessment, ChecklistEvaluation } from "@/lib/types";
 
 interface CrossReferenceCheckerProps {
   screeningId: number;
   roleContext?: string;
   currentAssessment?: CredibilityAssessment;
+  /** 2026-08-18 — passed straight through to CredibilitySection so the trajectory graph can plot real per-role checklist evidence. See CredibilitySection's own comment on this same prop. */
+  checklistEvaluation?: ChecklistEvaluation;
   /**
    * Return true/false (or a Promise of one) to report whether the result was
    * actually persisted — callers that PATCH to /api/history/[id] should
@@ -109,7 +111,7 @@ function FileSlot({
   );
 }
 
-export function CrossReferenceChecker({ screeningId, roleContext, currentAssessment, onComplete, initialFile, crossRefScreeningId, crossRefLabel }: CrossReferenceCheckerProps) {
+export function CrossReferenceChecker({ screeningId, roleContext, currentAssessment, onComplete, initialFile, crossRefScreeningId, crossRefLabel, checklistEvaluation }: CrossReferenceCheckerProps) {
   const [file, setFile] = useState<File | null>(initialFile ?? null);
   const [checkState, setCheckState] = useState<CheckState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -227,7 +229,7 @@ export function CrossReferenceChecker({ screeningId, roleContext, currentAssessm
     return (
       <div className="flex flex-col gap-3">
         <div className="relative">
-          <CredibilitySection assessment={displayAssessment} showSummary={false} />
+          <CredibilitySection assessment={displayAssessment} showSummary={false} checklistEvaluation={checklistEvaluation} />
           {checkState === "checking" && (
             <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/70 dark:bg-zinc-900/70">
               <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">

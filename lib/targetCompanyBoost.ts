@@ -9,12 +9,12 @@
  * adjustments elsewhere in this app.
  *
  * Matching is a plain case-insensitive substring check against the whole
- * resume text — not scoped to an "Experience" section, not fuzzy/alias-aware
- * (e.g. "Google" won't catch "Alphabet Inc."). This is a known, deliberate
- * simplification: Vlad's own ask was literally "if it matches with the
- * candidate's resume," and a heavier NLP-based match would trade simplicity/
- * auditability for marginal precision. Flagged in open-questions.md as a
- * possible future refinement if false positives turn out to be a real problem.
+ * resume text — not scoped to an "Experience" section, still not fuzzy/
+ * rebrand-aware (e.g. "Google" won't catch "Alphabet Inc." — that needs a
+ * real maintained alias list, deliberately out of scope). This IS now
+ * legal-suffix-aware as of 2026-08-19 (Phase 2.6, Vlad's ask) — see
+ * stripLegalSuffix below. A heavier NLP-based match would still trade
+ * simplicity/auditability for marginal precision beyond that.
  *
  * The bonus is FLAT, not stacked — matching three target companies gives the
  * same +TARGET_COMPANY_BOOST_POINTS as matching one. Stacking would reward
@@ -30,6 +30,26 @@ export interface TargetCompanyBoostResult {
   bonus: number;
 }
 
+/**
+ * Strips a trailing legal-entity suffix so a target company entered with a
+ * fuller legal name ("Google LLC") still matches a resume that just says the
+ * bare name ("Google") — 2026-08-19 (Phase 2.6, Vlad's ask: alias-awareness
+ * for target-company matching, "loose match only" per his explicit choice).
+ * Deliberately one-directional — only the TARGET side needs this. A shorter
+ * target name already matches inside a longer resume mention via plain
+ * substring matching with zero changes (target "Google" already matches
+ * resume "Google LLC" today); the gap was specifically the reverse, a
+ * longer/suffixed target failing to match a bare resume mention. Returns the
+ * original (lowercased) string unchanged if stripping would leave fewer than
+ * 2 characters — avoids a degenerate, over-broad key like matching on "co"
+ * alone if a target company name is unusually short.
+ */
+export function stripLegalSuffix(name: string): string {
+  const lower = name.toLowerCase().replace(/[.,]/g, "").trim();
+  const stripped = lower.replace(/\s+(inc|llc|ltd|corp|corporation|co|company|group|holdings|plc)$/i, "").trim();
+  return stripped.length >= 2 ? stripped : lower;
+}
+
 export function computeTargetCompanyBoost(resumeText: string, targetCompanies: string[]): TargetCompanyBoostResult {
   const candidates = (targetCompanies ?? [])
     .map((c) => c.trim())
@@ -40,12 +60,13 @@ export function computeTargetCompanyBoost(resumeText: string, targetCompanies: s
   }
 
   const lowerResume = resumeText.toLowerCase();
-  // Dedup case-insensitively (wide/narrow can list the same company with
-  // different casing) while preserving the first-seen original casing for display.
+  // Dedup on the suffix-stripped key (wide/narrow can list the same company
+  // with different casing OR a different legal-suffix form) while preserving
+  // the first-seen original casing for display.
   const seen = new Set<string>();
   const matchedCompanies: string[] = [];
   for (const company of candidates) {
-    const key = company.toLowerCase();
+    const key = stripLegalSuffix(company);
     if (seen.has(key)) continue;
     if (lowerResume.includes(key)) {
       seen.add(key);

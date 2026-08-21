@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { assessCredibility, detectLinkedIn } from "@/lib/assessCredibility";
 import { extractResumeText } from "@/lib/parseResume";
-import { getScreeningConcerns, getScreeningResume, updateScreening } from "@/lib/screenings";
+import { getScreeningConcerns, getScreeningResume, getScreeningTrajectoryEntries, updateScreening } from "@/lib/screenings";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
+import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
 
 export const maxDuration = 60;
 
@@ -151,21 +152,28 @@ export async function POST(request: NextRequest) {
   let crossRefText: string;
   let crossRefPath: string | undefined;
   let originalConcerns: string[];
+  let candidateTrajectoryEntries: Awaited<ReturnType<typeof getScreeningTrajectoryEntries>>;
   try {
     // originalConcerns (added 2026-07-29, positive-scoring feature) is an
     // independent read, same reasoning as the main-resume/cross-ref split
     // above — folded into the same Promise.all rather than awaited after,
     // and never allowed to fail the whole request (see getScreeningConcerns'
-    // own comment: fails closed to [], not thrown).
-    const [main, crossRef, concerns] = await Promise.all([
+    // own comment: fails closed to [], not thrown). candidateTrajectoryEntries
+    // (roadmap 2.5.2, 2026-08-17) is the same shape of independent, never-
+    // fails-the-request read — getScreeningTrajectoryEntries fails closed to
+    // null (not thrown), which assessCredibility() reads as "fall back to
+    // the legacy single-call comparison," never as a request failure.
+    const [main, crossRef, concerns, trajectoryEntries] = await Promise.all([
       loadMainResume(),
       loadCrossRef(),
       getScreeningConcerns(screeningId),
+      getScreeningTrajectoryEntries(screeningId),
     ]);
     resumeText = main;
     crossRefText = crossRef.crossRefText;
     crossRefPath = crossRef.crossRefPath;
     originalConcerns = concerns;
+    candidateTrajectoryEntries = trajectoryEntries;
   } catch (err) {
     if (err instanceof RouteError) return err.response;
     throw err;
@@ -176,13 +184,35 @@ export async function POST(request: NextRequest) {
   // always resume-vs-resume, never LinkedIn, so skip detection there.
   const isLinkedIn = hasCrossRefDoc ? detectLinkedIn(crossRefText) : false;
 
+  // GitHub corroboration, 2026-08-17 (roadmap 2.5.3) — deliberately run and
+  // attached AFTER assessCredibility() returns, not fed into its prompt.
+  // See lib/githubCorroboration.ts's header comment for the full reasoning:
+  // assessCredibility.ts's prompt is a tuned, live-calibrated system this
+  // sandbox can't test against, so this stays a pure code-side passthrough
+  // rather than risking a regression to it. Best-effort end to end — a
+  // missing/failed lookup just means no panel shows, same as no cross-ref
+  // doc at all; never blocks or slows the real credibility check
+  // meaningfully (5s timeout, and only even attempted when a GitHub URL is
+  // actually present in the resume text).
+  const githubUsername = extractGithubUsername(resumeText);
+  const githubSignal = githubUsername
+    ? await fetchGithubCorroboration(githubUsername).catch(() => null)
+    : null;
+
   const assessment = await assessCredibility({
     resumeText,
     crossRefText,
     roleContext: typeof roleContext === "string" ? roleContext : undefined,
     isLinkedIn,
     originalConcerns,
+    // undefined (not null) matches assessCredibility()'s param type — null
+    // here just means "no stored trajectory yet," same "fall back to legacy
+    // flow" outcome as undefined, so the conversion is purely a type nicety.
+    candidateTrajectoryEntries: candidateTrajectoryEntries ?? undefined,
   });
+  if (githubSignal) {
+    assessment.githubSignal = githubSignal;
+  }
 
   // Persist cross-reference doc path (reuses linkedin_pdf_path column — no schema change)
   if (crossRefPath) {

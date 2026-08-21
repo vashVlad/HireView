@@ -1,13 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
-import { getFitExclusionMap, listProjects } from "@/lib/projects";
+import { getFitExclusionMap, getProjectChecklist, listProjects } from "@/lib/projects";
+import { evaluateGate1 } from "@/lib/evaluateGate1";
 import { getUserTeamIds } from "@/lib/teams";
-import { getAuthUser } from "@/lib/auth";
-import { findProjectsWithCandidate } from "@/lib/screenings";
-import type { CandidateResult } from "@/lib/types";
+import { getAuthUser, canAccessScreening } from "@/lib/auth";
+import {
+  findProjectsWithCandidate,
+  getGate1FitSuggestion,
+  getScreeningFitContext,
+  getScreeningResume,
+  updateScreening,
+} from "@/lib/screenings";
+import type { CandidateResult, StoredFitSuggestion } from "@/lib/types";
 
 export const maxDuration = 60;
+
+/**
+ * A suggestion has to actually clear the other project's own bar by a real
+ * margin, not just barely — Phase 2.6 Tier 2 (2026-08-20, Vlad's explicit
+ * choice via AskUserQuestion: "Fixed +15 everywhere (Recommended)").
+ * Replaces the old currentScore-based "must beat what they already scored on
+ * THIS project" rule entirely (see the removed `currentScore` param below) —
+ * that rule broke down for Gate 1 candidates, whose only "score" is a
+ * checklist percentage, not a real scoreCandidate() score, so comparing the
+ * two wasn't meaningful. A flat threshold + margin bar is meaningful for
+ * both a Gate 2 candidate's real score and a Gate 1 candidate's checklist
+ * score alike. Same value as app/projects/[id]/page.tsx's FIT_CHECK_MARGIN
+ * (which gates whether the check is even offered) — deliberately kept as two
+ * separate constants in two files rather than shared, since one gates
+ * ELIGIBILITY (client-side, "is it even worth asking") and this one gates
+ * ACCEPTANCE (server-side, "is this specific other project's score good
+ * enough to suggest") — same number today by design, but conceptually
+ * different questions that happen to share a value.
+ */
+const FIT_ACCEPT_MARGIN = 15;
 
 /**
  * Cheap eligibility check — no scoring, no Claude call. Lets the frontend
@@ -55,9 +82,20 @@ export async function GET(request: NextRequest) {
  * Feature 2.1 — Cross-Project Fit Suggestion (Cirot_Enterprise_Plan.md).
  * A candidate who scored below threshold on the active role gets re-scored
  * against every other active project in the same team, surfacing the best
- * match if one clears that project's own bar. Deliberately stateless — no
- * new schema, nothing persisted; this is an on-demand suggestion the
- * recruiter triggers, not a background job.
+ * match if one clears that project's own bar.
+ *
+ * Two input modes, Phase 2.6 Tier 2 (2026-08-20):
+ *   resumeFile — the original live flow. Stateless, nothing persisted; the
+ *     browser still holds the File object from the upload that just
+ *     happened (app/projects/[id]/page.tsx), so it's re-sent fresh each
+ *     call. Unchanged from before this tier.
+ *   screeningId — new. For a Gate 1-archived candidate reopened later (no
+ *     File object survives a page reload — see app/candidates/[id]/page.tsx),
+ *     the resume is re-read from Supabase storage instead. This path also
+ *     persists its result (gate1_fit_suggestion) and checks for an
+ *     already-persisted one FIRST, before doing any work — Vlad's ask,
+ *     "once": compute lazily on first card open, never recompute after
+ *     that, even if the checklist/threshold/other projects change later.
  *
  * Always scoped by the caller's own team membership (not teamIdsFilter's
  * admin-sees-everything behavior) — "same team" is the point of the
@@ -70,30 +108,65 @@ export async function POST(request: NextRequest) {
 
   const formData = await request.formData();
   const resumeFile = formData.get("resumeFile");
+  const screeningIdField = formData.get("screeningId");
   const currentProjectIdField = formData.get("currentProjectId");
   const candidateNameField = formData.get("candidateName");
-  const currentScoreField = formData.get("currentScore");
 
-  if (!(resumeFile instanceof File)) {
-    return NextResponse.json({ error: "resumeFile is required" }, { status: 400 });
+  const hasResumeFile = resumeFile instanceof File;
+  const hasScreeningId = typeof screeningIdField === "string" && screeningIdField.trim().length > 0;
+  if (!hasResumeFile && !hasScreeningId) {
+    return NextResponse.json({ error: "resumeFile or screeningId is required" }, { status: 400 });
   }
-  const currentProjectId = typeof currentProjectIdField === "string" && currentProjectIdField.trim()
+
+  let screeningId: number | undefined;
+  if (hasScreeningId) {
+    screeningId = parseInt(screeningIdField as string, 10);
+    if (isNaN(screeningId)) return NextResponse.json({ error: "Invalid screeningId" }, { status: 400 });
+    if (!(await canAccessScreening(user, screeningId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    // Never recompute — Vlad's ask, "once". Best-effort: a read failure
+    // (including the migration not being run yet) just falls through to
+    // computing fresh, same as it would for a screening that genuinely
+    // hasn't been checked yet.
+    const persisted = await getGate1FitSuggestion(screeningId).catch(() => null);
+    if (persisted) return NextResponse.json(persisted);
+  }
+
+  // currentProjectId/candidateName come from the form for the resumeFile
+  // path (the browser already has both in state); for the screeningId path
+  // they're read from the screening row itself, since there's no live
+  // browser state to carry them.
+  let currentProjectId = typeof currentProjectIdField === "string" && currentProjectIdField.trim()
     ? parseInt(currentProjectIdField.trim(), 10) || undefined
     : undefined;
-  const candidateName = typeof candidateNameField === "string" ? candidateNameField.trim() : "";
-  // Vlad's ask, 2026-07-30: a "stronger fit" has to actually score higher
-  // than what the candidate already scored on the role they were screened
-  // against — see the `best` filter below. Left undefined if the caller
-  // ever omits it, which the filter treats as "no floor" so a missing
-  // field degrades to the old behavior rather than silently suppressing
-  // every suggestion.
-  const currentScore = typeof currentScoreField === "string" && currentScoreField.trim()
-    ? parseInt(currentScoreField.trim(), 10)
-    : undefined;
+  let candidateName = typeof candidateNameField === "string" ? candidateNameField.trim() : "";
+  if (screeningId != null) {
+    const ctx = await getScreeningFitContext(screeningId);
+    if (!ctx) return NextResponse.json({ suggestion: null, alreadyIn: [] });
+    candidateName = ctx.candidateName;
+    currentProjectId = ctx.projectId ?? currentProjectId;
+  }
+
+  // Persist-then-respond, Phase 2.6 Tier 2 — every successful exit below
+  // (not the error responses above, which mean "couldn't check," not
+  // "checked, found nothing") goes through this so the screeningId path's
+  // "once" guarantee actually holds. An earlier version of this route only
+  // persisted at the very end, which meant a candidate with zero other
+  // eligible projects (no other active projects, or already screened
+  // everywhere) recomputed — cheaply, but still a real DB round-trip and a
+  // violation of "never recompute" — on every single card open. Best-effort:
+  // a write failure never blocks the response itself.
+  async function respond(body: StoredFitSuggestion) {
+    if (screeningId != null) {
+      await updateScreening(screeningId, { gate1FitSuggestion: body }).catch(() => {});
+    }
+    return NextResponse.json(body);
+  }
 
   const teamIds = await getUserTeamIds(user.id);
   if (teamIds.length === 0) {
-    return NextResponse.json({ suggestion: null, alreadyIn: [] });
+    return respond({ suggestion: null, alreadyIn: [] });
   }
 
   const projects = await listProjects(teamIds);
@@ -106,7 +179,7 @@ export async function POST(request: NextRequest) {
   const candidates = baseCandidates.filter((p) => !excluded.has(p.id));
 
   if (candidates.length === 0) {
-    return NextResponse.json({ suggestion: null, alreadyIn: [] });
+    return respond({ suggestion: null, alreadyIn: [] });
   }
 
   // Free (no Claude call) pre-check, Vlad's ask 2026-07-28: don't re-score a
@@ -123,15 +196,53 @@ export async function POST(request: NextRequest) {
   const toScore = candidates.filter((p) => !alreadyInMap.has(p.id));
 
   if (toScore.length === 0) {
-    return NextResponse.json({ suggestion: null, alreadyIn });
+    return respond({ suggestion: null, alreadyIn });
   }
 
   let resumeText: string;
-  try {
-    const buffer = Buffer.from(await resumeFile.arrayBuffer());
-    resumeText = await extractResumeText(resumeFile.name, buffer);
-  } catch {
-    return NextResponse.json({ error: "Could not read the resume file" }, { status: 400 });
+  let resumeFileName: string;
+  if (hasResumeFile) {
+    resumeFileName = resumeFile.name;
+    try {
+      const buffer = Buffer.from(await resumeFile.arrayBuffer());
+      resumeText = await extractResumeText(resumeFileName, buffer);
+    } catch {
+      return NextResponse.json({ error: "Could not read the resume file" }, { status: 400 });
+    }
+  } else {
+    try {
+      const stored = await getScreeningResume(screeningId!);
+      resumeFileName = stored.fileName;
+      resumeText = await extractResumeText(stored.fileName, stored.data);
+    } catch {
+      return NextResponse.json({ error: "Could not read the resume file" }, { status: 400 });
+    }
+  }
+
+  // Checklist pre-filter, Phase 2.6 Tier 2 (2026-08-20, Vlad's ask) — same
+  // cheap-before-expensive philosophy as Gate 1 itself
+  // (app/api/screen-resumes/route.ts), applied here to avoid paying for a
+  // full scoreCandidate() call against every other active project when a
+  // project's own checklist already makes a miss obvious. Only drops a
+  // project whose checklist score would itself fail to clear that project's
+  // threshold; a project with no checklist configured, a checklist read/eval
+  // failure (fails open — never let this optimization suppress a real
+  // suggestion), or a checklist score that clears the bar all fall through
+  // to the real scoreCandidate() call below unchanged.
+  //
+  // Gate-decision logic extracted 2026-08-20 into lib/evaluateGate1.ts (see
+  // its own doc comment) — deliberately does NOT use that helper's true
+  // branch to build a full gate1Only stand-in result the way screen-resumes/
+  // route.ts and archive-fits/decide/route.ts do; this loop only needs the
+  // boolean to decide whether to drop a project from consideration, and
+  // building the stand-in would cost an unnecessary extra Claude call per
+  // filtered project (buildGate1ArchivedResult's candidate-name fallback).
+  const checklistFiltered: typeof toScore = [];
+  for (const project of toScore) {
+    const checklist = await getProjectChecklist(project.id).catch(() => null);
+    const gate1 = await evaluateGate1({ checklist, resumeText, scoreThreshold: project.scoreThreshold });
+    if (gate1.gate1Only) continue;
+    checklistFiltered.push(project);
   }
 
   // Score against each remaining candidate project, 3 at a time — same
@@ -148,12 +259,12 @@ export async function POST(request: NextRequest) {
     jobDescription: string;
   }[] = [];
   const CONCURRENCY = 3;
-  for (let i = 0; i < toScore.length; i += CONCURRENCY) {
-    const batch = toScore.slice(i, i + CONCURRENCY);
+  for (let i = 0; i < checklistFiltered.length; i += CONCURRENCY) {
+    const batch = checklistFiltered.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       batch.map(async (project) => {
         try {
-          const result = await scoreCandidate(project.jobDescription, resumeFile.name, resumeText, [], project.name);
+          const result = await scoreCandidate(project.jobDescription, resumeFileName, resumeText, [], project.name);
           return {
             projectId: project.id,
             projectName: project.name,
@@ -170,18 +281,14 @@ export async function POST(request: NextRequest) {
     for (const r of results) if (r) scored.push(r);
   }
 
-  // Only surface a suggestion that would actually clear the other project's
-  // own bar — a "better fit" that still wouldn't pass isn't a real
-  // suggestion. Also, 2026-07-30 (Vlad's ask): it has to actually score
-  // higher than the candidate's score on the project they were screened
-  // against — otherwise calling it a "stronger fit" is wrong even if it
-  // clears the other project's own threshold (e.g. scoring 54 on a 50-point
-  // bar here isn't "stronger" than the 60 they already scored elsewhere).
+  // Only surface a suggestion that clears the other project's own bar by a
+  // real margin — see FIT_ACCEPT_MARGIN's own comment for why this replaced
+  // the old currentScore-based comparison.
   const best = scored
-    .filter((s) => s.score >= s.threshold && (currentScore == null || s.score > currentScore))
+    .filter((s) => s.score >= s.threshold + FIT_ACCEPT_MARGIN)
     .sort((a, b) => b.score - a.score)[0];
 
-  return NextResponse.json({
+  return respond({
     suggestion: best
       ? {
           projectId: best.projectId,

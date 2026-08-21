@@ -2,12 +2,22 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ResultCard } from "@/components/ResultCard";
+import { ResultCard, type AlreadyInProject, type FitSuggestion } from "@/components/ResultCard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
 import { ScoringLoader } from "@/components/ScoringLoader";
 import type { CandidateStatus, JDAnalysis, ScreeningRecord } from "@/lib/types";
 import { toCandidateResult } from "@/lib/toCandidateResult";
+
+/**
+ * Same margin as app/projects/[id]/page.tsx's FIT_CHECK_MARGIN — kept as a
+ * separate local constant rather than shared/exported, same reasoning as
+ * that file's own comment on why FIT_CHECK_MARGIN and cross-project-fit/
+ * route.ts's FIT_ACCEPT_MARGIN are two constants that happen to share a
+ * value: this one gates ELIGIBILITY (is it even worth asking) on a
+ * different page than the one that originally introduced the number.
+ */
+const FIT_CHECK_MARGIN = 15;
 
 /**
  * Full result card view for an already-saved candidate — added 2026-07-27
@@ -47,6 +57,58 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
   useEffect(() => {
     setReturnTo(new URLSearchParams(window.location.search).get("returnTo"));
   }, []);
+
+  // Lazy Cross-Project Fit Suggestion, Phase 2.6 Tier 2 (2026-08-20, Vlad's
+  // ask: "when the recruiter opens the card" is the trigger, and this page
+  // — the real, linkable "view an already-saved candidate" page — is
+  // exactly that moment for a candidate reopened outside the live Screen
+  // tab flow (no in-memory File object survives a reload, so the resumeFile
+  // path app/projects/[id]/page.tsx uses can't work here; POST
+  // /api/cross-project-fit's screeningId path exists specifically for this).
+  // Same eligibility rule as the live flow (score < threshold + margin);
+  // unlike that flow, there's no separate cheap Claude gate call here —
+  // the server-side checklist pre-filter inside POST /api/cross-project-fit
+  // itself is this path's "gate," so onCheckCrossProjectPromise below is a
+  // trivial always-promising stub that just lets ResultCard's existing
+  // auto-fire-on-mount effect (built for the live flow's two-step gate+real
+  // check) trigger the one real call this page needs.
+  const [otherActiveCount, setOtherActiveCount] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (screening?.projectId == null) return;
+    let cancelled = false;
+    fetch(`/api/cross-project-fit?currentProjectId=${screening.projectId}`)
+      .then((res) => (res.ok ? res.json() : { count: 0 }))
+      .then((data) => { if (!cancelled) setOtherActiveCount(data.count ?? 0); })
+      .catch(() => { if (!cancelled) setOtherActiveCount(0); });
+    return () => { cancelled = true; };
+  }, [screening?.projectId]);
+
+  const eligibleForFitCheck =
+    screening != null && scoreThreshold != null && screening.score < scoreThreshold + FIT_CHECK_MARGIN;
+
+  // Archive Fits role-type suggestion, 2026-08-20 (Vlad's ask: connect the
+  // open-role fit-suggestion above with the older, JD-independent
+  // suggested_role_fits mechanism — "the only reason I want the system to
+  // suggest a better fit and save it is because when I apply archived fits
+  // during new role creation, the system identifies a similar role"). Lazy,
+  // same "on first open" trigger as the fit-suggestion above — POST
+  // /api/history/[id]/role-fit only spends a Claude call for a candidate
+  // with no summary (Gate-1-only) and no suggestion yet; every other case
+  // returns instantly from the already-persisted array or a no-op. Not
+  // gated on eligibleForFitCheck (that's specifically about score vs.
+  // threshold, unrelated to whether a role-title suggestion makes sense) —
+  // fires whenever a screening is loaded, same as the otherActiveCount read
+  // above.
+  const [suggestedRoleFits, setSuggestedRoleFits] = useState<string[]>([]);
+  useEffect(() => {
+    if (screening?.id == null) return;
+    let cancelled = false;
+    fetch(`/api/history/${numId}/role-fit`, { method: "POST" })
+      .then((res) => (res.ok ? res.json() : { suggestedRoleFits: [] }))
+      .then((data) => { if (!cancelled) setSuggestedRoleFits(data.suggestedRoleFits ?? []); })
+      .catch(() => { if (!cancelled) setSuggestedRoleFits([]); });
+    return () => { cancelled = true; };
+  }, [screening?.id, numId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,6 +240,32 @@ export default function CandidateFullResultPage({ params }: { params: Promise<{ 
               scoreThreshold={scoreThreshold}
               onStatusChange={handleStatusChange}
               onArchiveReasonChange={handleArchiveReasonChange}
+              eligibleForFitCheck={eligibleForFitCheck}
+              otherActiveCount={otherActiveCount}
+              suggestedRoleFits={suggestedRoleFits}
+              onCheckCrossProjectPromise={eligibleForFitCheck ? async () => ({ promising: true, alreadyIn: [] as AlreadyInProject[] }) : undefined}
+              onFindBetterFit={eligibleForFitCheck ? async () => {
+                const fd = new FormData();
+                fd.set("screeningId", String(numId));
+                const res = await fetch("/api/cross-project-fit", { method: "POST", body: fd });
+                if (!res.ok) {
+                  const body = await res.json().catch(() => null);
+                  throw new Error(body?.error ?? "Could not check other roles");
+                }
+                const data = await res.json();
+                return {
+                  suggestion: (data.suggestion ?? null) as FitSuggestion | null,
+                  alreadyIn: (data.alreadyIn ?? []) as AlreadyInProject[],
+                };
+              } : undefined}
+              // onTransferToProject deliberately not wired here — a transfer
+              // needs the resume's actual bytes re-saved into the target
+              // project, and POST /api/screenings/save-one (do-not-touch)
+              // only accepts a resumeFile today, not a screeningId. Adding
+              // that path is a real, separate follow-up (needs its own
+              // do-not-touch exception), not a silent gap — the suggestion
+              // itself still displays and links to the target project;
+              // "Transfer" just isn't offered from this page yet.
             />
           </ul>
         )}
