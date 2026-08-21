@@ -110,7 +110,7 @@ function buildYearTicks(globalMin: number, globalMax: number): { monthIndex: num
 
 // Chart geometry, 2026-08-18 — fixed virtual units, scaled to 100% width by
 // the SVG's viewBox; a taller canvas would just add whitespace.
-const CHART_TOP = 22;
+const CHART_TOP = 34;
 const CHART_BOTTOM = 150;
 const CHART_TICK_END = 158;
 const CHART_LABEL_Y = 172;
@@ -164,7 +164,101 @@ function computeTrajectoryValues(entries: TrajectoryEntry[], checklistByRole?: R
   return values;
 }
 
-function buildSegments(values: RoleValue[], globalMin: number, span: number, minY: number, maxY: number) {
+interface RoleCluster {
+  /** One or more RoleValues, chronological order, that share this cluster's drawn segment. */
+  entries: RoleValue[];
+  /** Same accumulated Y as every entry in the cluster (clustering only ever groups same-value, overlapping entries — see clusterRoleValues). */
+  value: number;
+  /** True when a real employment gap precedes the cluster's FIRST entry — a gap can only ever fall between clusters, never inside one (an overlap and a gap are mutually exclusive by definition). */
+  hasGapBefore: boolean;
+  gapMonths?: number;
+  /** Widest real [start, end] span the cluster's entries actually cover, before the backward-jump clip below. */
+  naturalStart: number;
+  naturalEnd: number;
+  /** What's actually drawn — naturalStart/naturalEnd after clipping against neighboring clusters so the polyline's x is never backward. */
+  drawnStart: number;
+  drawnEnd: number;
+}
+
+/**
+ * Fixes the real bug this was built for, 2026-08-21 (Vlad, live-reviewing
+ * AJ Fuhler's actual graph: "the graph is moving forward and then at some
+ * point goes back with a step up, instead of stepping up and moving
+ * forward"). Root cause, confirmed against AJ Fuhler's real data: two roles
+ * that genuinely overlap in time (a side project or bootcamp running
+ * alongside a day job — common, not a data error) each got their own
+ * full-width segment in buildSegments, drawn from their OWN start to their
+ * OWN end. When segment i's end fell later than segment i+1's start, the
+ * polyline had to move backward in time to connect them — visually a
+ * candidate's trajectory appearing to "go back."
+ *
+ * Two-part fix, chosen after comparing four visual redesigns with Vlad
+ * (Option A, "Polished Step" — see the 2026-08-21 conversation): (1) adjacent
+ * entries that land on the SAME value AND overlap in time merge into one
+ * cluster — two things happening at once at the same effective level are one
+ * visual step, not two competing ones; (2) adjacent entries/clusters that
+ * DIFFER in value but still overlap (e.g. three months still employed at the
+ * old job after the new one technically starts) get clipped so the earlier
+ * one's drawn end never exceeds the later one's drawn start — the level
+ * changes at the moment the new thing begins, which is also how a recruiter
+ * would narrate it out loud. The result is a polyline whose x-coordinates
+ * are strictly non-decreasing by construction — a backward jump is no
+ * longer representable, not just less likely.
+ *
+ * Deliberately does NOT merge same-value entries that DON'T overlap in time
+ * (e.g. two separate lateral moves years apart) — only overlap forces a
+ * merge; two genuinely separate periods at the same level still render as
+ * two distinct flat segments, same as before this fix.
+ */
+function clusterRoleValues(values: RoleValue[], referenceNow: Date): RoleCluster[] {
+  if (values.length === 0) return [];
+  const withRange = values.map((v) => ({ value: v, range: toMonthRange(v.entry, referenceNow) }));
+
+  interface Building {
+    entries: RoleValue[];
+    value: number;
+    naturalStart: number;
+    naturalEnd: number;
+  }
+  const building: Building[] = [];
+  let current: Building | null = null;
+
+  for (const { value: v, range } of withRange) {
+    const start: number = isFinite(range[0]) ? range[0] : (current?.naturalStart ?? 0);
+    const end: number = isFinite(range[1]) ? range[1] : start;
+    const overlapsCurrent = current !== null && start < current.naturalEnd;
+    if (current && v.value === current.value && overlapsCurrent) {
+      current.entries.push(v);
+      current.naturalEnd = Math.max(current.naturalEnd, end);
+    } else {
+      current = { entries: [v], value: v.value, naturalStart: start, naturalEnd: end };
+      building.push(current);
+    }
+  }
+
+  // Clip: an earlier cluster's drawn end can never exceed the next cluster's
+  // start — this is what actually guarantees the fix, not just the merge
+  // above (merging handles same-value overlaps; different-value overlaps
+  // still need this clip, e.g. Bank of America vs. a role that starts while
+  // it's still technically ongoing).
+  const drawnEnds = building.map((c) => c.naturalEnd);
+  for (let i = 0; i < building.length - 1; i++) {
+    if (drawnEnds[i] > building[i + 1].naturalStart) drawnEnds[i] = building[i + 1].naturalStart;
+  }
+
+  return building.map((c, i) => ({
+    entries: c.entries,
+    value: c.value,
+    hasGapBefore: c.entries[0].hasGapBefore,
+    gapMonths: c.entries[0].gapMonths,
+    naturalStart: c.naturalStart,
+    naturalEnd: c.naturalEnd,
+    drawnStart: c.naturalStart,
+    drawnEnd: drawnEnds[i],
+  }));
+}
+
+function buildSegments(clusters: RoleCluster[], globalMin: number, span: number, minY: number, maxY: number) {
   const yRange = Math.max(1, maxY - minY);
   function xForSvg(monthIndex: number): number {
     const start = isFinite(monthIndex) ? monthIndex : globalMin;
@@ -173,15 +267,12 @@ function buildSegments(values: RoleValue[], globalMin: number, span: number, min
   function yForSvg(value: number): number {
     return CHART_BOTTOM - ((value - minY) / yRange) * (CHART_BOTTOM - CHART_TOP);
   }
-  const segments = values.map((row) => {
-    const range = toMonthRange(row.entry, REFERENCE_NOW);
-    return {
-      x1: xForSvg(range[0]),
-      x2: xForSvg(range[1]),
-      y: yForSvg(row.value),
-      row,
-    };
-  });
+  const segments = clusters.map((cluster) => ({
+    x1: xForSvg(cluster.drawnStart),
+    x2: xForSvg(cluster.drawnEnd),
+    y: yForSvg(cluster.value),
+    cluster,
+  }));
   const polyline = segments.flatMap((s) => [`${s.x1},${s.y}`, `${s.x2},${s.y}`]).join(" ");
   return { segments, polyline };
 }
@@ -197,6 +288,29 @@ function buildDetailText(row: RoleValue, label?: string): string {
       : undefined,
   ];
   return parts.filter(Boolean).join(" — ");
+}
+
+/** Native <title> hover text for a whole cluster — one line per entry when more than one shares the segment (see clusterRoleValues). */
+function buildClusterDetailText(cluster: RoleCluster, label?: string): string {
+  return cluster.entries.map((row) => buildDetailText(row, label)).join("\n");
+}
+
+/**
+ * The on-chart direct label, 2026-08-21 (Option A, "Polished Step" —
+ * Vlad's pick after comparing four redesigns) — role names now sit on the
+ * chart itself instead of being click-only, same instinct as every other
+ * label added to this app's cards. A cluster of 2 gets both company names;
+ * 3+ collapses to the first plus a count, same overflow convention as a
+ * "+N" avatar stack, so it never runs the chart out of room.
+ */
+function buildClusterLabel(cluster: RoleCluster): { primary: string; sub: string } {
+  const companies = cluster.entries.map((r) => r.entry.company);
+  if (cluster.entries.length === 1) {
+    return { primary: companies[0], sub: cluster.entries[0].entry.title };
+  }
+  const primary =
+    companies.length === 2 ? companies.join(" + ") : `${companies[0]} +${companies.length - 1} more`;
+  return { primary, sub: `${cluster.entries.length} roles at once` };
 }
 
 export function TrajectoryGraph({
@@ -241,6 +355,8 @@ export function TrajectoryGraph({
 
   const primaryValues = computeTrajectoryValues(entries, checklistByRole);
   const secondaryValues = hasSecondary ? computeTrajectoryValues(secondaryEntries as TrajectoryEntry[], secondaryChecklistByRole) : [];
+  const primaryClusters = clusterRoleValues(primaryValues, REFERENCE_NOW);
+  const secondaryClusters = hasSecondary ? clusterRoleValues(secondaryValues, REFERENCE_NOW) : [];
   // secondaryDateDiff is keyed to the ORIGINAL secondaryEntries order (as
   // passed by the caller), not the chronologically-resorted order
   // computeTrajectoryValues produces — build a lookup by entry reference so
@@ -279,8 +395,8 @@ export function TrajectoryGraph({
     return Math.max(0, Math.min(1000, ((start - globalMin) / span) * 1000));
   }
 
-  const primary = buildSegments(primaryValues, globalMin, span, minY, maxY);
-  const secondary = hasSecondary ? buildSegments(secondaryValues, globalMin, span, minY, maxY) : null;
+  const primary = buildSegments(primaryClusters, globalMin, span, minY, maxY);
+  const secondary = hasSecondary ? buildSegments(secondaryClusters, globalMin, span, minY, maxY) : null;
 
   const selected =
     primary.segments.find((_s, i) => selectedKey === `p-${i}`) ??
@@ -344,12 +460,12 @@ export function TrajectoryGraph({
               />
               {secondary.segments.map((s, i) => {
                 const cx = (s.x1 + s.x2) / 2;
-                const dateDiff = secondaryDateDiffByEntry.get(s.row.entry) ?? false;
+                const dateDiff = s.cluster.entries.some((r) => secondaryDateDiffByEntry.get(r.entry));
                 return (
                   <g key={`sec-${i}`}>
-                    {s.row.hasGapBefore && (
+                    {s.cluster.hasGapBefore && (
                       <circle cx={s.x1} cy={s.y - 7} r={2.5} className="fill-zinc-400 dark:fill-zinc-500">
-                        <title>{`${secondaryLabel}: ${s.row.gapMonths}-month gap before this role`}</title>
+                        <title>{`${secondaryLabel}: ${s.cluster.gapMonths}-month gap before this role`}</title>
                       </circle>
                     )}
                     <circle
@@ -362,7 +478,7 @@ export function TrajectoryGraph({
                       style={{ cursor: "pointer" }}
                       onClick={() => setSelectedKey((k) => (k === `s-${i}` ? null : `s-${i}`))}
                     >
-                      <title>{buildDetailText(s.row, secondaryLabel) + (dateDiff ? " — date discrepancy vs. resume" : "")}</title>
+                      <title>{buildClusterDetailText(s.cluster, secondaryLabel) + (dateDiff ? " — date discrepancy vs. resume" : "")}</title>
                     </circle>
                   </g>
                 );
@@ -385,16 +501,42 @@ export function TrajectoryGraph({
           />
           {primary.segments.map((s, i) => {
             const cx = (s.x1 + s.x2) / 2;
+            const isLast = i === primary.segments.length - 1;
+            // Direct on-chart labels, 2026-08-21 (Option A) — skipped on a
+            // segment too narrow to hold text without colliding with its
+            // neighbor; still fully readable via the existing hover/click,
+            // same degrade-gracefully convention as everything else here.
+            const wideEnoughForLabel = s.x2 - s.x1 >= 55 || isLast;
+            const { primary: labelPrimary, sub: labelSub } = buildClusterLabel(s.cluster);
+            const labelAnchor = isLast ? "end" : "middle";
+            const labelX = isLast ? Math.min(s.x2, 985) : cx;
             return (
               <g key={i} className="text-blue-500 dark:text-blue-400">
-                {s.row.hasGapBefore && (
+                {s.cluster.hasGapBefore && (
                   <circle cx={s.x1} cy={s.y - 7} r={2.5} className="fill-zinc-400 dark:fill-zinc-500">
-                    <title>{`${s.row.gapMonths}-month gap before this role`}</title>
+                    <title>{`${s.cluster.gapMonths}-month gap before this role`}</title>
                   </circle>
                 )}
                 <circle cx={cx} cy={s.y} r={4} fill="currentColor" style={{ cursor: "pointer" }} onClick={() => setSelectedKey((k) => (k === `p-${i}` ? null : `p-${i}`))}>
-                  <title>{buildDetailText(s.row)}</title>
+                  <title>{buildClusterDetailText(s.cluster)}</title>
                 </circle>
+                {/* Twin-dot marker — this segment folds together 2+ roles
+                    that genuinely overlapped in time (see clusterRoleValues'
+                    own comment for why they're one visual step, not two
+                    competing ones). */}
+                {s.cluster.entries.length > 1 && (
+                  <circle cx={cx + 9} cy={s.y} r={3.5} fill="currentColor" className="text-zinc-400 dark:text-zinc-500" stroke="white" strokeWidth={1.5} style={{ pointerEvents: "none" }} />
+                )}
+                {wideEnoughForLabel && (
+                  <g className="text-zinc-700 dark:text-zinc-200" style={{ pointerEvents: "none" }}>
+                    <text x={labelX} y={s.y - 14} textAnchor={labelAnchor} fontSize={11} fontWeight={700} fill="currentColor">
+                      {labelPrimary}
+                    </text>
+                    <text x={labelX} y={s.y - 3} textAnchor={labelAnchor} fontSize={9.5} className="text-zinc-400 dark:text-zinc-500" fill="currentColor">
+                      {labelSub}
+                    </text>
+                  </g>
+                )}
               </g>
             );
           })}
@@ -419,6 +561,8 @@ export function TrajectoryGraph({
           )}
           <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500" /> Gap marker</span>
           <span className="text-zinc-300 dark:text-zinc-700">·</span>
+          <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full border border-white bg-zinc-400 shadow-[0_0_0_1px] shadow-zinc-400 dark:bg-zinc-500" /> Two roles at once</span>
+          <span className="text-zinc-300 dark:text-zinc-700">·</span>
           <span>Click a point for detail</span>
         </div>
         {/* Click-to-expand detail panel, 2026-08-20 (Phase 2.6 Tier 4 —
@@ -429,27 +573,38 @@ export function TrajectoryGraph({
             tooltips don't. */}
         {selected && (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-800/60 dark:text-zinc-300">
-            <p className="font-semibold text-zinc-700 dark:text-zinc-200">
-              {selected.row.entry.title} · {selected.row.entry.company}
-            </p>
-            <p className="text-zinc-500 dark:text-zinc-400">
-              {formatDateLabel(selected.row.entry.startDate)} – {formatDateLabel(selected.row.entry.endDate)}
-              {EMPLOYMENT_TYPE_LABEL[selected.row.entry.employmentType] ? ` · ${EMPLOYMENT_TYPE_LABEL[selected.row.entry.employmentType]}` : ""}
-            </p>
-            {selected.row.entry.stepDirection && (
-              <p className="mt-1">
-                <span className="font-medium">{STEP_LABEL[selected.row.entry.stepDirection]}</span>
-                {selected.row.entry.stepReasoning ? ` — ${selected.row.entry.stepReasoning}` : ""}
+            {selected.cluster.hasGapBefore && (
+              <p className="mb-1.5 text-amber-600 dark:text-amber-400">{selected.cluster.gapMonths}-month gap before this.</p>
+            )}
+            {selected.cluster.entries.length > 1 && (
+              <p className="mb-1.5 font-medium text-zinc-500 dark:text-zinc-400">
+                {selected.cluster.entries.length} roles running at once:
               </p>
             )}
-            {selected.row.hasGapBefore && (
-              <p className="mt-1 text-amber-600 dark:text-amber-400">{selected.row.gapMonths}-month gap before this role.</p>
-            )}
-            {selected.row.checklist && selected.row.checklist.firedItems.length > 0 && (
-              <p className="mt-1">
-                Checklist evidence: {selected.row.checklist.firedItems.map((item) => item.label).join(", ")}
-              </p>
-            )}
+            <div className="flex flex-col gap-2.5">
+              {selected.cluster.entries.map((row, i) => (
+                <div key={i} className={i > 0 ? "border-t border-zinc-200 pt-2 dark:border-zinc-700" : undefined}>
+                  <p className="font-semibold text-zinc-700 dark:text-zinc-200">
+                    {row.entry.title} · {row.entry.company}
+                  </p>
+                  <p className="text-zinc-500 dark:text-zinc-400">
+                    {formatDateLabel(row.entry.startDate)} – {formatDateLabel(row.entry.endDate)}
+                    {EMPLOYMENT_TYPE_LABEL[row.entry.employmentType] ? ` · ${EMPLOYMENT_TYPE_LABEL[row.entry.employmentType]}` : ""}
+                  </p>
+                  {row.entry.stepDirection && (
+                    <p className="mt-1">
+                      <span className="font-medium">{STEP_LABEL[row.entry.stepDirection]}</span>
+                      {row.entry.stepReasoning ? ` — ${row.entry.stepReasoning}` : ""}
+                    </p>
+                  )}
+                  {row.checklist && row.checklist.firedItems.length > 0 && (
+                    <p className="mt-1">
+                      Checklist evidence: {row.checklist.firedItems.map((item) => item.label).join(", ")}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

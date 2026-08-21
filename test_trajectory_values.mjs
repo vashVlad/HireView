@@ -172,5 +172,121 @@ function entry(company, start, end, stepDirection) {
   check("checklist detail attaches to the correct role by reference", values[1].checklist?.firedItems.length === 1 && values[0].checklist === undefined);
 }
 
+// clusterRoleValues — mirrors components/TrajectoryGraph.tsx's function of
+// the same name, added 2026-08-21 to fix the real bug Vlad found live-
+// reviewing AJ Fuhler's actual graph: two roles that genuinely overlap in
+// time (a side project or bootcamp alongside a day job) each got their own
+// full-width segment, and when one segment's end fell later than the next
+// segment's start, the polyline had to move backward in time to connect
+// them. See the function's own doc comment in TrajectoryGraph.tsx for the
+// full two-part fix (merge same-value overlaps, clip different-value ones).
+function clusterRoleValues(values, referenceNow) {
+  if (values.length === 0) return [];
+  const withRange = values.map((v) => ({ value: v, range: toMonthRange(v.entry, referenceNow) }));
+
+  const building = [];
+  let current = null;
+  for (const { value: v, range } of withRange) {
+    const start = isFinite(range[0]) ? range[0] : (current?.naturalStart ?? 0);
+    const end = isFinite(range[1]) ? range[1] : start;
+    const overlapsCurrent = current !== null && start < current.naturalEnd;
+    if (current && v.value === current.value && overlapsCurrent) {
+      current.entries.push(v);
+      current.naturalEnd = Math.max(current.naturalEnd, end);
+    } else {
+      current = { entries: [v], value: v.value, naturalStart: start, naturalEnd: end };
+      building.push(current);
+    }
+  }
+
+  const drawnEnds = building.map((c) => c.naturalEnd);
+  for (let i = 0; i < building.length - 1; i++) {
+    if (drawnEnds[i] > building[i + 1].naturalStart) drawnEnds[i] = building[i + 1].naturalStart;
+  }
+
+  return building.map((c, i) => ({
+    entries: c.entries,
+    value: c.value,
+    hasGapBefore: c.entries[0].hasGapBefore,
+    gapMonths: c.entries[0].gapMonths,
+    naturalStart: c.naturalStart,
+    naturalEnd: c.naturalEnd,
+    drawnStart: c.naturalStart,
+    drawnEnd: drawnEnds[i],
+  }));
+}
+
+// Non-overlapping same-value entries stay separate — only overlap forces a merge
+{
+  const entries = [
+    entry("A", "2015-01", "2016-01", "first"),
+    entry("B", "2018-01", "2019-01", "lateral"), // same value as A, but no overlap and no gap (< 2mo tolerance would need adjusting; use a real gap-free but non-overlapping pair)
+  ];
+  const values = computeTrajectoryValues(entries, NOW);
+  const clusters = clusterRoleValues(values, NOW);
+  check("non-overlapping same-value entries: 2 clusters, not merged", clusters.length === 2);
+}
+
+// Overlapping same-value entries (a bootcamp running alongside a lateral-value job) merge into one cluster
+{
+  const entries = [
+    entry("A", "2015-01", "2017-01", "first"),
+    entry("SideProject", "2017-02", "2019-01", "up"),
+    entry("Bootcamp", "2017-06", "2019-01", "lateral"), // overlaps SideProject entirely, same resulting value (lateral = +0)
+  ];
+  const values = computeTrajectoryValues(entries, NOW);
+  const clusters = clusterRoleValues(values, NOW);
+  check("overlapping same-value entries merge into one cluster", clusters.length === 2);
+  check("merged cluster carries both entries", clusters[1].entries.length === 2);
+}
+
+// The actual bug: overlapping DIFFERENT-value entries must never produce a
+// backward x movement — earlier cluster's drawnEnd clips to the next
+// cluster's start, guaranteeing non-decreasing x by construction.
+{
+  const entries = [
+    entry("BankOfAmerica", "2022-06", "2024-08", "first"), // real end Aug 2024
+    entry("SelfEmployed", "2024-05", "2026-03", "up"), // starts BEFORE BankOfAmerica ends — real overlap
+    entry("SpruceUp", "2026-03", "present", "up"),
+  ];
+  const values = computeTrajectoryValues(entries, NOW);
+  const clusters = clusterRoleValues(values, NOW);
+  check("AJ Fuhler shape: 3 distinct clusters (values 0, 1, 2 all differ)", clusters.length === 3);
+  check("BankOfAmerica's drawn end clipped to SelfEmployed's start (no backward jump)", clusters[0].drawnEnd === clusters[1].drawnStart);
+  check("clip actually did something — drawnEnd < naturalEnd", clusters[0].drawnEnd < clusters[0].naturalEnd);
+  check("x is non-decreasing end to end", clusters[0].drawnStart <= clusters[0].drawnEnd
+    && clusters[0].drawnEnd <= clusters[1].drawnStart
+    && clusters[1].drawnStart <= clusters[1].drawnEnd
+    && clusters[1].drawnEnd <= clusters[2].drawnStart);
+}
+
+// The full real AJ Fuhler case, all 4 roles, order scrambled the way the AI
+// actually returns it (not strictly sorted) — the exact scenario that shipped
+// broken to Vlad, now verified end to end.
+{
+  const entries = [
+    entry("SpruceUp", "2026-03", "present", "up"),
+    entry("Self-employed", "2024-05", "2026-03", "up"),
+    entry("BankOfAmerica", "2022-06", "2024-08", "first"),
+    entry("LaunchSchool", "2024-06", "2026-03", "lateral"),
+  ];
+  const values = computeTrajectoryValues(entries, NOW);
+  const clusters = clusterRoleValues(values, NOW);
+  check("real AJ Fuhler case: BankOfAmerica alone, Self-employed+LaunchSchool merged, SpruceUp alone (3 clusters)", clusters.length === 3);
+  check("real AJ Fuhler case: middle cluster is the 2-role merge", clusters[1].entries.length === 2);
+  let monotonic = true;
+  for (let i = 0; i < clusters.length - 1; i++) {
+    if (clusters[i].drawnEnd > clusters[i + 1].drawnStart) monotonic = false;
+  }
+  check("real AJ Fuhler case: fully monotonic x, zero backward movement anywhere", monotonic);
+}
+
+// Single entry is its own cluster, unaffected
+{
+  const values = computeTrajectoryValues([entry("A", "2018-01", "2020-01", "first")], NOW);
+  const clusters = clusterRoleValues(values, NOW);
+  check("single entry: one cluster, one entry", clusters.length === 1 && clusters[0].entries.length === 1);
+}
+
 console.log(`\n${pass}/${total} passed`);
 if (pass !== total) process.exit(1);
