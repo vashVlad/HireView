@@ -21,24 +21,31 @@ const ROLE_FIT_TOOL = {
  * their existing screening summary/strengths/trajectory — independent of any
  * specific JD. Reuses the same already-generated fields every screening
  * already has, so no resume re-parsing or extra Claude call scope creep.
+ *
+ * Phase 2.6 Tier "connect Archive Fits" (2026-08-20, Vlad's ask) — a
+ * Gate-1-only archived candidate (lib/buildGate1ArchivedResult.ts) has none
+ * of summary/strengths/careerTrajectory populated (empty by design — Gate 1
+ * never runs the full scoreCandidate() pipeline), so the original
+ * summary-based prompt has nothing to work from for exactly the population
+ * this connection is meant to cover. `resumeText` is a second, mutually
+ * exclusive input mode for that case — callers pass EITHER the summary/
+ * strengths/trajectory trio (any Gate-2 candidate, existing behavior,
+ * unchanged) OR raw resumeText (Gate-1-only candidates), never both. See
+ * app/api/history/[id]/role-fit/route.ts for the branch that decides which.
  */
 export async function generateRoleFit(candidate: {
   summary: string;
   strengths: string[];
   careerTrajectory?: string;
+  resumeText?: string;
 }): Promise<string> {
-  const message = await getAnthropicClient().messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 200,
-    tools: [ROLE_FIT_TOOL],
-    tool_choice: { type: "tool", name: "submit_role_fit" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: `Based on this candidate's profile, suggest ONE short role/title they'd likely be a stronger fit for than the role they were just archived from. Be specific and realistic (an actual job title a recruiter would search for), not a generic category.
+  const usingResumeText = !candidate.summary && !!candidate.resumeText;
+  const promptText = usingResumeText
+    ? `Based on this candidate's resume, suggest ONE short role/title they'd likely be a strong fit for. Be specific and realistic (an actual job title a recruiter would search for), not a generic category.
+
+RESUME:
+${candidate.resumeText}`
+    : `Based on this candidate's profile, suggest ONE short role/title they'd likely be a stronger fit for than the role they were just archived from. Be specific and realistic (an actual job title a recruiter would search for), not a generic category.
 
 SUMMARY:
 ${candidate.summary}
@@ -47,9 +54,17 @@ STRENGTHS:
 ${candidate.strengths.join(", ")}
 
 CAREER TRAJECTORY:
-${candidate.careerTrajectory ?? "(not available)"}`,
-          },
-        ],
+${candidate.careerTrajectory ?? "(not available)"}`;
+
+  const message = await getAnthropicClient().messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 200,
+    tools: [ROLE_FIT_TOOL],
+    tool_choice: { type: "tool", name: "submit_role_fit" },
+    messages: [
+      {
+        role: "user",
+        content: [{ type: "text", text: promptText }],
       },
     ],
   });

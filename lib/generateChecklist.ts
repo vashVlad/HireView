@@ -14,6 +14,19 @@ import type { ChecklistItem, ProjectChecklist } from "./types";
  * per resume at screening time).
  */
 
+// Single-list, additive-only, 2026-08-17 (Vlad's direct feedback on the
+// Filters tab UI — see lib/evaluateChecklist.ts's computeChecklistScoreDelta
+// comment for the full reasoning). Used to generate two categories,
+// "decrease" (gap/absence penalties, phrased as negations like "No
+// container orchestration experience") and "add" (positive signals) — that
+// read as genuinely confusing in the UI (a plainly positive-sounding label
+// sitting under a "Decrease score" tab) and doubled as an inverted-logic
+// trap ("fired" meaning "the gap IS present" for decrease items). Every
+// checklist item is now the same shape: a positive, checkable signal that
+// only ever adds points when the resume shows real evidence of it. Real
+// deductions still exist — they live entirely in the credibility/cross-
+// reference check (lib/assessCredibility.ts), a fundamentally different
+// "found an actual problem" mechanism, not a missing-requirement penalty.
 const CHECKLIST_TOOL = {
   name: "submit_checklist",
   description: "Submit a precise, individually-reasoned checklist derived from this job description.",
@@ -23,25 +36,25 @@ const CHECKLIST_TOOL = {
       items: {
         type: "array",
         description:
-          "5-12 specific, checkable items total. Each must be concrete enough that a recruiter could look at one resume and say yes/no — never vague ('strong communicator'), always specific ('Led a cross-functional team of 5+'). Do NOT include a target-company-match item — that's already handled by a separate, existing mechanism; adding one here would double-count the same signal.",
+          "5-12 specific, checkable items total, drawn from both the must-have and nice-to-have lists. Each must be concrete enough that a recruiter could look at one resume and say yes/no — never vague ('strong communicator'), always specific ('Led a cross-functional team of 5+'). Every item is a POSITIVE, checkable signal — phrase each as evidence to look FOR, never as an absence or a negation (never 'No X experience' or 'Lacks Y') — a must-have-derived item should still read the same way, just phrased as what having it looks like ('AWS Solutions Architect certification', not 'Missing AWS certification'). Do NOT include a target-company-match item — that's already handled by a separate, existing mechanism; adding one here would double-count the same signal.",
         items: {
           type: "object",
           properties: {
-            category: {
-              type: "string",
-              enum: ["decrease", "add"],
-              description: "'decrease' = a specific gap or red flag worth deducting points for if genuinely unevidenced (e.g. a stated must-have with no supporting evidence). 'add' = a specific reinforcing signal worth bonus points if genuinely evidenced (e.g. a nice-to-have, or a strong specific indicator of seniority/impact).",
-            },
             label: {
               type: "string",
-              description: "Short, specific, checkable in one read. 4-10 words. E.g. 'AWS Solutions Architect certification' or 'Owned a production on-call rotation'.",
+              description: "Short, specific, checkable in one read, phrased as a positive signal to look for. 4-10 words. E.g. 'AWS Solutions Architect certification' or 'Owned a production on-call rotation'.",
+            },
+            tier: {
+              type: "string",
+              enum: ["must-have", "nice-to-have"],
+              description: "Which source list this item was sharpened from. Drives both display order (must-haves shown first) and, as of 2026-08-19, whether this checklist can act as a real screening gate — so this must match points: a must-have item should virtually always score 8-15, a nice-to-have item 3-8.",
             },
             points: {
               type: "number",
-              description: "Magnitude only, always positive (category above determines the sign when applied) — 3 to 15. Must-have-derived 'decrease' items should generally sit higher (8-15) than 'add' items (3-8), since a missing requirement matters more than a bonus signal.",
+              description: "3 to 15 — how much this signal should add to the score when evidenced. Items derived from a stated must-have should generally sit higher (8-15) than items derived from a nice-to-have (3-8), since a core requirement matters more than a bonus signal — but both are bonus points either way, never a deduction.",
             },
           },
-          required: ["category", "label", "points"],
+          required: ["label", "tier", "points"],
         },
       },
     },
@@ -67,10 +80,10 @@ export async function generateChecklist(params: {
 JOB DESCRIPTION:
 ${params.jobDescription.slice(0, 6000)}
 
-MUST-HAVE SKILLS (source list, sharpen these into specific decrease-category checks):
+MUST-HAVE SKILLS (source list, sharpen these into specific, positively-phrased checks worth more points):
 ${params.mustHaveSkills.join(", ") || "(none extracted)"}
 
-NICE-TO-HAVE SKILLS (source list, sharpen these into specific add-category checks):
+NICE-TO-HAVE SKILLS (source list, sharpen these into specific, positively-phrased checks worth fewer points):
 ${params.niceToHaveSkills.join(", ") || "(none extracted)"}`,
       },
     ],
@@ -81,10 +94,15 @@ ${params.niceToHaveSkills.join(", ") || "(none extracted)"}`,
     throw new Error("Claude did not return a checklist");
   }
 
-  const input = toolUse.input as { items: { category: "decrease" | "add"; label: string; points: number }[] };
+  const input = toolUse.input as { items: { label: string; tier: "must-have" | "nice-to-have"; points: number }[] };
+  // category is always "add" now — kept on the type for backward-compat
+  // display of already-frozen historical evaluations (see
+  // computeChecklistScoreDelta's comment in lib/evaluateChecklist.ts), but
+  // this generator never produces anything else going forward.
   const items: ChecklistItem[] = (input.items ?? []).map((item) => ({
     id: randomUUID(),
-    category: item.category,
+    category: "add",
+    tier: item.tier,
     label: item.label,
     points: Math.max(1, Math.round(item.points)),
   }));

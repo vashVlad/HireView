@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals, GithubCorroboration, TrajectoryEntry } from "@/lib/types";
+import type { CredibilityAssessment, CredibilityRow, CredibilitySignal, LinkedInSignals, GithubCorroboration, TrajectoryEntry, ChecklistEvaluation } from "@/lib/types";
 import { mapTrajectoryRowToCredibilityRow } from "@/lib/matchTrajectoryEntries";
+import { attributeChecklistItemsToRoles } from "@/lib/attributeChecklistToRoles";
 import { TrajectoryGraph } from "@/components/TrajectoryGraph";
 
 const SIGNAL_CONFIG: Record<CredibilitySignal, { label: string; className: string }> = {
@@ -163,7 +164,24 @@ function CredibilityRowItem({ row, isLinkedIn }: { row: CredibilityRow; isLinked
   );
 }
 
-export function CredibilitySection({ assessment, showSummary = true }: { assessment: CredibilityAssessment; showSummary?: boolean }) {
+export function CredibilitySection({
+  assessment,
+  showSummary = true,
+  checklistEvaluation,
+}: {
+  assessment: CredibilityAssessment;
+  showSummary?: boolean;
+  /**
+   * 2026-08-18 — passed through from the candidate's own screening result
+   * (not part of the credibility assessment itself) so the trajectory graph
+   * can plot real per-role checklist evidence instead of a flat timeline.
+   * See lib/attributeChecklistToRoles.ts and TrajectoryGraph's rolePoints
+   * prop for the full "why." Undefined when the project has no checklist,
+   * or this screening predates evidenceSource — graph falls back to the
+   * plain duration-bar rendering, same as always.
+   */
+  checklistEvaluation?: ChecklistEvaluation;
+}) {
   const { label, className } = SIGNAL_CONFIG[assessment.overallSignal] ?? SIGNAL_CONFIG.minor_concerns;
   // Open by default once a result exists — Vlad's ask, 2026-07-15: previously
   // defaulted closed, so every credibility result required an extra click to
@@ -198,6 +216,33 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
   const graphEntries: TrajectoryEntry[] = (assessment.trajectoryComparison ?? [])
     .filter((r) => r.kind === "paired" && r.resumeEntry)
     .map((r) => r.resumeEntry!);
+  // Per-role fired checklist items, 2026-08-20 (Phase 2.6 Tier 4) — hover/
+  // click detail only now, no longer drives the graph's Y-axis (see
+  // TrajectoryGraph.tsx's own top-of-file comment: that's now computed from
+  // each entry's own stepDirection + employment-gap data). Undefined when
+  // there's no checklist evaluation at all, same "don't fabricate a signal
+  // that isn't there" reasoning as before.
+  const checklistByRole = checklistEvaluation
+    ? attributeChecklistItemsToRoles(checklistEvaluation.results, graphEntries)
+    : undefined;
+  // Cross-reference document's FULL trajectory, plotted as a SECOND line on
+  // the SAME graph — 2026-08-18, Y-axis meaning updated 2026-08-20 (Phase
+  // 2.6 Tier 4). Every cross-ref-side entry (not just the resume-paired
+  // subset — includes "undisclosed" rows too, so it's genuinely the FULL
+  // cross-reference trajectory, not a trimmed one). TrajectoryGraph now
+  // computes this line's Y-values itself, directly off each crossRefEntry's
+  // OWN stepDirection/stepReasoning (extracted by
+  // lib/assessCredibility.ts's TRAJECTORY_EXTRACTION_TOOL — see that file's
+  // own comment on why it must mirror scoreCandidate.ts's field pair) —
+  // no longer derived from the resume side's checklist points at all, which
+  // is exactly why the two lines can now genuinely overlap on agreement
+  // instead of needing a shared points source. dateDiff flags still carry
+  // over from the trajectoryComparison row so a real date discrepancy gets
+  // a visible marker (amber ring) even though the line itself isn't a flag
+  // mechanism.
+  const trajectoryComparison = assessment.trajectoryComparison ?? [];
+  const crossRefFullEntries: TrajectoryEntry[] = trajectoryComparison.filter((r) => r.crossRefEntry).map((r) => r.crossRefEntry!);
+  const crossRefDateDiff: boolean[] = trajectoryComparison.filter((r) => r.crossRefEntry).map((r) => !!r.fieldDiffs?.dates);
   // Resolved concerns — added 2026-07-29, Vlad's ask: credit the candidate
   // when the cross-reference document actually clears something the
   // original JD-fit screening flagged, not just penalize discrepancies.
@@ -266,14 +311,24 @@ export function CredibilitySection({ assessment, showSummary = true }: { assessm
       {/* Expandable content */}
       {open && (
         <div className="flex flex-col gap-3 border-t border-zinc-100 px-4 pb-4 pt-3 dark:border-zinc-800">
-          {/* Trajectory graph — roadmap 2.5.2, 2026-08-17. Only renders when
-              this assessment used the new comparison flow AND actually had
-              at least one paired role to plot (both empty for an old-style
-              assessment, or a candidate with no stored trajectoryEntries at
-              screening time — see assessCredibility.ts's fallback branch). */}
+          {/* Trajectory graph — roadmap 2.5.2, 2026-08-17. ONE graph, two
+              lines, 2026-08-18 (third iteration same day — see
+              crossRefFullEntries' comment above for the full history: an
+              invisible same-height overlay, then two fully separate boxes,
+              now one shared graph with a real second polyline). Only
+              renders when this assessment used the new comparison flow AND
+              actually had at least one paired role to plot (both empty for
+              an old-style assessment, or a candidate with no stored
+              trajectoryEntries at screening time — see assessCredibility.ts's
+              fallback branch). */}
           {graphEntries.length > 0 && (
             <div className="rounded-lg border border-zinc-100 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900/40">
-              <TrajectoryGraph entries={graphEntries} comparisonRows={assessment.trajectoryComparison} />
+              <TrajectoryGraph
+                entries={graphEntries}
+                checklistByRole={checklistByRole}
+                secondaryEntries={crossRefFullEntries}
+                secondaryDateDiff={crossRefDateDiff}
+              />
             </div>
           )}
 

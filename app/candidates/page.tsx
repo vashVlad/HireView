@@ -549,6 +549,7 @@ function CandidateCard({
           <CrossReferenceChecker
             screeningId={s.id}
             currentAssessment={credibility}
+            checklistEvaluation={s.checklistEvaluation}
             onComplete={async (assessment) => {
               try {
                 const res = await fetch(`/api/history/${s.id}`, {

@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "@/lib/supabase";
 import { getRecruiterEmailMap } from "@/lib/recruiters";
+import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
 import type { CandidateStatus, TrackerStage } from "@/lib/types";
 import type { FunnelCandidate, FunnelData, FunnelProjectBreakdown, FunnelStageCount } from "./types";
 import { TRACKER_ORDER, candidateMatchesStageKey, stageKeyFor } from "./stageMatch";
@@ -23,6 +24,14 @@ interface ScreeningFunnelRow {
   duplicate_flag: boolean | null;
   history_alert_type: string | null;
   created_at: string;
+  // strengths/concerns, 2026-08-15 (Vlad's ask) — "Signals" export column.
+  // Unlike current_company/current_title/etc. below, these are original
+  // scoreCandidate.ts output (required since the tool schema's first
+  // version), not a later deferred-migration column, so they're safe to
+  // pull in the main required select rather than needing their own isolated
+  // fetch-with-fallback.
+  strengths: string[] | null;
+  concerns: string[] | null;
 }
 
 /**
@@ -201,7 +210,7 @@ export async function getFunnelData(): Promise<FunnelData> {
     supabase
       .from("screenings")
       .select(
-        "id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, agency_name, score, duplicate_flag, history_alert_type, created_at"
+        "id, candidate_name, project_id, user_id, status, previous_status, linkedin_mode, agency_name, score, duplicate_flag, history_alert_type, created_at, strengths, concerns"
       )
       .returns<ScreeningFunnelRow[]>(),
     supabase.from("tracker").select("screening_id, stage, previous_stage").returns<TrackerFunnelRow[]>(),
@@ -242,13 +251,13 @@ export async function getFunnelData(): Promise<FunnelData> {
   const totalScreened = screenings.length;
   const trackerByScreeningId = new Map((trackerRes.data ?? []).map((t) => [t.screening_id, t]));
   const projectNameById = new Map((projectsRes.data ?? []).map((p) => [p.id, p.name]));
-  const scoreThresholdByProjectId = new Map((projectsRes.data ?? []).map((p) => [p.id, p.score_threshold ?? 45]));
+  const scoreThresholdByProjectId = new Map((projectsRes.data ?? []).map((p) => [p.id, p.score_threshold ?? DEFAULT_SCORE_THRESHOLD]));
 
   const candidates: FunnelCandidate[] = screenings.map((s) => {
     const tracker = trackerByScreeningId.get(s.id);
     const stage = tracker?.stage ?? null;
     const previousStage = tracker?.previous_stage ?? null;
-    const threshold = s.project_id != null ? (scoreThresholdByProjectId.get(s.project_id) ?? 45) : 45;
+    const threshold = s.project_id != null ? (scoreThresholdByProjectId.get(s.project_id) ?? DEFAULT_SCORE_THRESHOLD) : DEFAULT_SCORE_THRESHOLD;
     const currentRole = currentRoleByScreeningId.get(s.id);
     return {
       screeningId: s.id,
@@ -261,6 +270,14 @@ export async function getFunnelData(): Promise<FunnelData> {
       currentTitle: currentRole?.currentTitle ?? null,
       totalExperienceSummary: currentRole?.totalExperienceSummary ?? null,
       linkedinUrl: currentRole?.linkedinUrl ?? null,
+      // "Signals" export column, 2026-08-15 (Vlad's ask) — strongest
+      // strength + weakest concern, both already generated at screening
+      // time, no new AI call. concerns[0] is reliably the biggest concern
+      // (SCORE_TOOL's concerns description already says "must-haves
+      // first"); strengths[0] is reliably the strongest as of the
+      // 2026-08-15 do-not-touch exception in lib/scoreCandidate.ts.
+      topStrength: s.strengths && s.strengths.length > 0 ? s.strengths[0] : null,
+      topConcern: s.concerns && s.concerns.length > 0 ? s.concerns[0] : null,
       source: s.linkedin_mode ? "outbound" : s.agency_name ? "agency" : "inbound",
       ...(s.agency_name ? { agencyName: s.agency_name } : {}),
       score: s.score,

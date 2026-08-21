@@ -4,6 +4,7 @@ import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening } from "@/lib/screenings";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import { getProject } from "@/lib/projects";
+import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
 import type { CandidateResult } from "@/lib/types";
 
 // DO-NOT-TOUCH EXCEPTION (2026-07-30 — Vlad reported a real
@@ -121,7 +122,13 @@ export async function POST(request: NextRequest) {
       return null;
     }),
   ]);
-  const scoreThreshold = project?.scoreThreshold ?? 45;
+  // DO-NOT-TOUCH EXCEPTION (2026-08-20 — Claude Code's full-system audit
+  // flagged this literal `45` fallback as one of 9 hardcoded copies of the
+  // same default across the app, a real drift risk since nothing tied them
+  // together; see lib/scoreThreshold.ts's own doc comment). Same value,
+  // same fallback behavior — just sourced from one shared constant instead
+  // of retyping the number here.
+  const scoreThreshold = project?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD;
 
   const { id } = await saveScreening({
     result,

@@ -110,6 +110,32 @@ const SCORE_TOOL = {
               type: "string",
               description: "YYYY-MM or YYYY matching startDate's precision, or the literal string 'present' for the candidate's current role.",
             },
+            // DO-NOT-TOUCH EXCEPTION (2026-08-20, Phase 2.6 Tier 4 — Vlad's
+            // explicit ask, see memory/decisions-log.md's 2026-08-19 "career-
+            // trajectory direction stays visual-only, never touches the
+            // persisted score" entry). Same shape/precedent as the 2026-08-17
+            // trajectoryEntries exception directly above: an additive field
+            // on an existing array item, NOT in `required` below, zero cost,
+            // zero disruption to any existing required-field contract.
+            // Drives TrajectoryGraph.tsx's Y-axis (see lib/types.ts's
+            // TrajectoryEntry.stepDirection doc comment for the full
+            // rationale) — purely visual, never read by
+            // saveScreening()/the score computation itself. Wording here
+            // must be kept in sync BY HAND with the identical field pair in
+            // lib/assessCredibility.ts's TRAJECTORY_EXTRACTION_TOOL — the two
+            // files cannot share code (this one is do-not-touch and doesn't
+            // import from feature files), so any future wording change here
+            // needs the same change made there too.
+            stepDirection: {
+              type: "string",
+              enum: ["up", "down", "lateral", "first"],
+              description:
+                "Career-trajectory direction of THIS role relative to the PREVIOUS entry in this array (one entry back = the role immediately before this one chronologically) — judged from title, scope, and responsibilities together, not a title-keyword match. 'up' = a real step up (promotion, more scope/seniority, a materially better company/role). 'down' = a real step down (demotion, narrower scope, a materially lesser role) — do not use for a lateral move at similar level even if the company changed. 'lateral' = same level, similar scope, a sideways move. 'first' = this is the earliest role in the array — there is nothing before it to compare against, always use 'first' for that one entry, never guess a direction for it.",
+            },
+            stepReasoning: {
+              type: "string",
+              description: "One short sentence (max 20 words) explaining the stepDirection call — the specific title/scope/responsibility signal that drove it. Omit or leave empty for stepDirection: 'first'.",
+            },
           },
           required: ["company", "title", "employmentType", "startDate", "endDate"],
         },

@@ -75,7 +75,8 @@ function normalizeCompanyForCompare(s: string): string {
     .trim();
 }
 
-function companiesLooselyMatch(a: string, b: string): boolean {
+/** Exported for lib/attributeChecklistToRoles.ts, 2026-08-18 — same loose-match rule used to attribute a checklist item's free-text evidenceSource to a specific trajectoryEntry, deliberately not reimplemented a second time (same "reuse, don't reimplement" precedent as parseYearMonth/toMonthRange above). */
+export function companiesLooselyMatch(a: string, b: string): boolean {
   const na = normalizeCompanyForCompare(a);
   const nb = normalizeCompanyForCompare(b);
   if (!na || !nb) return na === nb;

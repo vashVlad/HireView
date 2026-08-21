@@ -19,10 +19,11 @@ import { getPrimaryTeamId } from "./teams";
 import { getAuthUser } from "./auth";
 import { getRecruiterEmailMap } from "./recruiters";
 import { computeTargetCompanyBoost } from "./targetCompanyBoost";
+import { computeChecklistPercentageScore } from "./evaluateChecklist";
 import { detectLinkedIn } from "./assessCredibility";
 import type {
   BlacklistEntry, CandidateResult, CandidateStatus, ChecklistEvaluation, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
-  Recommendation, RejectionHistoryEntry, ScreeningRecord, TrackerEntry, TrackerStage, TrajectoryEntry,
+  Recommendation, RejectionHistoryEntry, ScreeningRecord, StoredFitSuggestion, TrackerEntry, TrackerStage, TrajectoryEntry,
 } from "./types";
 import { DEFAULT_AUTO_ARCHIVE_REASON } from "./types";
 
@@ -278,6 +279,22 @@ export async function transferScreeningToProject(params: {
   mode: "copy" | "rescore" | "existing";
   existingScreeningId?: number;
   rescoredResult?: CandidateResult;
+  /**
+   * Gate 1 architecture passthrough, 2026-08-20 (Vlad's ask: "when the
+   * system identifies a similar role [Archive Fits], the system will do the
+   * same screening with the gates"). Only meaningful with mode: "rescore" —
+   * mirrors saveScreening()'s own gate1Only/checklistEvaluation params
+   * exactly (same names, same semantics), just threaded one level up so
+   * app/api/projects/[id]/archive-fits/[screeningId]/decide/route.ts (the
+   * only caller that runs a real Gate 1 check before calling this function)
+   * can get its result correctly flagged/scored the same way
+   * app/api/screen-resumes/route.ts's do-not-touch exception already does.
+   * Omitted entirely by every other existing caller (TransferControl's
+   * manual "Transfer" button) — unaffected, same behavior as before this
+   * field existed.
+   */
+  gate1Only?: boolean;
+  checklistEvaluation?: ChecklistEvaluation | null;
 }): Promise<{ newScreeningId: number; destinationProjectName: string }> {
   const supabase = getSupabaseClient();
 
@@ -346,6 +363,12 @@ export async function transferScreeningToProject(params: {
       scoreThreshold: destinationProject.scoreThreshold,
       actingUserId: params.actingUserId,
       teamId: destinationProject.teamId ?? null,
+      // Gate 1 passthrough, 2026-08-20 — see this function's own param
+      // comment. Undefined for every caller except the Archive Fits
+      // "screen" decision, same no-op-when-omitted behavior saveScreening()
+      // already has for every other caller.
+      gate1Only: params.gate1Only,
+      checklistEvaluation: params.checklistEvaluation,
     });
     newScreeningId = saved.id;
   }
@@ -862,8 +885,23 @@ export async function saveScreening(params: {
    * matching fingerprint's null-vs-omit convention.
    */
   checklistEvaluation?: ChecklistEvaluation | null;
+  /**
+   * Gate 1 architecture, 2026-08-19 (Phase 2.6 — see decisions-log.md's
+   * 2026-08-19 entries). True when this candidate's checklist score alone
+   * came in below scoreThreshold and app/api/screen-resumes/route.ts skipped
+   * scoreCandidate()/generateFingerprint() entirely — `result` here is a
+   * lib/buildGate1ArchivedResult.ts stand-in, not a real AI judgment, and
+   * `result.score` (the checklist percentage) IS the candidate's only score,
+   * not an override of something else. Distinct from the old (2026-08-17,
+   * now-superseded) "checklist always overrides score" behavior: when this
+   * is false/omitted and checklistEvaluation is still present, the candidate
+   * DID get a real scoreCandidate() judgment (Gate 1 passed) and the
+   * checklist data attaches for display/graph purposes only, no longer
+   * touching result.score at all.
+   */
+  gate1Only?: boolean;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies, checklistEvaluation } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies, checklistEvaluation, gate1Only } = params;
   const supabase = getSupabaseClient();
 
   // Real bug found 2026-07-20 (Vlad: "FunnelView didn't save the recruiter
@@ -955,39 +993,50 @@ export async function saveScreening(params: {
     console.error("resume_content_hash computation failed (screening still saved):", err);
   }
 
+  // Gate 1 architecture, 2026-08-19 (Phase 2.6 — see decisions-log.md's
+  // 2026-08-19 entries) — SUPERSEDES the 2026-08-17 "checklist always
+  // overrides score" behavior. The checklist-percentage override now only
+  // applies when `gate1Only` is true, i.e. `result` is a
+  // lib/buildGate1ArchivedResult.ts stand-in that never went through a real
+  // scoreCandidate() call — there, the checklist percentage isn't
+  // "overriding" anything, it's the only score that exists. For a candidate
+  // who DID clear Gate 1 and get a real scoreCandidate() judgment, the
+  // checklist evaluation still attaches (still needed for display and the
+  // Phase 2.6.10 trajectory graph) but result.score is left completely
+  // untouched — scoreCandidate()'s own judgment is the real score again, not
+  // something the checklist can silently overwrite.
+  if (checklistEvaluation) {
+    result.checklistEvaluation = checklistEvaluation;
+    if (gate1Only) {
+      const checklistScore = computeChecklistPercentageScore(checklistEvaluation.results);
+      if (checklistScore !== null) {
+        result.score = checklistScore;
+      }
+    }
+  }
+
   // Target-company score boost, 2026-08-07 (Vlad's ask: "add companies in
   // there that would increase the score if it matches with the candidate's
   // resume"). Deterministic, code-computed — see lib/targetCompanyBoost.ts's
   // own header for why this isn't baked into scoreCandidate.ts's prompt.
   // Applied BEFORE initialStatus is computed below, so a match can actually
   // help a borderline candidate clear the project's score threshold — that's
-  // the point of the feature, not an incidental side effect. Mutates
-  // result.score/result.targetCompanyMatches in place, same pattern as every
-  // other result.* mutation in this function (strengths/concerns above,
-  // status/archiveReason below) — reaches both do-not-touch callers'
-  // immediate API response for free.
+  // the point of the feature, not an incidental side effect. Explicitly kept
+  // even in checklist-only mode, 2026-08-17 — Vlad's direct answer when
+  // asked ("I'd keep the companies boost"): a distinct, useful signal the
+  // checklist doesn't cover, so it still stacks on top of whichever base
+  // score is currently in result.score (checklist-percentage or the AI's
+  // own, depending on the block above). Mutates result.score/
+  // result.targetCompanyMatches in place, same pattern as every other
+  // result.* mutation in this function (strengths/concerns above, status/
+  // archiveReason below) — reaches both do-not-touch callers' immediate API
+  // response for free.
   if (targetCompanies && targetCompanies.length > 0 && resumeText) {
     const boost = computeTargetCompanyBoost(resumeText, targetCompanies);
     if (boost.matched) {
       result.score = Math.min(100, result.score + boost.bonus);
     }
     result.targetCompanyMatches = boost.matchedCompanies;
-  }
-
-  // JD checklist score delta, 2026-08-17 (Vlad's ask). Same deterministic-
-  // application pattern as the target-company boost directly above — the
-  // per-item point values and fired/not-fired decisions are already fully
-  // resolved by the time this runs (see lib/evaluateChecklist.ts, called by
-  // the route BEFORE saveScreening, in parallel with scoreCandidate()). This
-  // block only applies the already-computed delta and clamps — same [0,100]
-  // bound as the auto-archive threshold check below relies on. Runs after
-  // the target-company boost so both adjustments stack on the model's raw
-  // score, in the order they happened to be computed — order between the
-  // two doesn't matter since both are plain addition before the single
-  // clamp here.
-  if (checklistEvaluation) {
-    result.score = Math.max(0, Math.min(100, result.score + checklistEvaluation.scoreDelta));
-    result.checklistEvaluation = checklistEvaluation;
   }
 
   const resumePath = `${randomUUID()}/${sanitizeStorageFileName(result.fileName)}`;
@@ -1547,6 +1596,53 @@ export async function getScreeningConcerns(id: number): Promise<string[]> {
 }
 
 /**
+ * Gate 1 lazy fit-suggestion read, Phase 2.6 Tier 2 (2026-08-20) — isolated
+ * single-column select, same reasoning as getScreeningConcerns above:
+ * gate1_fit_suggestion requires supabase-migration-gate1-fit-suggestion.sql,
+ * NOT YET CONFIRMED RUN, so it stays out of the shared SCREENING_COLUMNS
+ * select. Returns null for BOTH "column doesn't exist yet / read failed" AND
+ * "never computed" (SQL NULL) — the caller (POST /api/cross-project-fit)
+ * treats null as "go ahead and compute," and a stored non-null object
+ * (including one whose own `suggestion` field is null) as "already computed,
+ * return as-is, never recompute." That distinction is exactly why this
+ * column is never defaulted to '{}' the way suggested_role_fits is — an
+ * empty-looking default would be indistinguishable from a real "checked,
+ * found nothing" result.
+ */
+export async function getGate1FitSuggestion(id: number): Promise<StoredFitSuggestion | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("gate1_fit_suggestion")
+    .eq("id", id)
+    .maybeSingle<{ gate1_fit_suggestion: StoredFitSuggestion | null }>();
+  if (error || !data) return null;
+  return data.gate1_fit_suggestion ?? null;
+}
+
+/**
+ * Small isolated read for POST /api/cross-project-fit's screeningId path
+ * (Phase 2.6 Tier 2, 2026-08-20) — the candidate name and owning project id
+ * needed to run a cross-project fit check against a persisted screening
+ * that has no in-memory File object to re-derive these from (unlike the
+ * live Screen-tab flow, which already has both from its own state). Both
+ * columns are already in the base `screenings` table (candidate_name,
+ * project_id are original columns, not deferred), so this is safe to read
+ * unconditionally rather than best-effort like the deferred-column helpers
+ * above.
+ */
+export async function getScreeningFitContext(id: number): Promise<{ candidateName: string; projectId: number | null } | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("candidate_name, project_id")
+    .eq("id", id)
+    .maybeSingle<{ candidate_name: string; project_id: number | null }>();
+  if (error || !data) return null;
+  return { candidateName: data.candidate_name, projectId: data.project_id };
+}
+
+/**
  * Roadmap 2.5.2, 2026-08-17 — isolated read for the credibility check route:
  * the candidate's OWN structured trajectory, to diff against a cross-
  * reference document's freshly-extracted one (lib/matchTrajectoryEntries.ts).
@@ -1777,6 +1873,21 @@ export async function updateScreening(
      * lib/types.ts's ChecklistEvaluation for shape.
      */
     checklistEvaluation?: ChecklistEvaluation;
+    /**
+     * Gate 1 lazy fit-suggestion, Phase 2.6 Tier 2 (2026-08-20, Vlad's ask:
+     * "once" — persist, never recompute). Same deferred-column pattern as
+     * checklistEvaluation above, requires
+     * supabase-migration-gate1-fit-suggestion.sql, NOT YET CONFIRMED RUN.
+     * Written by POST /api/cross-project-fit's screeningId path the first
+     * time a gate-1-archived candidate's card is opened; read back via
+     * getGate1FitSuggestion below so every subsequent open returns the same
+     * stored result instead of paying for another scoring pass. See
+     * lib/types.ts's StoredFitSuggestion for the exact shape (mirrors this
+     * route's own response body 1:1, including a meaningful `suggestion:
+     * null` for "checked, nothing cleared the bar" — distinct from the
+     * column itself being SQL NULL, which means "never checked").
+     */
+    gate1FitSuggestion?: StoredFitSuggestion;
   },
   actorUserId?: string
 ): Promise<void> {
@@ -1805,6 +1916,12 @@ export async function updateScreening(
   // CONFIRMED RUN. Same deferred-wiring pattern as target_company_matches
   // above.
   if (fields.checklistEvaluation !== undefined) update.checklist_evaluation = fields.checklistEvaluation;
+  // gate1_fit_suggestion requires supabase-migration-gate1-fit-suggestion.sql
+  // — NOT YET CONFIRMED RUN. Same deferred-wiring pattern as
+  // checklist_evaluation above; caller (POST /api/cross-project-fit) wraps
+  // this in .catch(() => {}) so a missing column degrades to "recompute every
+  // time" rather than failing the response.
+  if (fields.gate1FitSuggestion !== undefined) update.gate1_fit_suggestion = fields.gate1FitSuggestion;
   if (fields.photoUrl !== undefined) update.photo_url = fields.photoUrl;
   if (fields.linkedInPdfPath !== undefined) update.linkedin_pdf_path = fields.linkedInPdfPath;
   // cross_ref_is_linkedin requires supabase-migration-cross-ref-doc-type.sql

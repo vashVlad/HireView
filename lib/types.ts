@@ -150,6 +150,36 @@ export interface TrajectoryEntry {
   startDate: string;
   /** YYYY-MM or YYYY matching startDate's precision, or the literal string "present" for a current role. */
   endDate: string;
+  /**
+   * Career-trajectory direction, Phase 2.6 Tier 4 (2026-08-20 — roadmap
+   * 2.6.7, "reevaluate this graph logic" thread from 2026-08-18, closed
+   * 2026-08-19 via decisions-log). Judged by the model relative to the
+   * PREVIOUS entry in the array (title + experience + responsibilities, not
+   * a title-keyword heuristic) — "first" for the earliest role in the
+   * array, which has nothing before it to compare against (Vlad's explicit
+   * "starts clean, no marker" call). Drives TrajectoryGraph.tsx's Y-axis:
+   * up = +1, lateral = 0, down = −1, accumulated role by role, with a real
+   * employment gap (see lib/detectEmploymentGaps.ts) forcing a dip
+   * regardless of what stepDirection says — a gap is a harder, more
+   * objective signal than the model's own judgment. Optional — undefined on
+   * any TrajectoryEntry produced before this field existed, or wherever the
+   * generating call doesn't populate it (older calibration data, etc.);
+   * TrajectoryGraph.tsx treats undefined the same as "lateral" so an
+   * entry missing this field doesn't silently break the shape of the line.
+   * Set by two independent call sites that must be kept in sync by
+   * convention, not shared code — see each one's own comment:
+   *   - lib/scoreCandidate.ts's SCORE_TOOL (do-not-touch exception)
+   *   - lib/assessCredibility.ts's TRAJECTORY_EXTRACTION_TOOL
+   */
+  stepDirection?: "up" | "down" | "lateral" | "first";
+  /**
+   * One short sentence (same "reasoning before verdict" pattern as
+   * evaluateChecklist.ts's per-item `reasoning`) explaining the
+   * stepDirection call — shown in TrajectoryGraph.tsx's per-point hover
+   * detail. Same two call sites and sync-by-convention caveat as
+   * stepDirection above.
+   */
+  stepReasoning?: string;
 }
 
 /**
@@ -394,6 +424,19 @@ export interface CandidateResult {
    * Undefined = no checklist configured for this project, not evaluated.
    */
   checklistEvaluation?: ChecklistEvaluation;
+  /**
+   * Gate 1 architecture, 2026-08-19 (Phase 2.6 — see decisions-log.md's
+   * 2026-08-19 entries and memory/claude-code-handoff-2026-08-19-phase-2.6-
+   * architecture.md). True when this candidate never reached the real
+   * scoreCandidate() call at all — the checklist alone (Gate 1) came in
+   * below the project's scoreThreshold, so score/summary/strengths/concerns/
+   * careerTrajectory/trajectoryEntries are all empty placeholders, not a
+   * real AI judgment. The archived-candidate card branches on this to show
+   * the matched/unmatched checklist list instead of the normal AI-summary
+   * layout. Undefined/false = went through the full Gate 2 pipeline as
+   * normal (or no checklist configured at all — Gate 1 never applied).
+   */
+  gate1Only?: boolean;
   recommendation: Recommendation;
   status?: CandidateStatus;
   credibility?: CredibilityAssessment;
@@ -492,7 +535,7 @@ export interface ScreenResumesError {
 
 export interface CheckExistingResult {
   fileName: string;
-  status: "new" | "duplicate";
+  status: "new" | "duplicate" | "blacklisted";
   /**
    * The uploaded file's own resume_content_hash — computed here regardless of
    * "new"/"duplicate" status (it's free, already computed for the same-project
@@ -502,6 +545,26 @@ export interface CheckExistingResult {
    * just a name coincidence. Added 2026-07-29, see decisions-log.md.
    */
   resumeContentHash?: string;
+  /**
+   * Real pre-score gate, 2026-08-20 (previously blacklist suppression only
+   * ever fired AFTER a full scoreCandidate() call — see
+   * findBlacklistMatches in app/projects/[id]/page.tsx, which still exists
+   * as a fallback below). check-existing runs lib/extractCandidateNameFallback's
+   * free extractNameHeuristic() against each upload's already-extracted
+   * resume text (zero Claude calls) and matches it against the system-wide
+   * blacklist. When it hits, status is "blacklisted" instead of "new" and
+   * this carries the matched entry — the frontend skips scoring for that
+   * file entirely (same "set aside before it costs anything" precedent as
+   * the "duplicate" status/`existing` field below), rather than spending a
+   * real Claude call just to find out afterward what was already knowable
+   * for free. Undefined whenever status isn't "blacklisted", or when the
+   * heuristic couldn't confidently find a name (short-word names, unusual
+   * resume layouts, etc.) — that's not a false negative so much as this
+   * pre-check declining to guess; the existing post-score check (matched
+   * against the AI-extracted name, more reliable but not free) still runs
+   * as a safety net for anything this misses.
+   */
+  blacklistMatch?: BlacklistEntry;
   existing?: {
     id: number;
     candidateName: string;
@@ -1015,22 +1078,77 @@ export interface JDAnalysis {
  * individually-reasoned checks. Generated once per JD analysis/re-analysis
  * by lib/generateChecklist.ts (a NEW, separate file — NOT an edit to
  * analyzeJD.ts, which is do-not-touch), then freely editable by the
- * recruiter on the project's Filters tab. Two categories, matching Vlad's
- * "Decrease score" / "Add score" framing: `decrease` items are soft-signal
- * gaps worth a deduction if genuinely unevidenced; `add` items are
- * reinforcing signals worth a bonus if genuinely evidenced. Deliberately
- * does NOT include a target-company-match item — that's already a separate,
- * shipped, deterministic mechanism (lib/targetCompanyBoost.ts); a checklist
- * item for it would double-count the same signal.
+ * recruiter on the project's Filters tab. Deliberately does NOT include a
+ * target-company-match item — that's already a separate, shipped,
+ * deterministic mechanism (lib/targetCompanyBoost.ts); a checklist item for
+ * it would double-count the same signal.
+ *
+ * SIMPLIFIED 2026-08-17 — single additive-only list, no more decrease/add
+ * split. Originally had two categories matching a "Decrease score" / "Add
+ * score" UI tab: `decrease` items docked points if a stated must-have was
+ * unevidenced (fired=true meant "the gap IS present," an inverted-logic
+ * trap), `add` items awarded points if evidenced. Vlad's direct feedback:
+ * seeing a plainly positive-sounding label ("Python used in AI or software
+ * project on resume") sitting under a "Decrease score" tab made no sense at
+ * a glance, and he wanted score decreases to come ONLY from the credibility/
+ * cross-reference check finding a real problem (lib/assessCredibility.ts),
+ * never from a checklist absence. Every item is now the same shape: a
+ * positive, checkable signal that only ever adds points when evidenced —
+ * see lib/evaluateChecklist.ts's computeChecklistScoreDelta for the exact
+ * mechanics, including how this stays backward-compatible with any
+ * already-generated project checklist that still has legacy `category:
+ * "decrease"` items sitting in it (they now score identically to an `add`
+ * item the moment they fire — no data migration needed).
  */
 export interface ChecklistItem {
   /** Stable id for editing/deleting one specific item without disturbing the rest — crypto.randomUUID() at creation time. */
   id: string;
+  /**
+   * Legacy field, 2026-08-17 — kept only so an already-saved checklist
+   * (possibly still holding pre-simplification "decrease" items) has
+   * somewhere to keep that value; lib/generateChecklist.ts always emits
+   * "add" now, and nothing in scoring branches on this anymore. Not shown
+   * or editable as a distinct concept in the Filters tab UI going forward.
+   */
   category: "decrease" | "add";
+  /**
+   * Priority tier, 2026-08-19 (Phase 2.6 — Gate 1 becomes the real screening
+   * gate, so must-haves need to be visually distinguishable and sortable,
+   * not just implied by a higher points value). Optional so an
+   * already-generated checklist (pre-dating this field) doesn't break —
+   * display code should treat a missing tier as "nice-to-have" rather than
+   * fail, same graceful-degradation convention every other deferred field in
+   * this codebase already follows.
+   */
+  tier?: "must-have" | "nice-to-have";
   /** Short, specific description of the check — e.g. "AWS Solutions Architect certification" or "Led a team of 3+ engineers". */
   label: string;
-  /** Magnitude only (always positive) — category determines the sign when applied. */
+  /** Magnitude only, always positive — how much this item adds to the score when it fires. */
   points: number;
+}
+
+/**
+ * Persisted lazy fit-suggestion, 2026-08-19 (Phase 2.6 — see decisions-log.md's
+ * 2026-08-19 entries and memory/claude-code-handoff-2026-08-19-phase-2.6-
+ * architecture.md). Computed once, the first time a recruiter opens a gate-1-
+ * archived candidate's card, and stored — never recomputed on a later open
+ * (Vlad's explicit answer: "once"). `suggestion: null` is a MEANINGFUL,
+ * distinct value from the column being unset entirely: null means "already
+ * checked, genuinely nothing cleared the bar," column-is-null means "never
+ * checked yet, still needs computing." Same shape as ResultCard.tsx's
+ * FitSuggestion (mirrored here, not imported — lib/ can't depend on
+ * components/) so the same Transfer flow works identically for both the live
+ * in-session suggestion and this persisted one.
+ */
+export interface StoredFitSuggestion {
+  suggestion: {
+    projectId: number;
+    projectName: string;
+    score: number;
+    result: CandidateResult;
+    jobDescription: string;
+  } | null;
+  alreadyIn: { projectId: number; projectName: string; screeningId: number; score: number }[];
 }
 
 export interface ProjectChecklist {
@@ -1065,12 +1183,32 @@ export interface ChecklistItemResult {
    * back up by id), not silently reflect whatever the checklist says today.
    */
   label: string;
+  /** Legacy field, see ChecklistItem.category's comment — kept here so an already-frozen historical evaluation still displays exactly what category it was evaluated against at the time (ResultCard.tsx's checklist breakdown intentionally still renders an old "decrease" result as a negative number — that's accurate history, not something to rewrite). Does not affect scoring — see computeChecklistScoreDelta. */
   category: "decrease" | "add";
+  /** Denormalized off ChecklistItem.tier at evaluation time, same reasoning as label/category/points above — 2026-08-19. Undefined for any evaluation saved before this date, or against an item that predates the tier field; display code should treat a missing tier as "nice-to-have". */
+  tier?: "must-have" | "nice-to-have";
   points: number;
+  /**
+   * Which employer/role on the resume this item's evidence actually came
+   * from, 2026-08-18 (Vlad's ask: a real "score per experience over time"
+   * graph, not a fabricated metric). Free text naming a company/project —
+   * e.g. "Optum", "DataGuard AI" — matched against TrajectoryEntry.company
+   * by lib/attributeChecklistToRoles.ts's companiesLooselyMatch, NOT a
+   * structured id, because evaluateChecklist() runs independently of (in
+   * parallel with, not after) scoreCandidate()'s trajectoryEntries
+   * extraction — see app/api/screen-resumes/route.ts's Promise.all
+   * (do-not-touch) — so the model has no structured entry list to reference
+   * at evaluation time, only its own read of the resume text. Empty string
+   * when the evidence isn't tied to one specific role (e.g. a general
+   * skills-section listing) — those items are simply excluded from the
+   * per-role graph, not attributed anywhere. Undefined for any evaluation
+   * saved before this date (never re-evaluated).
+   */
+  evidenceSource?: string;
 }
 
 export interface ChecklistEvaluation {
   results: ChecklistItemResult[];
-  /** Deterministic sum of fired items' points (decrease items negative, add items positive) — computed in code, not by the model. See computeChecklistScoreDelta. */
+  /** Deterministic sum of fired items' points, always added (2026-08-17 — see computeChecklistScoreDelta's own comment for why this checklist never subtracts, and how legacy "decrease" items are handled without a data migration) — computed in code, not by the model. */
   scoreDelta: number;
 }

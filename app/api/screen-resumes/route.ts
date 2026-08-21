@@ -7,7 +7,9 @@ import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening, setScreeningEmbedding } from "@/lib/screenings";
 import { generateEmbedding, buildCandidateEmbeddingText } from "@/lib/embeddings";
 import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
-import { evaluateChecklist } from "@/lib/evaluateChecklist";
+import { evaluateGate1 } from "@/lib/evaluateGate1";
+import { buildGate1ArchivedResult } from "@/lib/buildGate1ArchivedResult";
+import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
 import { getProject, getProjectChecklist } from "@/lib/projects";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
@@ -137,7 +139,14 @@ export async function POST(request: NextRequest) {
 
   // Pull project config (LinkedIn context + per-role score threshold)
   let linkedInContext: string | undefined;
-  let scoreThreshold = 45;
+  // DO-NOT-TOUCH EXCEPTION (2026-08-20 — Claude Code's full-system audit
+  // flagged this literal `45` as one of 9 hardcoded copies of the same
+  // default scattered across the app; see lib/scoreThreshold.ts's own doc
+  // comment). Same value, same fallback behavior, both places it appears in
+  // this function — just sourced from one shared constant instead of two
+  // separately-typed literals that could silently drift apart from each
+  // other, let alone from the other 7 copies elsewhere in the app.
+  let scoreThreshold = DEFAULT_SCORE_THRESHOLD;
   // DO-NOT-TOUCH EXCEPTION (2026-07-29 perf pass — see decisions-log.md):
   // this project fetch already happened here for linkedInContext/
   // scoreThreshold above — teamId just reads an already-fetched field off
@@ -168,7 +177,7 @@ export async function POST(request: NextRequest) {
   if (projectId) {
     const project = await getProject(projectId).catch(() => null);
     linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
-    scoreThreshold = project?.scoreThreshold ?? 45;
+    scoreThreshold = project?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD;
     teamId = project?.teamId ?? null;
     targetCompanies = combineTargetCompanies(project?.jdAnalysis?.wide?.targetCompanies, project?.jdAnalysis?.narrow?.targetCompanies);
     checklist = await getProjectChecklist(projectId).catch(() => null);
@@ -221,50 +230,82 @@ export async function POST(request: NextRequest) {
 
   async function score(resume: (typeof parsed)[number]) {
     try {
-      // DO-NOT-TOUCH EXCEPTION (flagged, 2026-07-20 perf pass — see
-      // decisions-log.md): fingerprinting (fraud/duplicate detection) only
-      // needs the raw resume text, not the score, so it never actually had to
-      // wait for scoring to finish — it was just written sequentially before.
-      // Running both Claude calls concurrently cuts the wait to roughly
-      // whichever one is slower instead of the sum of both, with no change to
-      // what either call does or what the response contains. A fingerprint
-      // failure resolves to `null` (not a rejection) so it can never fail the
-      // scoring half of this Promise.all — saveScreening treats an explicit
-      // `null` as "don't retry, just skip duplicate/history matching for this
-      // save," same as its pre-existing best-effort behavior.
-      // DO-NOT-TOUCH EXCEPTION (2026-08-17, Vlad's explicit ask — JD
-      // checklist): a third parallel branch, same shape as the fingerprint
-      // branch directly below — evaluateChecklist() needs its own Claude
-      // call (checking checklist-item evidence needs real reading
-      // comprehension, unlike the plain substring match in
-      // targetCompanyBoost.ts), so it runs concurrently with scoring rather
-      // than sequentially after it. Skipped entirely (resolves to `null`,
-      // not a rejection) when this project has no checklist configured —
-      // the common case for most projects until the recruiter opts in via
-      // the Filters tab. A genuine evaluation failure also resolves to
-      // `null`, same best-effort convention as the fingerprint branch — a
-      // checklist miss must never block the candidate's actual score/save.
-      const [result, fingerprint, checklistEvaluation] = await Promise.all([
-        scoreCandidate(
-          jobDescription,
-          resume.fileName,
-          resume.text,
-          calibrationExamples,
-          roleContext,
-          linkedInContext,
-          linkedInModeOverride
-        ),
-        generateFingerprint(resume.text).catch((err) => {
-          console.error("Fingerprint generation failed (scoring unaffected):", err);
-          return null;
-        }),
-        checklist
-          ? evaluateChecklist({ resumeText: resume.text, checklist }).catch((err) => {
-              console.error("Checklist evaluation failed (scoring unaffected):", err);
-              return null;
-            })
-          : Promise.resolve(null),
-      ]);
+      // DO-NOT-TOUCH EXCEPTION (2026-08-19, Phase 2.6 — see decisions-log.md's
+      // 2026-08-19 entries and memory/claude-code-handoff-2026-08-19-phase-2.6-
+      // architecture.md). Gate 1 architecture: evaluateChecklist() no longer
+      // runs as a third parallel branch alongside scoreCandidate() —
+      // unconditionally paying for the full scoreCandidate()/
+      // generateFingerprint() pair on every resume defeats the entire point
+      // of a cheap first-pass gate for a high-volume applicant flow (Vlad's
+      // explicit ask, 2026-08-19: "the checklist must be a main gate").
+      // evaluateChecklist() now runs FIRST, alone — if this project has no
+      // checklist configured, or the checklist score clears scoreThreshold,
+      // behavior is unchanged from before (falls through to the same
+      // scoreCandidate()/generateFingerprint() pair as always). Only when the
+      // checklist score comes in below scoreThreshold does this branch: the
+      // expensive pair never runs at all, and a lightweight stand-in result
+      // (lib/buildGate1ArchivedResult.ts) is built instead.
+      //
+      // DO-NOT-TOUCH EXCEPTION (2026-08-20 — Claude Code's full-system audit
+      // flagged this exact evaluate-checklist/compare-to-threshold shape as
+      // duplicated in three places; see lib/evaluateGate1.ts's own doc
+      // comment). The evaluate+compare logic below moved into that shared
+      // helper — same evaluateChecklist call, same
+      // computeChecklistPercentageScore call, same threshold comparison,
+      // byte-for-byte, just no longer copy-pasted. Nothing about WHEN or
+      // WHETHER the expensive scoreCandidate()/generateFingerprint() pair
+      // runs changed — still exactly the same condition, still exactly the
+      // same fallback build call for the gate1Only stand-in.
+      const gate1 = await evaluateGate1({ checklist, resumeText: resume.text, scoreThreshold });
+      const checklistEvaluation = gate1.checklistEvaluation;
+
+      let gate1Only = false;
+      let result: CandidateResult;
+      let fingerprint = null;
+
+      if (gate1.gate1Only) {
+        gate1Only = true;
+        result = await buildGate1ArchivedResult({
+          fileName: resume.fileName,
+          resumeText: resume.text,
+          checklistScore: gate1.checklistScore!,
+          checklistEvaluation: checklistEvaluation!,
+        });
+      } else {
+        // DO-NOT-TOUCH EXCEPTION (flagged, 2026-07-20 perf pass — see
+        // decisions-log.md): fingerprinting (fraud/duplicate detection) only
+        // needs the raw resume text, not the score, so it never actually had
+        // to wait for scoring to finish — it was just written sequentially
+        // before. Running both Claude calls concurrently cuts the wait to
+        // roughly whichever one is slower instead of the sum of both, with no
+        // change to what either call does or what the response contains. A
+        // fingerprint failure resolves to `null` (not a rejection) so it can
+        // never fail the scoring half of this Promise.all — saveScreening
+        // treats an explicit `null` as "don't retry, just skip
+        // duplicate/history matching for this save," same as its
+        // pre-existing best-effort behavior. Gate-1 failures skip this pair
+        // entirely (2026-08-19, Phase 2.6) — least likely group to be a
+        // sophisticated fraud attempt, not worth the token spend; they still
+        // get the free resume_content_hash dedup check unconditionally
+        // inside saveScreening() below, independent of this AI call.
+        const [scoreResult, fp] = await Promise.all([
+          scoreCandidate(
+            jobDescription,
+            resume.fileName,
+            resume.text,
+            calibrationExamples,
+            roleContext,
+            linkedInContext,
+            linkedInModeOverride
+          ),
+          generateFingerprint(resume.text).catch((err) => {
+            console.error("Fingerprint generation failed (scoring unaffected):", err);
+            return null;
+          }),
+        ]);
+        result = scoreResult;
+        fingerprint = fp;
+      }
       results.push(result);
 
       // Persist every screened candidate, regardless of score (Teti's
@@ -319,6 +360,9 @@ export async function POST(request: NextRequest) {
           // DO-NOT-TOUCH EXCEPTION (2026-08-17 — see the comment on the
           // Promise.all above where checklistEvaluation is computed).
           checklistEvaluation,
+          // DO-NOT-TOUCH EXCEPTION (2026-08-19, Phase 2.6 — see the gate
+          // branch above where this is set).
+          gate1Only,
         });
         result.id = id;
 
@@ -336,17 +380,25 @@ export async function POST(request: NextRequest) {
         // end-to-end: a missing VOYAGE_API_KEY, a Voyage API failure, or the
         // embedding migration not being run yet all degrade to "this
         // candidate isn't searchable yet," never to a failed/lost screening.
-        try {
-          const embeddingText = buildCandidateEmbeddingText({
-            summary: result.summary,
-            strengths: result.strengths,
-            concerns: result.concerns,
-            careerTrajectory: result.careerTrajectory,
-          });
-          const embedding = await generateEmbedding(embeddingText, "document");
-          if (embedding) await setScreeningEmbedding(id, embedding);
-        } catch (err) {
-          console.error("Embedding generation/save failed (screening unaffected):", err);
+        // Skipped entirely for gate-1-only candidates (2026-08-19, Phase
+        // 2.6) — summary/strengths/concerns/careerTrajectory are all empty
+        // for these (scoreCandidate() never ran), so buildCandidateEmbeddingText
+        // would have nothing meaningful to embed; generating one anyway would
+        // burn a real API call to produce a near-empty vector that pollutes
+        // talent search rather than helping it.
+        if (!gate1Only) {
+          try {
+            const embeddingText = buildCandidateEmbeddingText({
+              summary: result.summary,
+              strengths: result.strengths,
+              concerns: result.concerns,
+              careerTrajectory: result.careerTrajectory,
+            });
+            const embedding = await generateEmbedding(embeddingText, "document");
+            if (embedding) await setScreeningEmbedding(id, embedding);
+          } catch (err) {
+            console.error("Embedding generation/save failed (screening unaffected):", err);
+          }
         }
       } catch (err) {
         console.error("Failed to persist screening result:", err);

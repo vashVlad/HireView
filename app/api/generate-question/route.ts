@@ -1,50 +1,17 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getAnthropicClient, CLAUDE_MODEL } from "@/lib/anthropic";
-import { extractResumeText } from "@/lib/parseResume";
-import { getScreeningResume } from "@/lib/screenings";
+// Dead code, confirmed 2026-08-19 (Cowork architecture pass) — zero callers
+// anywhere in app/, components/, or lib/ (full-repo grep for "generate-question"
+// matches nothing but this file). Not a leftover UI feature like compare-resumes
+// was — this looks like a screening-question generator that was built but never
+// wired to a button/UI trigger. Stubbed rather than physically deleted: this
+// sandbox's rm is blocked by the same permission quirk documented elsewhere in
+// open-questions.md (2026-07-29, "delete attempt blocked by the auto-mode
+// permission classifier"). Safe to `rm -rf app/api/generate-question/` entirely
+// from a real machine — nothing calls this path.
+import { NextResponse } from "next/server";
 
-export const maxDuration = 30;
-
-export async function POST(request: NextRequest) {
-  const { screeningId, experience } = await request.json();
-
-  if (!screeningId || !experience) {
-    return NextResponse.json(
-      { error: "screeningId and experience are required" },
-      { status: 400 }
-    );
-  }
-
-  const resumeData = await getScreeningResume(screeningId);
-  if (!resumeData) {
-    return NextResponse.json({ error: "Resume not found" }, { status: 404 });
-  }
-
-  const resumeText = await extractResumeText(resumeData.fileName, resumeData.data);
-
-  const message = await getAnthropicClient().messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 200,
-    messages: [
-      {
-        role: "user",
-        content: `You are helping a recruiter prepare for a quick candidate screen. Generate ONE conversational question to verify this candidate's experience with: "${experience}".
-
-Rules:
-- Not technical — this is a soft check, not an interview
-- Should prompt the candidate to describe what they actually did, not prove knowledge
-- Conversational tone, like something you'd ask on a 15-minute call
-- Reference a specific detail from their resume about this experience so it feels personal, not generic
-- One sentence. No preamble.
-
-RESUME:
-${resumeText}`,
-      },
-    ],
-  });
-
-  const text = message.content.find((b) => b.type === "text");
-  return NextResponse.json({
-    question: text?.type === "text" ? text.text.trim() : "",
-  });
+export async function POST() {
+  return NextResponse.json(
+    { error: "This endpoint is unused and has been disabled." },
+    { status: 410 }
+  );
 }

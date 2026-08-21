@@ -374,7 +374,19 @@ export function StatusStageControl({
         <>
           <span className="h-3.5 w-px shrink-0 bg-current opacity-25" />
           <Link
-            href={`/candidates/${transferredToScreeningId}`}
+            // returnTo, 2026-08-11 (Vlad's ask — this is one of the actual
+            // "transfer button" cases he meant) — without it, this
+            // candidate page's Back button falls back to the DESTINATION
+            // project (where the transfer landed), not wherever this status
+            // pill is actually being viewed from. Same fix as the two
+            // "Also screened in" links (app/projects/[id]/page.tsx,
+            // ResultCard.tsx) — read at render time so it's correct
+            // regardless of which page/tab renders this control.
+            href={`/candidates/${transferredToScreeningId}${
+              typeof window !== "undefined"
+                ? `?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+                : ""
+            }`}
             onClick={(e) => e.stopPropagation()}
             title={`View the result card in "${transferredToProjectName ?? "that project"}"`}
             className="max-w-20 truncate py-1 pl-1.5 pr-1 text-[10px] underline decoration-dotted underline-offset-2 opacity-80 hover:opacity-100"

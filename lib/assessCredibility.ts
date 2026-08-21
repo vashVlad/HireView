@@ -188,6 +188,25 @@ const TRAJECTORY_ENTRY_ITEM_SCHEMA = {
     },
     startDate: { type: "string", description: "YYYY-MM if the document gives a month, YYYY if only a year is shown. Never invent a month the document doesn't state." },
     endDate: { type: "string", description: "YYYY-MM or YYYY matching startDate's precision, or the literal string 'present' for a current role." },
+    // Phase 2.6 Tier 4 (2026-08-20) — MUST stay word-for-word in sync with
+    // the identical stepDirection/stepReasoning field pair in
+    // lib/scoreCandidate.ts's SCORE_TOOL (do-not-touch — see that file's own
+    // comment for why this can't be a shared import instead). Needed here
+    // because TrajectoryGraph.tsx's cross-reference line is only meaningful
+    // as "a full second trajectory on the same axis" (2026-08-19 design) if
+    // the cross-reference document's own extraction produces the same
+    // stepDirection judgment the resume side gets — without this, the two
+    // lines couldn't be plotted on the same Y-axis at all.
+    stepDirection: {
+      type: "string",
+      enum: ["up", "down", "lateral", "first"],
+      description:
+        "Career-trajectory direction of THIS role relative to the PREVIOUS entry in this array (one entry back = the role immediately before this one chronologically) — judged from title, scope, and responsibilities together, not a title-keyword match. 'up' = a real step up (promotion, more scope/seniority, a materially better company/role). 'down' = a real step down (demotion, narrower scope, a materially lesser role) — do not use for a lateral move at similar level even if the company changed. 'lateral' = same level, similar scope, a sideways move. 'first' = this is the earliest role in the array — there is nothing before it to compare against, always use 'first' for that one entry, never guess a direction for it.",
+    },
+    stepReasoning: {
+      type: "string",
+      description: "One short sentence (max 20 words) explaining the stepDirection call — the specific title/scope/responsibility signal that drove it. Omit or leave empty for stepDirection: 'first'.",
+    },
   },
   required: ["company", "title", "employmentType", "startDate", "endDate"],
 };
