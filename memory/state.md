@@ -1,6 +1,6 @@
 # Cirot — Current State
 
-*Last updated: 2026-07-01 (seeded from Cirot-Dev-Log.docx, Architecture-Redesign doc, and git log — update this in place as state changes, don't just append)*
+*Last updated: 2026-08-24 (seeded from Cirot-Dev-Log.docx, Architecture-Redesign doc, and git log — update this in place as state changes, don't just append)*
 
 ## Status: live, in active use at Brillio
 
@@ -659,3 +659,19 @@ Claude Code's full-system audit (`memory/claude-code-handoff-2026-08-20-full-sys
 **Verified:** `npx tsc --noEmit -p .` clean (incl. `--noUnusedLocals --noUnusedParameters`). All 11 `test_*.mjs` files pass. Do-not-touch diff: `scoreCandidate.ts`/`screen-resumes/route.ts` carry this round's new flagged exceptions alongside the prior ones; `screenings/save-one/route.ts` carries its own first diff this session (fully flagged).
 
 **Not live-tested, not migrated (no schema changes), left uncommitted**, per standing instruction. Next: a Claude Code handoff for live verification of these four (especially the blacklist pre-score skip flow and the Pipeline tab fix — need real browser confirmation, not just a code read), then the commit/branch/PR that's been pending across the last two verification rounds.
+
+## 2026-08-21 — Live-verified, committed, and merged to `main`; CTO handoff prepared
+
+Claude Code live-verified all four 2026-08-20 audit fixes against the real app/DB, then committed and merged. The merge surfaced real git-history entanglement (`feat/jd-checklist`'s 5 commits turned out to be sequential, not independent — the whole Phase 2.6+ working tree was built cumulatively on top of all five) across two separate stop-and-report rounds; Vlad resolved both ("current files are the source of truth, merge everything present, the rest can be overwritten"). Final merge commit `5d6dc1d` on `main`. Branch kept on origin, not deleted.
+
+Test data (dev-only screenings/projects/fingerprints/etc. from the verification rounds) was cleared afterward. A clean staged copy of the repo (`Cirot-for-CTO-handoff-2026-08-21/`, real `.env`/`.git`/`node_modules`/test files stripped, `.env.example` kept) was prepared in the `Architecture Agents` workspace folder for Vlad to zip and send to the CTO team for ADAM-infrastructure integration — `docs/Cirot-Technical-Stack-Handoff.md` (pre-existing) refreshed with current page/route/migration counts plus a short addendum on the Gate 1 architecture change.
+
+## 2026-08-24 — Target-company splitting fixed + new pre-score "target company gate" toggle
+
+Full detail in `decisions-log.md`'s 2026-08-24 entry and `session-log.md`'s matching entry — short pointer here per convention.
+
+- **Target-company input** (Filters tab) now splits a pasted/typed group like "Google OpenAI Cognizant" into separate entries. Initially comma-or-whitespace (Vlad's first choice); refined same day into an AI-assisted split (`lib/splitCompanyNames.ts`) after he flagged that plain whitespace splitting can't tell "Goldman Sachs" (one company) from "Google OpenAI" (two) — now comma/single-word input stays free and instant, only genuinely ambiguous multi-word-no-comma input triggers a tiny Claude call to find the real boundaries.
+- **New per-project toggle, "Require a match before scoring"** (Filters tab, inside the existing Score boost companies card) — when on, `app/api/screen-resumes/route.ts` archives a resume immediately, before Gate 1 or scoring, if it matches none of the project's target companies. New DO-NOT-TOUCH EXCEPTION in that route; new `lib/buildTargetCompanyGateArchivedResult.ts`/`lib/isTargetCompanyGateResult.ts` (mirror the Gate 1 pair); `saveScreening()` gained a `targetCompanyGateFailed` param.
+- **New migration, NOT YET RUN:** `supabase-migration-target-company-gate.sql` (`require_target_company_match` column on `projects`, default false — toggle silently does nothing until this runs).
+- **Verified:** `tsc` clean, all 11 tests pass, do-not-touch diff clean except the new flagged exception in `screen-resumes/route.ts`.
+- **Not live-tested, not migrated, left uncommitted**, per standing instruction. Needs from Vlad: run the migration, then live-test (toggle on, resume with no target-company match, confirm immediate archive + new message + Gate 1/scoring skipped).

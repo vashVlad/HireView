@@ -6,11 +6,12 @@ import { scoreCandidate } from "@/lib/scoreCandidate";
 import { generateFingerprint } from "@/lib/generateFingerprint";
 import { saveScreening, setScreeningEmbedding } from "@/lib/screenings";
 import { generateEmbedding, buildCandidateEmbeddingText } from "@/lib/embeddings";
-import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
+import { combineTargetCompanies, computeTargetCompanyBoost } from "@/lib/targetCompanyBoost";
 import { evaluateGate1 } from "@/lib/evaluateGate1";
 import { buildGate1ArchivedResult } from "@/lib/buildGate1ArchivedResult";
+import { buildTargetCompanyGateArchivedResult } from "@/lib/buildTargetCompanyGateArchivedResult";
 import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
-import { getProject, getProjectChecklist } from "@/lib/projects";
+import { getProject, getProjectChecklist, getProjectTargetCompanyGate } from "@/lib/projects";
 import { canAccessProject, getAuthUser, userIdFilter } from "@/lib/auth";
 import type { CandidateResult, ScreenResumesError } from "@/lib/types";
 
@@ -174,6 +175,13 @@ export async function POST(request: NextRequest) {
   // degrades to "no checklist configured," it must never block scoring
   // itself, unlike the Filters-tab's own read/write of this same data.
   let checklist: Awaited<ReturnType<typeof getProjectChecklist>> = null;
+  // DO-NOT-TOUCH EXCEPTION (2026-08-24, Vlad's explicit ask — target-company
+  // pre-score gate, see decisions-log.md): read via getProjectTargetCompanyGate(),
+  // same isolated/deferred-column pattern as getProjectChecklist() just below
+  // (NOT part of the `project` object's shared select — a not-yet-run
+  // migration must never break this route). Fails closed to `false` (gate
+  // off) on any error, including the column not existing yet.
+  let requireTargetCompanyMatch = false;
   if (projectId) {
     const project = await getProject(projectId).catch(() => null);
     linkedInContext = project?.jdAnalysis?.linkedInContext ?? undefined;
@@ -181,6 +189,7 @@ export async function POST(request: NextRequest) {
     teamId = project?.teamId ?? null;
     targetCompanies = combineTargetCompanies(project?.jdAnalysis?.wide?.targetCompanies, project?.jdAnalysis?.narrow?.targetCompanies);
     checklist = await getProjectChecklist(projectId).catch(() => null);
+    requireTargetCompanyMatch = await getProjectTargetCompanyGate(projectId).catch(() => false);
   }
 
   if (files.length === 0) {
@@ -230,6 +239,59 @@ export async function POST(request: NextRequest) {
 
   async function score(resume: (typeof parsed)[number]) {
     try {
+      // DO-NOT-TOUCH EXCEPTION (2026-08-24, Vlad's explicit ask — target-
+      // company pre-score gate, see decisions-log.md's 2026-08-24 entry).
+      // Runs BEFORE Gate 1's checklist evaluation, which is the cheapest-
+      // first ordering: this check is a plain substring match
+      // (computeTargetCompanyBoost, same function the score-boost feature
+      // already uses) with zero AI calls, while Gate 1 below still needs one
+      // real evaluateChecklist() call even to fail. Only takes effect when
+      // the project has both the toggle on AND at least one target company
+      // configured — an empty target-company list has nothing to gate on,
+      // so every resume passes through unfiltered exactly as before. A
+      // matched resume falls through to the unchanged Gate 1 branch below
+      // with no other behavior difference.
+      if (requireTargetCompanyMatch && targetCompanies.length > 0) {
+        const gateBoost = computeTargetCompanyBoost(resume.text, targetCompanies);
+        if (!gateBoost.matched) {
+          const gateResult = await buildTargetCompanyGateArchivedResult({
+            fileName: resume.fileName,
+            resumeText: resume.text,
+          });
+          results.push(gateResult);
+          try {
+            const { id } = await saveScreening({
+              result: gateResult,
+              jobDescription,
+              resumeFile: resume.buffer,
+              resumeMimeType: resume.mimeType,
+              resumeText: resume.text,
+              fingerprint: null,
+              linkedInMode: linkedInModeOverride,
+              agencyName,
+              projectId,
+              userId,
+              scoreThreshold,
+              batchId,
+              actingUserId,
+              teamId,
+              targetCompanies,
+              checklistEvaluation: null,
+              gate1Only: false,
+              targetCompanyGateFailed: true,
+            });
+            gateResult.id = id;
+          } catch (saveErr) {
+            // Matches the identical catch block below (Gate 1 / full-score
+            // path) — log only, same "the screening result already reached
+            // the response, a persistence hiccup shouldn't turn it into a
+            // reported error" reasoning.
+            console.error("Failed to persist screening result:", saveErr);
+          }
+          return;
+        }
+      }
+
       // DO-NOT-TOUCH EXCEPTION (2026-08-19, Phase 2.6 — see decisions-log.md's
       // 2026-08-19 entries and memory/claude-code-handoff-2026-08-19-phase-2.6-
       // architecture.md). Gate 1 architecture: evaluateChecklist() no longer

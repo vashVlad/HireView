@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteProject, getProject, getProjectChecklist, getProjectFitExclusion, updateProject } from "@/lib/projects";
+import { deleteProject, getProject, getProjectChecklist, getProjectFitExclusion, getProjectTargetCompanyGate, updateProject } from "@/lib/projects";
 import { canAccessProject, getAuthUser, isAdmin } from "@/lib/auth";
 
 export async function GET(
@@ -45,7 +45,11 @@ export async function GET(
       console.error("Checklist read failed on project GET (degrading to null, rest of the page is unaffected):", err);
       return null;
     });
-    return NextResponse.json({ project: { ...project, excludeFromFitSuggestions, checklist } });
+    // Target-company gate, 2026-08-24 — same isolated-read-merged-on pattern
+    // as excludeFromFitSuggestions/checklist above, same fail-closed
+    // (defaults to false) contract as getProjectFitExclusion.
+    const requireTargetCompanyMatch = await getProjectTargetCompanyGate(numId);
+    return NextResponse.json({ project: { ...project, excludeFromFitSuggestions, checklist, requireTargetCompanyMatch } });
   } catch (err) {
     console.error("Project GET error:", err);
     return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });
@@ -89,6 +93,7 @@ export async function PATCH(
       ...(body?.scoreThreshold !== undefined && { scoreThreshold: Number(body.scoreThreshold) }),
       ...(body?.teamId !== undefined && { teamId: body.teamId === null ? null : Number(body.teamId) }),
       ...(body?.excludeFromFitSuggestions !== undefined && { excludeFromFitSuggestions: Boolean(body.excludeFromFitSuggestions) }),
+      ...(body?.requireTargetCompanyMatch !== undefined && { requireTargetCompanyMatch: Boolean(body.requireTargetCompanyMatch) }),
     });
     return NextResponse.json({ ok: true });
   } catch (err) {

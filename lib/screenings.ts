@@ -18,7 +18,7 @@ import { getProject } from "./projects";
 import { getPrimaryTeamId } from "./teams";
 import { getAuthUser } from "./auth";
 import { getRecruiterEmailMap } from "./recruiters";
-import { computeTargetCompanyBoost } from "./targetCompanyBoost";
+import { computeTargetCompanyBoost, NO_TARGET_COMPANY_MATCH_REASON } from "./targetCompanyBoost";
 import { computeChecklistPercentageScore } from "./evaluateChecklist";
 import { detectLinkedIn } from "./assessCredibility";
 import type {
@@ -900,8 +900,20 @@ export async function saveScreening(params: {
    * touching result.score at all.
    */
   gate1Only?: boolean;
+  /**
+   * Target-company pre-score gate, 2026-08-24 (Vlad's ask). True when this
+   * candidate's resume matched none of the project's configured target
+   * companies while Project.requireTargetCompanyMatch is on — `result` here
+   * is a lib/buildTargetCompanyGateArchivedResult.ts stand-in, checklist
+   * Gate 1 and scoreCandidate()/generateFingerprint() never ran. Forces
+   * initialStatus to "archived" with archiveReason
+   * NO_TARGET_COMPANY_MATCH_REASON below, regardless of scoreThreshold —
+   * this candidate was filtered for a specific, recruiter-visible reason,
+   * not a generic below-threshold auto-archive.
+   */
+  targetCompanyGateFailed?: boolean;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies, checklistEvaluation, gate1Only } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies, checklistEvaluation, gate1Only, targetCompanyGateFailed } = params;
   const supabase = getSupabaseClient();
 
   // Real bug found 2026-07-20 (Vlad: "FunnelView didn't save the recruiter
@@ -1050,9 +1062,20 @@ export async function saveScreening(params: {
   // pipeline. Vlad's ask, 2026-07-15 (AskUserQuestion: "Save directly as
   // Archived"). Only applies when a threshold was actually passed in —
   // callers with no project context keep the old unconditional behavior.
-  const initialStatus: CandidateStatus =
-    scoreThreshold !== undefined && result.score < scoreThreshold ? "archived" : "new_applicant";
-  const initialArchiveReason = initialStatus === "archived" ? DEFAULT_AUTO_ARCHIVE_REASON : null;
+  // Target-company pre-score gate, 2026-08-24 (Vlad's ask) — always archived
+  // with its own distinct reason, independent of scoreThreshold. This
+  // candidate was filtered for a specific reason (no target-company match),
+  // not a generic below-threshold auto-archive, so it must never fall
+  // through to DEFAULT_AUTO_ARCHIVE_REASON below even on a project with an
+  // unusually low/zero threshold. See lib/isTargetCompanyGateResult.ts,
+  // which relies on archiveReason being exactly this string to infer gate
+  // status on reload.
+  const initialStatus: CandidateStatus = targetCompanyGateFailed
+    ? "archived"
+    : scoreThreshold !== undefined && result.score < scoreThreshold ? "archived" : "new_applicant";
+  const initialArchiveReason = targetCompanyGateFailed
+    ? NO_TARGET_COMPANY_MATCH_REASON
+    : initialStatus === "archived" ? DEFAULT_AUTO_ARCHIVE_REASON : null;
 
   // 2026-07-30 hardening: scoreCandidate.ts's tool schema (do-not-touch)
   // declares strengths/concerns as string[], but a live Claude response can

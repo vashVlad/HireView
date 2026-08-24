@@ -437,6 +437,22 @@ export interface CandidateResult {
    * normal (or no checklist configured at all — Gate 1 never applied).
    */
   gate1Only?: boolean;
+  /**
+   * Target-company pre-score gate, 2026-08-24 (see Project.
+   * requireTargetCompanyMatch). True when this candidate never reached
+   * checklist Gate 1 or scoreCandidate() at all — the project's target-
+   * company gate is on and this resume matched none of the configured
+   * "Score boost companies," so score/summary/strengths/concerns/
+   * checklistEvaluation/careerTrajectory/trajectoryEntries are all empty
+   * placeholders (lib/buildTargetCompanyGateArchivedResult.ts), same "stand-
+   * in result" shape as gate1Only above. Same in-memory-only caveat as
+   * gate1Only (see lib/isGate1OnlyResult.ts's own comment) — NOT written to
+   * the database directly; a reload infers it via
+   * lib/isTargetCompanyGateResult.ts instead, off the (persisted)
+   * archiveReason. Undefined/false = this gate is off, or the resume
+   * matched, or no target companies are configured for this project.
+   */
+  targetCompanyGateFailed?: boolean;
   recommendation: Recommendation;
   status?: CandidateStatus;
   credibility?: CredibilityAssessment;
@@ -1033,6 +1049,23 @@ export interface Project {
    * configured for this project yet.
    */
   checklist?: ProjectChecklist | null;
+  /**
+   * Target-company pre-score gate, 2026-08-24 (Vlad's ask): "make companies
+   * look up first before moving farther into screening... when the
+   * candidate doesn't have a company that is listed in the score boost
+   * companies list in their resume, then it gets filtered out." When true,
+   * app/api/screen-resumes/route.ts checks computeTargetCompanyBoost()
+   * (lib/targetCompanyBoost.ts) against this project's "Score boost
+   * companies" BEFORE the checklist Gate 1 evaluation or scoreCandidate()/
+   * generateFingerprint() run — a resume matching none of them is archived
+   * immediately (lib/buildTargetCompanyGateArchivedResult.ts) instead of
+   * proceeding further. Default false (opt-in) — same deferred-column
+   * pattern as excludeFromFitSuggestions above, requires
+   * supabase-migration-target-company-gate.sql. Only populated when
+   * explicitly fetched via getProjectTargetCompanyGate()/
+   * getTargetCompanyGateMap() (lib/projects.ts).
+   */
+  requireTargetCompanyMatch?: boolean;
   createdAt: string;
   updatedAt: string;
 }

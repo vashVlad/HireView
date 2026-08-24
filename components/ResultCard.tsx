@@ -17,6 +17,7 @@ import SourceIcon from "./SourceIcon";
 import { getSourceType } from "@/lib/sourceType";
 import { isGate1OnlyResult } from "@/lib/isGate1OnlyResult";
 import { Gate1ChecklistBreakdown } from "./Gate1ChecklistBreakdown";
+import { isTargetCompanyGateResult } from "@/lib/isTargetCompanyGateResult";
 import type { JDAnalysis } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
 
@@ -795,6 +796,16 @@ export function ResultCard({
             that file's doc comment for the full story. */}
         {isGate1OnlyResult(result) && result.checklistEvaluation && (
           <Gate1ChecklistBreakdown checklistEvaluation={result.checklistEvaluation} />
+        )}
+        {/* Target-company pre-score gate, 2026-08-24 — same "this IS the
+            only real content that exists" reasoning as the Gate 1 block
+            above (no AI summary/strengths/concerns/trajectory ever ran for
+            this candidate), just a plain message instead of a checklist
+            breakdown since there's no per-item data to show. */}
+        {isTargetCompanyGateResult(result) && (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700/50 dark:bg-rose-500/10 dark:text-rose-300">
+            Filtered out — resume didn't mention any of this project's target companies. Scoring was skipped.
+          </div>
         )}
         {canCheck && (
           <CrossReferenceChecker
