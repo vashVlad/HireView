@@ -15,6 +15,7 @@ import { RejectionCard } from "@/components/RejectionCard";
 import { ResultCard, type FitSuggestion, type AlreadyInProject } from "@/components/ResultCard";
 import { Gate1ChecklistBreakdown } from "@/components/Gate1ChecklistBreakdown";
 import { isGate1OnlyResult } from "@/lib/isGate1OnlyResult";
+import { isTargetCompanyGateResult } from "@/lib/isTargetCompanyGateResult";
 import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
 import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
@@ -101,7 +102,7 @@ function formatStatusDate(iso: string) {
 
 // ── Filters tab ────────────────────────────────────────────────────────────
 
-function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, checklist, onChecklistUpdated }: {
+function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, checklist, onChecklistUpdated, requireTargetCompanyMatch, onRequireTargetCompanyMatchSaved }: {
   analysis: JDAnalysis;
   projectId: number;
   jobDescription: string;
@@ -109,6 +110,13 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
   /** null = checked, no checklist configured yet. undefined = not fetched (shouldn't happen once the parent's GET response includes it, kept for defensiveness). */
   checklist?: ProjectChecklist | null;
   onChecklistUpdated: (checklist: ProjectChecklist) => void;
+  /**
+   * Target-company pre-score gate, 2026-08-24 (Vlad's ask) — see
+   * Project.requireTargetCompanyMatch (lib/types.ts). Defaults to false
+   * when not yet fetched, same as every other deferred-column toggle.
+   */
+  requireTargetCompanyMatch?: boolean;
+  onRequireTargetCompanyMatchSaved: (requireTargetCompanyMatch: boolean) => void;
 }) {
   const [open, setOpen] = useState(true);
   const [mode, setMode] = useState<SearchMode>("narrow");
@@ -126,6 +134,30 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
   const [savingCompanies, setSavingCompanies] = useState(false);
   const [companiesError, setCompaniesError] = useState<string | null>(null);
   const boostCompanies = combineTargetCompanies(analysis.wide.targetCompanies, analysis.narrow.targetCompanies);
+
+  // Target-company pre-score gate, 2026-08-24 (Vlad's ask) — see
+  // Project.requireTargetCompanyMatch (lib/types.ts). Same local-state-
+  // mirrors-prop-then-PATCHes pattern as SettingsTab's excludeFromFit
+  // toggle.
+  const [requireMatch, setRequireMatch] = useState(requireTargetCompanyMatch ?? false);
+  const [savingRequireMatch, setSavingRequireMatch] = useState(false);
+
+  async function saveRequireMatch(next: boolean) {
+    setRequireMatch(next);
+    setSavingRequireMatch(true);
+    try {
+      await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requireTargetCompanyMatch: next }),
+      });
+      onRequireTargetCompanyMatchSaved(next);
+    } catch {
+      setRequireMatch(!next); // revert on failure — no dedicated error UI for this toggle, same as excludeFromFit
+    } finally {
+      setSavingRequireMatch(false);
+    }
+  }
 
   async function saveBoostCompanies(newList: string[]) {
     setSavingCompanies(true);
@@ -174,15 +206,48 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
     }
   }
 
-  function handleAddCompany() {
-    const trimmed = companyInput.trim();
-    if (!trimmed) return;
-    if (boostCompanies.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
-      setCompanyInput("");
-      return;
+  // Split-on-add, 2026-08-24 (Vlad's ask, refined same day: "I still want it
+  // to recognize whether the system is splitting the name of the same
+  // company or not"). A plain whitespace split couldn't tell "Google OpenAI
+  // Cognizant" (3 companies) apart from "Goldman Sachs" (1 company) — that
+  // needs real-world company-name knowledge, not just punctuation. Delegated
+  // to lib/splitCompanyNames.ts (via /api/target-companies/split): comma/
+  // newline-separated and single-word input still resolve instantly with no
+  // AI call; only a genuinely ambiguous multi-word, no-comma input calls
+  // Claude to find the real boundaries, falling back to the old per-word
+  // split if that call fails for any reason.
+  const [splittingCompany, setSplittingCompany] = useState(false);
+  async function handleAddCompany() {
+    const raw = companyInput.trim();
+    if (!raw) return;
+
+    setSplittingCompany(true);
+    let parts: string[];
+    try {
+      const res = await fetch("/api/target-companies/split", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: raw }),
+      });
+      const data = await res.json().catch(() => null);
+      parts = Array.isArray(data?.companies) && data.companies.length > 0
+        ? data.companies
+        : raw.split(/[,\n]+|\s+/).map((p: string) => p.trim()).filter(Boolean);
+    } catch {
+      parts = raw.split(/[,\n]+|\s+/).map((p) => p.trim()).filter(Boolean);
+    } finally {
+      setSplittingCompany(false);
+    }
+    if (parts.length === 0) return;
+
+    const next = [...boostCompanies];
+    for (const part of parts) {
+      if (next.some((c) => c.toLowerCase() === part.toLowerCase())) continue;
+      next.push(part);
     }
     setCompanyInput("");
-    saveBoostCompanies([...boostCompanies, trimmed]);
+    if (next.length === boostCompanies.length) return; // every part was already present
+    saveBoostCompanies(next);
   }
 
   function handleRemoveCompany(company: string) {
@@ -451,6 +516,28 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
             New candidates whose resume mentions any of these get +5 added to their score. Doesn't affect already-screened candidates.
           </p>
         </div>
+
+        {/* Target-company pre-score gate, 2026-08-24 (Vlad's ask): "make
+            companies look up first before moving farther into screening...
+            when the candidate doesn't have a company that is listed in the
+            score boost companies list in their resume, then it gets filtered
+            out." Off by default — this list starts as a pure score boost;
+            flipping this ALSO makes it a hard requirement. No effect with an
+            empty company list below (nothing to gate on). See
+            app/api/screen-resumes/route.ts's own gate check. */}
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
+          <div>
+            <p className="text-xs font-medium text-zinc-700 dark:text-zinc-200">Require a match before scoring</p>
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              Resumes that don't mention any company above are archived immediately, before scoring.
+            </p>
+          </div>
+          <button type="button" onClick={() => saveRequireMatch(!requireMatch)} disabled={savingRequireMatch}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${requireMatch ? "bg-violet-600" : "bg-zinc-300 dark:bg-zinc-600"}`}>
+            <span className={`inline-block h-3.5 w-3.5 translate-x-0.5 rounded-full bg-white transition-transform ${requireMatch ? "translate-x-4" : ""}`} />
+          </button>
+        </div>
+
         <div className="mt-3 flex flex-wrap gap-1.5">
           {boostCompanies.length === 0 && (
             <span className="text-sm text-zinc-400 dark:text-zinc-500">No companies added yet.</span>
@@ -472,12 +559,12 @@ function FiltersTab({ analysis, projectId, jobDescription, onAnalysisUpdated, ch
             onChange={(e) => setCompanyInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddCompany(); } }}
             placeholder="Add a company…"
-            disabled={savingCompanies}
+            disabled={savingCompanies || splittingCompany}
             className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-800 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
           />
-          <button type="button" onClick={handleAddCompany} disabled={savingCompanies || !companyInput.trim()}
+          <button type="button" onClick={handleAddCompany} disabled={savingCompanies || splittingCompany || !companyInput.trim()}
             className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-            Add
+            {splittingCompany ? "Adding…" : "Add"}
           </button>
         </div>
         {companiesError && <p className="mt-2 text-xs text-rose-500">{companiesError}</p>}
@@ -2723,6 +2810,17 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   <Gate1ChecklistBreakdown checklistEvaluation={s.checklistEvaluation} />
                 )}
 
+                {/* Target-company pre-score gate, 2026-08-24 — same pattern
+                    as ResultCard.tsx's own block, kept in sync here so the
+                    Pipeline tab never shows a blank card for one of these
+                    (the exact bug this file's Gate 1 block above was
+                    originally added to fix, 2026-08-20). */}
+                {isTargetCompanyGateResult(s) && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700/50 dark:bg-rose-500/10 dark:text-rose-300">
+                    Filtered out — resume didn't mention any of this project's target companies. Scoring was skipped.
+                  </div>
+                )}
+
                 {/* ── Career story ──────────────────────────────────────── */}
                 {/* Gated on actual content existing, 2026-08-20 — previously
                     unconditional, so a gate1Only candidate (empty
@@ -4540,6 +4638,8 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             onAnalysisUpdated={(newAnalysis, newJd) => setProject((p) => p ? { ...p, jdAnalysis: newAnalysis, jobDescription: newJd } : p)}
             checklist={project.checklist}
             onChecklistUpdated={(newChecklist) => setProject((p) => p ? { ...p, checklist: newChecklist } : p)}
+            requireTargetCompanyMatch={project.requireTargetCompanyMatch}
+            onRequireTargetCompanyMatchSaved={(requireTargetCompanyMatch) => setProject((p) => p ? { ...p, requireTargetCompanyMatch } : p)}
           />
         )}
         {tab === "filters" && !project.jdAnalysis && (

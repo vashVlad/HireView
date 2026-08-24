@@ -106,6 +106,13 @@ export async function updateProject(
      * the write itself only fails if the column is genuinely missing.
      */
     excludeFromFitSuggestions?: boolean;
+    /**
+     * See Project.requireTargetCompanyMatch (lib/types.ts). Requires
+     * supabase-migration-target-company-gate.sql — NOT YET CONFIRMED RUN as
+     * of this comment. Same conditional-write pattern as
+     * excludeFromFitSuggestions above.
+     */
+    requireTargetCompanyMatch?: boolean;
   }
 ): Promise<void> {
   const supabase = getSupabaseClient();
@@ -117,6 +124,7 @@ export async function updateProject(
   if (fields.scoreThreshold !== undefined) payload.score_threshold = Math.max(0, Math.min(100, fields.scoreThreshold));
   if (fields.teamId !== undefined) payload.team_id = fields.teamId;
   if (fields.excludeFromFitSuggestions !== undefined) payload.exclude_from_fit_suggestions = fields.excludeFromFitSuggestions;
+  if (fields.requireTargetCompanyMatch !== undefined) payload.require_target_company_match = fields.requireTargetCompanyMatch;
   const { error } = await supabase.from("projects").update(payload).eq("id", id);
   if (error) throw error;
 }
@@ -150,6 +158,38 @@ export async function getFitExclusionMap(projectIds: number[]): Promise<Set<numb
 /** Single-id convenience wrapper around getFitExclusionMap, for Settings' own read. */
 export async function getProjectFitExclusion(id: number): Promise<boolean> {
   const set = await getFitExclusionMap([id]);
+  return set.has(id);
+}
+
+/**
+ * Isolated, single-purpose read for Project.requireTargetCompanyMatch —
+ * kept OUT of listProjects()/getProject()'s shared select, same Migration
+ * Sequencing rule and same "fails closed" contract as getFitExclusionMap
+ * above (requires supabase-migration-target-company-gate.sql). A missing
+ * migration can only ever make the target-company gate behave as if it's
+ * off everywhere — it can never break listing/reading projects, and it can
+ * never accidentally start filtering candidates it shouldn't.
+ */
+export async function getTargetCompanyGateMap(projectIds: number[]): Promise<Set<number>> {
+  if (projectIds.length === 0) return new Set();
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from("projects")
+      .select("id, require_target_company_match")
+      .in("id", projectIds)
+      .returns<{ id: number; require_target_company_match: boolean | null }[]>();
+    if (error) throw error;
+    return new Set((data ?? []).filter((r) => r.require_target_company_match).map((r) => r.id));
+  } catch (err) {
+    console.error("getTargetCompanyGateMap failed (non-fatal — treated as gate off):", err);
+    return new Set();
+  }
+}
+
+/** Single-id convenience wrapper around getTargetCompanyGateMap, for the screening route's own read. */
+export async function getProjectTargetCompanyGate(id: number): Promise<boolean> {
+  const set = await getTargetCompanyGateMap([id]);
   return set.has(id);
 }
 

@@ -24,6 +24,18 @@
 
 export const TARGET_COMPANY_BOOST_POINTS = 5;
 
+/**
+ * Target-company pre-score gate, 2026-08-24 (Vlad's ask) — the archiveReason
+ * saved for a candidate whose resume matched none of the project's target
+ * companies while Project.requireTargetCompanyMatch is on. This is the ONLY
+ * durable (persisted, reload-survivable) signal that a candidate was
+ * filtered by this gate specifically, rather than a plain below-threshold
+ * auto-archive — see lib/isTargetCompanyGateResult.ts, which infers gate
+ * status from this exact string on reload the same way isGate1OnlyResult.ts
+ * infers gate1Only from an empty summary + present checklistEvaluation.
+ */
+export const NO_TARGET_COMPANY_MATCH_REASON = "No target company match";
+
 export interface TargetCompanyBoostResult {
   matched: boolean;
   matchedCompanies: string[];
