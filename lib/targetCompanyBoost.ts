@@ -94,6 +94,32 @@ export function computeTargetCompanyBoost(resumeText: string, targetCompanies: s
 }
 
 /**
+ * Trajectory highlighting, 2026-08-25 (Vlad's ask: "show the companies that
+ * were found during the screening... highlight them in the trajectory").
+ * Given one structured trajectory entry's company name (clean, distinct
+ * from raw resume text) and the list of target companies that already
+ * matched this candidate (CandidateResult.targetCompanyMatches — the
+ * OUTPUT of computeTargetCompanyBoost, not the full configured list), says
+ * whether this specific role is one of the matches. Same stripLegalSuffix
+ * normalization as the boost calculation itself, but bidirectional
+ * substring matching (unlike computeTargetCompanyBoost's one-directional
+ * resume-text-includes-target check) — here BOTH sides are already clean,
+ * short company names (a trajectory entry's `company` field, and an
+ * already-confirmed target match), so either one containing the other is a
+ * reasonable, low-risk match (e.g. entry "Google LLC" vs. matched "Google",
+ * or entry "Google" vs. matched "Google LLC").
+ */
+export function companyMatchesAny(company: string, targetCompanies: string[]): boolean {
+  const key = stripLegalSuffix(company);
+  if (!key) return false;
+  return targetCompanies.some((t) => {
+    const tKey = stripLegalSuffix(t);
+    if (!tKey) return false;
+    return key.includes(tKey) || tKey.includes(key);
+  });
+}
+
+/**
  * Union of wide.targetCompanies + narrow.targetCompanies, deduped
  * case-insensitively (first-seen casing wins) — the two lists are kept in
  * sync by the FiltersTab edit UI going forward, but pre-existing projects

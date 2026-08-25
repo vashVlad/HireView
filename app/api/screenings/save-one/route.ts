@@ -130,19 +130,34 @@ export async function POST(request: NextRequest) {
   // of retyping the number here.
   const scoreThreshold = project?.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD;
 
-  const { id } = await saveScreening({
-    result,
-    jobDescription: jobDescriptionField,
-    resumeFile: buffer,
-    resumeMimeType: mimeType,
-    resumeText: extractedResumeText,
-    fingerprint,
-    linkedInMode,
-    agencyName,
-    projectId,
-    userId,
-    scoreThreshold,
-  });
+  // DO-NOT-TOUCH EXCEPTION (2026-08-25 — Vlad's ask: "check the code for
+  // more errors like that," after finding and fixing the same class of bug
+  // in app/api/cross-project-fit/route.ts). saveScreening() throws raw on
+  // its main `screenings` insert failing (lib/screenings.ts) and nothing in
+  // this route caught that — a transient DB hiccup fell through to Next.js's
+  // bodyless default 500 instead of a diagnosable message. Minimal, targeted
+  // wrap of only this one call (not the whole handler) to keep the diff on
+  // this do-not-touch file as small as possible — every other call above
+  // already has its own guard (try/catch or .catch()).
+  let id: number;
+  try {
+    ({ id } = await saveScreening({
+      result,
+      jobDescription: jobDescriptionField,
+      resumeFile: buffer,
+      resumeMimeType: mimeType,
+      resumeText: extractedResumeText,
+      fingerprint,
+      linkedInMode,
+      agencyName,
+      projectId,
+      userId,
+      scoreThreshold,
+    }));
+  } catch (err) {
+    console.error("saveScreening failed in save-one route:", err);
+    return NextResponse.json({ error: "Could not save the screening — see server logs for the real cause" }, { status: 500 });
+  }
 
   return NextResponse.json({ id });
 }

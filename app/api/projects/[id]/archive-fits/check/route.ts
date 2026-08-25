@@ -47,6 +47,14 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Real error handling, 2026-08-25 — the try/catch below already covered
+  // the Claude call, but getProject()/getUserTeamIds()/listProjects() all
+  // ran BEFORE it, unguarded, and all three throw raw on a Supabase error —
+  // a transient DB hiccup here fell through to Next.js's bodyless default
+  // 500 instead of the same clean error response this route already returns
+  // for a classification failure. Extended to cover the whole handler.
+  try {
+
   const project = await getProject(projectId);
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (!project.jobDescription.trim()) {
@@ -73,7 +81,6 @@ export async function POST(
     .map((c, i) => `${i + 1}. ${c.candidateName} — suggested fit(s): ${c.suggestedRoleFits.join(", ")}`)
     .join("\n");
 
-  try {
     const anthropic = getAnthropicClient();
     const response = await anthropic.messages.create({
       model: CLAUDE_MODEL,
