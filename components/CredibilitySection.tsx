@@ -168,6 +168,7 @@ export function CredibilitySection({
   assessment,
   showSummary = true,
   checklistEvaluation,
+  targetCompanyMatches,
 }: {
   assessment: CredibilityAssessment;
   showSummary?: boolean;
@@ -181,6 +182,18 @@ export function CredibilitySection({
    * plain duration-bar rendering, same as always.
    */
   checklistEvaluation?: ChecklistEvaluation;
+  /**
+   * Target-company match highlighting, 2026-08-25 (Vlad's ask: "highlight
+   * them in the trajectory") — same passed-through-from-the-screening-
+   * result pattern as checklistEvaluation above (CandidateResult.
+   * targetCompanyMatches, lib/targetCompanyBoost.ts). Passed straight
+   * through to TrajectoryGraph, which matches each role's company against
+   * this list (lib/targetCompanyBoost.ts's companyMatchesAny) to mark the
+   * dot(s) for a role actually at one of the matched companies. Undefined
+   * or empty = no target companies configured, or none matched — graph
+   * renders with no highlighting, same as always.
+   */
+  targetCompanyMatches?: string[];
 }) {
   const { label, className } = SIGNAL_CONFIG[assessment.overallSignal] ?? SIGNAL_CONFIG.minor_concerns;
   // Open by default once a result exists — Vlad's ask, 2026-07-15: previously
@@ -328,6 +341,7 @@ export function CredibilitySection({
                 checklistByRole={checklistByRole}
                 secondaryEntries={crossRefFullEntries}
                 secondaryDateDiff={crossRefDateDiff}
+                targetCompanyMatches={targetCompanyMatches}
               />
             </div>
           )}

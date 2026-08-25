@@ -8,6 +8,11 @@ import { canAccessScreening, getAuthUser } from "@/lib/auth";
 export const maxDuration = 30;
 
 export async function POST(request: NextRequest) {
+  // Real error handling, 2026-08-25 — this route had zero try/catch: a
+  // malformed request body, a Supabase hiccup, or an Anthropic failure all
+  // fell through to Next.js's bodyless default 500 instead of a
+  // diagnosable message.
+  try {
   const { screeningId, concern } = await request.json();
 
   if (!screeningId || !concern) {
@@ -63,4 +68,8 @@ ${resumeText}`,
 
   const text = message.content.find((b) => b.type === "text");
   return NextResponse.json({ detail: text?.type === "text" ? text.text : "" });
+  } catch (err) {
+    console.error("Elaborate-concern failed:", err);
+    return NextResponse.json({ error: "Could not elaborate — see server logs for the real cause" }, { status: 500 });
+  }
 }

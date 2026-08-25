@@ -208,6 +208,8 @@ export function ResultCard({
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [showNameCompare, setShowNameCompare] = useState(false);
   const [nameCompareAssessment, setNameCompareAssessment] = useState<CredibilityAssessment | null>(null);
+  // Target company match list, 2026-08-25 (Vlad's ask) — see the badge's own comment below.
+  const [showTargetCompanies, setShowTargetCompanies] = useState(false);
   const [checkingGate, setCheckingGate] = useState(false);
   const [gateChecked, setGateChecked] = useState(false);
   const [checkingFit, setCheckingFit] = useState(false);
@@ -411,14 +413,24 @@ export function ResultCard({
                 match) or undefined (no target companies configured) both
                 render nothing, matching this row's "only surface a signal,
                 not a reassurance" convention (same as the duplicate/history
-                badges above). */}
+                badges above).
+                Interactive as of 2026-08-25 (Vlad's ask: "show the
+                companies that were found during the screening, not just
+                the chip... make the chip interactive"). The hover title=
+                still works as a quick preview, but the real list now also
+                renders as its own row (below, next to the other badges)
+                once clicked — a hover-only tooltip is easy to miss and
+                doesn't work at all on touch devices, same reasoning as
+                TrajectoryGraph's click-to-expand detail panel. */}
             {result.targetCompanyMatches && result.targetCompanyMatches.length > 0 && (
-              <span
+              <button
+                type="button"
+                onClick={() => setShowTargetCompanies((v) => !v)}
                 title={`Score boosted +5 for matching: ${result.targetCompanyMatches.join(", ")}`}
-                className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+                className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 transition-colors hover:bg-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:hover:bg-emerald-500/25"
               >
-                Target company match
-              </span>
+                Target company match {showTargetCompanies ? "▴" : "▾"}
+              </button>
             )}
             {/* JD checklist net-delta badge REMOVED 2026-08-18 (Vlad, direct
                 card-density feedback: "don't show the checklist at all" —
@@ -441,6 +453,23 @@ export function ResultCard({
               </span>
             )}
           </div>
+          {/* Target company match list, 2026-08-25 — expands under the badge
+              row when "Target company match" is clicked. Each pill names one
+              matched company directly, not just a hover-only tooltip
+              (result.targetCompanyMatches — same data the badge's title=
+              already summarized, now genuinely readable/tappable). */}
+          {showTargetCompanies && result.targetCompanyMatches && result.targetCompanyMatches.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {result.targetCompanyMatches.map((c) => (
+                <span
+                  key={c}
+                  className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-300"
+                >
+                  {c}
+                </span>
+              ))}
+            </div>
+          )}
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
               <StatusStageControl
@@ -813,6 +842,7 @@ export function ResultCard({
             roleContext={roleContext}
             currentAssessment={credibility ?? undefined}
             checklistEvaluation={result.checklistEvaluation}
+            targetCompanyMatches={result.targetCompanyMatches}
             onComplete={async (assessment) => {
               try {
                 const res = await fetch(`/api/history/${savedId}`, {

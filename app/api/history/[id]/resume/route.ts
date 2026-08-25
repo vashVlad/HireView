@@ -19,7 +19,16 @@ export async function GET(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const resume = await getScreeningResume(screeningId);
+  // Real error handling, 2026-08-25 — getScreeningResume() throws raw on a
+  // Supabase error; the sibling resume/preview/route.ts already guards this
+  // identical call with .catch(() => null), this route just hadn't been
+  // brought in line with it yet. A storage hiccup previously fell through
+  // to Next.js's bodyless default 500 instead of a clean 404/diagnosable
+  // message.
+  const resume = await getScreeningResume(screeningId).catch((err) => {
+    console.error("Resume fetch failed:", err);
+    return null;
+  });
   if (!resume) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

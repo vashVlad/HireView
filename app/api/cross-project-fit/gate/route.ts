@@ -52,6 +52,17 @@ export async function POST(request: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Real error handling, 2026-08-25 — this route's own doc comment above
+  // promises "fails closed (promising: false) on any error," but that
+  // wasn't actually true: getUserTeamIds()/listProjects() below throw raw
+  // on a Supabase error, which (with nothing catching it) would have
+  // produced an unhandled 500, not the documented graceful fallback. Now
+  // logged with console.error for diagnosis, but still resolves to the
+  // documented `{ promising: false, alreadyIn: [] }` shape rather than an
+  // error response — this route genuinely should never surface a visible
+  // error to the recruiter, unlike POST /api/cross-project-fit.
+  try {
+
   const formData = await request.formData();
   const resumeFile = formData.get("resumeFile");
   const currentProjectIdField = formData.get("currentProjectId");
@@ -134,5 +145,9 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error("Cross-project gate error:", err);
     return NextResponse.json({ promising: false, alreadyIn });
+  }
+  } catch (err) {
+    console.error("Cross-project gate error (outer):", err);
+    return NextResponse.json({ promising: false, alreadyIn: [] });
   }
 }

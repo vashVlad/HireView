@@ -38,32 +38,44 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
   }
 
-  const matches = await searchCandidatesByText(query, {
-    teamIds: teamIds ?? undefined,
-    projectId,
-    limit: 30,
-  });
-  if (matches.length === 0) {
-    return NextResponse.json({ results: [] });
+  // Real error handling, 2026-08-25 — this route (already flagged in its
+  // own header comment as "not live-tested") had zero try/catch:
+  // searchCandidatesByText() and getScreeningsByIds() both throw raw on a
+  // Supabase/pgvector error, and given the RPC dependency this route's own
+  // comment already calls out as unconfirmed, a failure here is genuinely
+  // likely on first real use — without this, it would have surfaced as
+  // Next.js's bodyless default 500 instead of a diagnosable message.
+  try {
+    const matches = await searchCandidatesByText(query, {
+      teamIds: teamIds ?? undefined,
+      projectId,
+      limit: 30,
+    });
+    if (matches.length === 0) {
+      return NextResponse.json({ results: [] });
+    }
+
+    const similarityById = new Map(matches.map((m) => [m.screeningId, m.similarity]));
+    const records = await getScreeningsByIds(matches.map((m) => m.screeningId));
+
+    // getScreeningsByIds doesn't preserve the RPC's similarity-ranked order
+    // (it's an unordered .in() lookup) — re-sort here so the response order
+    // actually reflects search relevance, not whatever order the DB happened
+    // to return rows in.
+    const results = records
+      .map((record: ScreeningRecord) => ({
+        ...record,
+        similarity: similarityById.get(record.id) ?? 0,
+        matchedTerms: highlightQueryOverlap(
+          query,
+          [record.summary, ...(record.strengths ?? []), ...(record.concerns ?? [])].join(" ")
+        ),
+      }))
+      .sort((a, b) => b.similarity - a.similarity);
+
+    return NextResponse.json({ results });
+  } catch (err) {
+    console.error("Candidate search failed:", err);
+    return NextResponse.json({ error: "Search failed — see server logs for the real cause" }, { status: 500 });
   }
-
-  const similarityById = new Map(matches.map((m) => [m.screeningId, m.similarity]));
-  const records = await getScreeningsByIds(matches.map((m) => m.screeningId));
-
-  // getScreeningsByIds doesn't preserve the RPC's similarity-ranked order
-  // (it's an unordered .in() lookup) — re-sort here so the response order
-  // actually reflects search relevance, not whatever order the DB happened
-  // to return rows in.
-  const results = records
-    .map((record: ScreeningRecord) => ({
-      ...record,
-      similarity: similarityById.get(record.id) ?? 0,
-      matchedTerms: highlightQueryOverlap(
-        query,
-        [record.summary, ...(record.strengths ?? []), ...(record.concerns ?? [])].join(" ")
-      ),
-    }))
-    .sort((a, b) => b.similarity - a.similarity);
-
-  return NextResponse.json({ results });
 }

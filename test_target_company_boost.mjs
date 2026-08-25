@@ -86,5 +86,40 @@ check(
   computeTargetCompanyBoost("Google", []).matched === false
 );
 
+// companyMatchesAny — 2026-08-25, trajectory highlighting (Vlad's ask:
+// "highlight them in the trajectory"). Bidirectional, unlike
+// computeTargetCompanyBoost's resume-text-includes-target check.
+function companyMatchesAny(company, targetCompanies) {
+  const key = stripLegalSuffix(company);
+  if (!key) return false;
+  return targetCompanies.some((t) => {
+    const tKey = stripLegalSuffix(t);
+    if (!tKey) return false;
+    return key.includes(tKey) || tKey.includes(key);
+  });
+}
+
+check(
+  "companyMatchesAny: exact match after suffix stripping",
+  companyMatchesAny("Google LLC", ["Google"]) === true
+);
+check(
+  "companyMatchesAny: reverse direction — entry has suffix, match doesn't",
+  companyMatchesAny("Google", ["Google LLC"]) === true
+);
+check(
+  "companyMatchesAny: entry is a longer form containing the matched name",
+  companyMatchesAny("Alphabet Google Cloud", ["Google"]) === true
+);
+check(
+  "companyMatchesAny: genuinely different companies don't match",
+  companyMatchesAny("Initech", ["Google", "Acme Inc."]) === false
+);
+check(
+  "companyMatchesAny: empty company or empty match list resolves to no match",
+  companyMatchesAny("", ["Google"]) === false &&
+  companyMatchesAny("Google", []) === false
+);
+
 console.log(`\n${pass}/${total} passed`);
 if (pass !== total) process.exit(1);

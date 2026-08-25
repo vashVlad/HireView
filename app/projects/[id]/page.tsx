@@ -2868,6 +2868,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   screeningId={s.id}
                   currentAssessment={credibilityMap[s.id]}
                   checklistEvaluation={s.checklistEvaluation}
+                  targetCompanyMatches={s.targetCompanyMatches}
                   onComplete={async (assessment) => {
                     try {
                       const res = await fetch(`/api/history/${s.id}`, {

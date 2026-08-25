@@ -57,6 +57,12 @@ export async function GET(request: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // Real error handling, 2026-08-25 — same fix as POST below (see its own
+  // comment): getUserTeamIds()/listProjects() throw raw on a Supabase error,
+  // and nothing here caught that, so a transient DB hiccup fell through to
+  // Next.js's bodyless default 500 instead of a diagnosable message.
+  try {
+
   const currentProjectIdParam = request.nextUrl.searchParams.get("currentProjectId");
   const currentProjectId = currentProjectIdParam ? parseInt(currentProjectIdParam, 10) || undefined : undefined;
 
@@ -76,6 +82,10 @@ export async function GET(request: NextRequest) {
   const count = baseCandidates.filter((p) => !excluded.has(p.id)).length;
 
   return NextResponse.json({ count });
+  } catch (err) {
+    console.error("Cross-project fit count failed:", err);
+    return NextResponse.json({ error: "Could not check other roles — see server logs for the real cause" }, { status: 500 });
+  }
 }
 
 /**
@@ -105,6 +115,19 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await getAuthUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Real error handling, 2026-08-25 (Vlad's report: the Screen tab's
+  // auto-fire "better fit" check was surfacing a generic "Could not check
+  // other roles" with no way to tell why). Before this, nothing below caught
+  // exceptions from getUserTeamIds()/listProjects()/findProjectsWithCandidate()
+  // (all three `throw` raw on a Supabase error) — an unhandled exception in
+  // any of them fell all the way through to Next.js's default 500, which has
+  // no JSON body for the client to read a real message from, so it always
+  // rendered as the generic client-side fallback regardless of what actually
+  // failed. Now logged with console.error (visible in Vercel function logs)
+  // so a future failure is diagnosable, and returned as clean JSON so the
+  // client's `body?.error` path actually has something real to show.
+  try {
 
   const formData = await request.formData();
   const resumeFile = formData.get("resumeFile");
@@ -237,12 +260,30 @@ export async function POST(request: NextRequest) {
   // boolean to decide whether to drop a project from consideration, and
   // building the stand-in would cost an unnecessary extra Claude call per
   // filtered project (buildGate1ArchivedResult's candidate-name fallback).
+  // Batched 3 at a time, 2026-08-25 (Vlad's report — the Screen tab's
+  // auto-fire "better fit" check was failing with a generic error). This
+  // loop used to await getProjectChecklist()+evaluateGate1() ONE PROJECT AT
+  // A TIME — each with a checklist configured pays for a real, sequential
+  // evaluateChecklist() Claude call, so a team with several other active
+  // projects could burn many seconds here before the scoring loop below (already
+  // batched 3-at-a-time) even started. Combined, that could realistically
+  // exceed this route's 60s maxDuration — a Vercel timeout returns a
+  // non-JSON response, which is indistinguishable client-side from any other
+  // failure and rendered as the same generic "Could not check other roles."
+  // Same CONCURRENCY=3 cap as the scoring loop below, for the same
+  // rate-limit reason — this loop can issue real Claude calls too.
   const checklistFiltered: typeof toScore = [];
-  for (const project of toScore) {
-    const checklist = await getProjectChecklist(project.id).catch(() => null);
-    const gate1 = await evaluateGate1({ checklist, resumeText, scoreThreshold: project.scoreThreshold });
-    if (gate1.gate1Only) continue;
-    checklistFiltered.push(project);
+  const CHECKLIST_CONCURRENCY = 3;
+  for (let i = 0; i < toScore.length; i += CHECKLIST_CONCURRENCY) {
+    const batch = toScore.slice(i, i + CHECKLIST_CONCURRENCY);
+    const decisions = await Promise.all(
+      batch.map(async (project) => {
+        const checklist = await getProjectChecklist(project.id).catch(() => null);
+        const gate1 = await evaluateGate1({ checklist, resumeText, scoreThreshold: project.scoreThreshold });
+        return { project, gate1Only: gate1.gate1Only };
+      })
+    );
+    for (const d of decisions) if (!d.gate1Only) checklistFiltered.push(d.project);
   }
 
   // Score against each remaining candidate project, 3 at a time — same
@@ -300,4 +341,8 @@ export async function POST(request: NextRequest) {
       : null,
     alreadyIn,
   });
+  } catch (err) {
+    console.error("Cross-project fit check failed:", err);
+    return NextResponse.json({ error: "Could not check other roles — see server logs for the real cause" }, { status: 500 });
+  }
 }

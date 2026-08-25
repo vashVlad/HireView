@@ -675,3 +675,23 @@ Full detail in `decisions-log.md`'s 2026-08-24 entry and `session-log.md`'s matc
 - **New migration, NOT YET RUN:** `supabase-migration-target-company-gate.sql` (`require_target_company_match` column on `projects`, default false — toggle silently does nothing until this runs).
 - **Verified:** `tsc` clean, all 11 tests pass, do-not-touch diff clean except the new flagged exception in `screen-resumes/route.ts`.
 - **Not live-tested, not migrated, left uncommitted**, per standing instruction. Needs from Vlad: run the migration, then live-test (toggle on, resume with no target-company match, confirm immediate archive + new message + Gate 1/scoring skipped).
+
+**Update, 2026-08-25:** committed and merged to `main` via Claude Code (branch `feat/target-company-gate-and-smart-split`, commit `89f3136`, merge commit `5012282`). The migration above is still not confirmed run.
+
+## 2026-08-25 — Cross-project-fit "Could not check other roles" diagnosed and fixed; broader API-route error-handling audit
+
+Full detail in `decisions-log.md`'s two matching 2026-08-25 entries — short pointer here per convention.
+
+- Vlad reported the Screen tab's auto-fire "better fit" check failing with a generic error. Confirmed the feature genuinely does run automatically during initial screening (not broken/disabled) — the message was just masking the real cause. Found and fixed two real gaps in `app/api/cross-project-fit/route.ts`: no top-level try/catch (several calls throw raw on a Supabase error → Next.js's bodyless default 500), and a sequential (non-batched) checklist pre-filter loop that risked exceeding the route's 60s `maxDuration` as the team's active-project count grows. Wrapped in try/catch with logging; batched to `CONCURRENCY = 3`.
+- Followed with a full audit (read-only Explore agent) across all ~55 API routes for the same bug class. Fixed the same "no try/catch around raw-throwing calls" issue in 11 more routes: `cross-project-fit/route.ts`'s GET, `cross-project-fit/gate/route.ts`, `funnelview/route.ts`, `elaborate-concern/route.ts`, `history/[id]/resume/route.ts`, `parse-jd/route.ts`, `candidates/search/route.ts`, `fraud-calibration/route.ts`'s DELETE, `assess-credibility/route.ts` (the AI call itself sat outside the existing try/catch), `projects/[id]/archive-fits/check/route.ts`, `history/[id]/photo/route.ts`'s POST, and `screenings/save-one/route.ts` (DO-NOT-TOUCH — minimal single-call wrap only). No other route had the sequential-loop timeout pattern — that was unique to cross-project-fit.
+- **Verified:** `tsc` clean, all 11 tests pass, `git diff --stat -w` across the whole repo confirms exactly the intended 13 files changed (do-not-touch diff clean except the one flagged minimal exception in `save-one/route.ts`). Note: this sandbox's mounted view of the repo shows nearly every file as "modified" in plain `git status` due to a line-ending artifact of the mount itself — `-w` (ignore-whitespace) diffs are the reliable way to see real changes here.
+- **Not live-tested, left uncommitted**, per standing instruction. The original root cause of the "Could not check other roles" report is still unconfirmed (unhandled exception vs. timeout) — needs a real Vercel log check or a live repro against a team with several active projects.
+
+## 2026-08-25 (later still) — Target-company matches made visible: interactive chip + trajectory highlighting
+
+Full detail in `decisions-log.md`'s matching 2026-08-25 entry — short pointer here per convention.
+
+- `ResultCard.tsx`'s "Target company match" badge is now clickable — reveals the actual matched company names as a pill row, not just a hover tooltip.
+- New `companyMatchesAny()` helper (`lib/targetCompanyBoost.ts`) threaded through `CrossReferenceChecker` -> `CredibilitySection` -> `TrajectoryGraph` (`targetCompanyMatches` prop) — a role at one of the candidate's matched target companies now gets a distinct emerald ring on its trajectory-graph dot (both resume and cross-reference lines), a mention in the hover tooltip and click-to-expand detail panel, and a conditional legend entry.
+- **Verified:** `tsc` clean, all 11 tests pass (new cases for `companyMatchesAny` in `test_target_company_boost.mjs`), do-not-touch diff clean (this round touched no do-not-touch file).
+- **Not live-tested, left uncommitted**, per standing instruction.

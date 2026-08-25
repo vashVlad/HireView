@@ -89,7 +89,17 @@ export async function POST(
   // Store the storage path (not a public URL) — served via GET /api/history/[id]/photo
   const photoUrl = path;
 
-  await updateScreening(numId, { photoUrl });
+  // Real error handling, 2026-08-25 — updateScreening() throws raw on a
+  // Supabase error; unguarded, that meant a DB hiccup here (AFTER the photo
+  // already uploaded successfully above) fell through to a bodyless default
+  // 500 instead of a clear "uploaded but not linked" message worth its own
+  // log line, since the two failure points are otherwise indistinguishable.
+  try {
+    await updateScreening(numId, { photoUrl });
+  } catch (err) {
+    console.error("Photo uploaded but updateScreening failed to link it:", err);
+    return NextResponse.json({ error: "Photo uploaded but could not be saved to the candidate — try again" }, { status: 500 });
+  }
 
   return NextResponse.json({ photoUrl: `/api/history/${numId}/photo` });
 }

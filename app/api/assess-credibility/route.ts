@@ -199,17 +199,29 @@ export async function POST(request: NextRequest) {
     ? await fetchGithubCorroboration(githubUsername).catch(() => null)
     : null;
 
-  const assessment = await assessCredibility({
-    resumeText,
-    crossRefText,
-    roleContext: typeof roleContext === "string" ? roleContext : undefined,
-    isLinkedIn,
-    originalConcerns,
-    // undefined (not null) matches assessCredibility()'s param type — null
-    // here just means "no stored trajectory yet," same "fall back to legacy
-    // flow" outcome as undefined, so the conversion is purely a type nicety.
-    candidateTrajectoryEntries: candidateTrajectoryEntries ?? undefined,
-  });
+  // Real error handling, 2026-08-25 — assessCredibility() makes a raw
+  // Anthropic call with no internal try/catch of its own, and unlike the
+  // earlier Promise.all block above (wrapped via the RouteError pattern),
+  // nothing here caught a failure from it — an API error, rate limit, or
+  // malformed response fell through to Next.js's bodyless default 500
+  // instead of a diagnosable message.
+  let assessment: Awaited<ReturnType<typeof assessCredibility>>;
+  try {
+    assessment = await assessCredibility({
+      resumeText,
+      crossRefText,
+      roleContext: typeof roleContext === "string" ? roleContext : undefined,
+      isLinkedIn,
+      originalConcerns,
+      // undefined (not null) matches assessCredibility()'s param type — null
+      // here just means "no stored trajectory yet," same "fall back to legacy
+      // flow" outcome as undefined, so the conversion is purely a type nicety.
+      candidateTrajectoryEntries: candidateTrajectoryEntries ?? undefined,
+    });
+  } catch (err) {
+    console.error("Credibility assessment failed:", err);
+    return NextResponse.json({ error: "Could not complete the credibility check — see server logs for the real cause" }, { status: 500 });
+  }
   if (githubSignal) {
     assessment.githubSignal = githubSignal;
   }

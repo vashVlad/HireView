@@ -47,6 +47,7 @@
 import { useState } from "react";
 import { toMonthRange } from "@/lib/matchTrajectoryEntries";
 import { detectEmploymentGaps } from "@/lib/detectEmploymentGaps";
+import { companyMatchesAny } from "@/lib/targetCompanyBoost";
 import type { TrajectoryEntry } from "@/lib/types";
 import type { RoleChecklistDetail } from "@/lib/attributeChecklistToRoles";
 
@@ -277,8 +278,9 @@ function buildSegments(clusters: RoleCluster[], globalMin: number, span: number,
   return { segments, polyline };
 }
 
-function buildDetailText(row: RoleValue, label?: string): string {
+function buildDetailText(row: RoleValue, label?: string, targetCompanyMatches?: string[]): string {
   const typeLabel = EMPLOYMENT_TYPE_LABEL[row.entry.employmentType] || "";
+  const isTargetMatch = !!targetCompanyMatches?.length && companyMatchesAny(row.entry.company, targetCompanyMatches);
   const parts = [
     `${label ? `${label}: ` : ""}${row.entry.title} · ${row.entry.company} — ${formatDateLabel(row.entry.startDate)} – ${formatDateLabel(row.entry.endDate)}${typeLabel ? ` · ${typeLabel}` : ""}`,
     row.entry.stepDirection ? `${STEP_LABEL[row.entry.stepDirection]}${row.entry.stepReasoning ? `: ${row.entry.stepReasoning}` : ""}` : undefined,
@@ -286,13 +288,25 @@ function buildDetailText(row: RoleValue, label?: string): string {
     row.checklist && row.checklist.firedItems.length > 0
       ? `Checklist evidence here: ${row.checklist.firedItems.map((i) => i.label).join(", ")}`
       : undefined,
+    // Target-company highlighting, 2026-08-25 (Vlad's ask: "highlight them
+    // in the trajectory") — reuses the exact list already confirmed by
+    // computeTargetCompanyBoost (CandidateResult.targetCompanyMatches), not
+    // the project's full configured target list, so this only ever marks a
+    // role that genuinely contributed to the score boost.
+    isTargetMatch ? "★ Target company match" : undefined,
   ];
   return parts.filter(Boolean).join(" — ");
 }
 
 /** Native <title> hover text for a whole cluster — one line per entry when more than one shares the segment (see clusterRoleValues). */
-function buildClusterDetailText(cluster: RoleCluster, label?: string): string {
-  return cluster.entries.map((row) => buildDetailText(row, label)).join("\n");
+function buildClusterDetailText(cluster: RoleCluster, label?: string, targetCompanyMatches?: string[]): string {
+  return cluster.entries.map((row) => buildDetailText(row, label, targetCompanyMatches)).join("\n");
+}
+
+/** True when any entry in this cluster is at one of the candidate's already-confirmed matched target companies. */
+function clusterHasTargetMatch(cluster: RoleCluster, targetCompanyMatches?: string[]): boolean {
+  if (!targetCompanyMatches?.length) return false;
+  return cluster.entries.some((row) => companyMatchesAny(row.entry.company, targetCompanyMatches));
 }
 
 /**
@@ -321,6 +335,7 @@ export function TrajectoryGraph({
   secondaryDateDiff,
   secondaryLabel = "Cross-reference",
   className,
+  targetCompanyMatches,
 }: {
   entries: TrajectoryEntry[];
   /**
@@ -346,6 +361,19 @@ export function TrajectoryGraph({
   secondaryDateDiff?: boolean[];
   secondaryLabel?: string;
   className?: string;
+  /**
+   * Target-company match highlighting, 2026-08-25 (Vlad's ask: "show the
+   * companies that were found during the screening... also highlight them
+   * in the trajectory"). The candidate's own CandidateResult.
+   * targetCompanyMatches — already-confirmed matches from
+   * computeTargetCompanyBoost, not the project's full configured target
+   * list. Checked against both the primary and secondary lines' entries
+   * (lib/targetCompanyBoost.ts's companyMatchesAny) so a role at one of
+   * these companies gets a distinct emerald ring on its dot, wherever it
+   * appears on either line. Undefined/empty = no highlighting, graph
+   * renders exactly as before this feature.
+   */
+  targetCompanyMatches?: string[];
 }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -401,6 +429,16 @@ export function TrajectoryGraph({
   const selected =
     primary.segments.find((_s, i) => selectedKey === `p-${i}`) ??
     secondary?.segments.find((_s, i) => selectedKey === `s-${i}`);
+
+  // Target-company highlighting, 2026-08-25 — only shown in the legend when
+  // at least one role on either line actually renders the ring, so the
+  // legend never advertises a swatch that isn't in use on this candidate's
+  // graph (e.g. matches exist per the card badge, but none of the matched
+  // companies happen to fall inside THIS credibility check's paired roles).
+  const hasAnyTargetMatch =
+    !!targetCompanyMatches?.length &&
+    (primary.segments.some((s) => clusterHasTargetMatch(s.cluster, targetCompanyMatches)) ||
+      !!secondary?.segments.some((s) => clusterHasTargetMatch(s.cluster, targetCompanyMatches)));
 
   return (
     <div className={`flex flex-col ${className ?? ""}`}>
@@ -461,6 +499,11 @@ export function TrajectoryGraph({
               {secondary.segments.map((s, i) => {
                 const cx = (s.x1 + s.x2) / 2;
                 const dateDiff = s.cluster.entries.some((r) => secondaryDateDiffByEntry.get(r.entry));
+                // Target-company highlighting, 2026-08-25 — a real date
+                // discrepancy is the more urgent signal, so it keeps
+                // priority on the ring color when both happen to apply to
+                // the same cluster (rare, but possible).
+                const isTargetMatch = !dateDiff && clusterHasTargetMatch(s.cluster, targetCompanyMatches);
                 return (
                   <g key={`sec-${i}`}>
                     {s.cluster.hasGapBefore && (
@@ -473,12 +516,12 @@ export function TrajectoryGraph({
                       cy={s.y}
                       r={4}
                       className="fill-red-400 dark:fill-red-500"
-                      stroke={dateDiff ? "#f59e0b" : "none"}
-                      strokeWidth={dateDiff ? 2 : 0}
+                      stroke={dateDiff ? "#f59e0b" : isTargetMatch ? "#10b981" : "none"}
+                      strokeWidth={dateDiff || isTargetMatch ? 2 : 0}
                       style={{ cursor: "pointer" }}
                       onClick={() => setSelectedKey((k) => (k === `s-${i}` ? null : `s-${i}`))}
                     >
-                      <title>{buildClusterDetailText(s.cluster, secondaryLabel) + (dateDiff ? " — date discrepancy vs. resume" : "")}</title>
+                      <title>{buildClusterDetailText(s.cluster, secondaryLabel, targetCompanyMatches) + (dateDiff ? " — date discrepancy vs. resume" : "")}</title>
                     </circle>
                   </g>
                 );
@@ -510,6 +553,11 @@ export function TrajectoryGraph({
             const { primary: labelPrimary, sub: labelSub } = buildClusterLabel(s.cluster);
             const labelAnchor = isLast ? "end" : "middle";
             const labelX = isLast ? Math.min(s.x2, 985) : cx;
+            // Target-company highlighting, 2026-08-25 (Vlad's ask) — a
+            // distinct emerald ring, same color family as the "Target
+            // company match" badge on the card itself, so the two visually
+            // read as the same signal.
+            const isTargetMatch = clusterHasTargetMatch(s.cluster, targetCompanyMatches);
             return (
               <g key={i} className="text-blue-500 dark:text-blue-400">
                 {s.cluster.hasGapBefore && (
@@ -517,8 +565,17 @@ export function TrajectoryGraph({
                     <title>{`${s.cluster.gapMonths}-month gap before this role`}</title>
                   </circle>
                 )}
-                <circle cx={cx} cy={s.y} r={4} fill="currentColor" style={{ cursor: "pointer" }} onClick={() => setSelectedKey((k) => (k === `p-${i}` ? null : `p-${i}`))}>
-                  <title>{buildClusterDetailText(s.cluster)}</title>
+                <circle
+                  cx={cx}
+                  cy={s.y}
+                  r={isTargetMatch ? 5 : 4}
+                  fill="currentColor"
+                  stroke={isTargetMatch ? "#10b981" : "none"}
+                  strokeWidth={isTargetMatch ? 2 : 0}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setSelectedKey((k) => (k === `p-${i}` ? null : `p-${i}`))}
+                >
+                  <title>{buildClusterDetailText(s.cluster, undefined, targetCompanyMatches)}</title>
                 </circle>
                 {/* Twin-dot marker — this segment folds together 2+ roles
                     that genuinely overlapped in time (see clusterRoleValues'
@@ -562,6 +619,12 @@ export function TrajectoryGraph({
           <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500" /> Gap marker</span>
           <span className="text-zinc-300 dark:text-zinc-700">·</span>
           <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full border border-white bg-zinc-400 shadow-[0_0_0_1px] shadow-zinc-400 dark:bg-zinc-500" /> Two roles at once</span>
+          {hasAnyTargetMatch && (
+            <>
+              <span className="text-zinc-300 dark:text-zinc-700">·</span>
+              <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full border-2 border-emerald-500 bg-white dark:bg-zinc-900" /> Target company match</span>
+            </>
+          )}
           <span className="text-zinc-300 dark:text-zinc-700">·</span>
           <span>Click a point for detail</span>
         </div>
@@ -582,10 +645,17 @@ export function TrajectoryGraph({
               </p>
             )}
             <div className="flex flex-col gap-2.5">
-              {selected.cluster.entries.map((row, i) => (
+              {selected.cluster.entries.map((row, i) => {
+                const isTargetMatch = !!targetCompanyMatches?.length && companyMatchesAny(row.entry.company, targetCompanyMatches);
+                return (
                 <div key={i} className={i > 0 ? "border-t border-zinc-200 pt-2 dark:border-zinc-700" : undefined}>
-                  <p className="font-semibold text-zinc-700 dark:text-zinc-200">
+                  <p className="flex items-center gap-1.5 font-semibold text-zinc-700 dark:text-zinc-200">
                     {row.entry.title} · {row.entry.company}
+                    {isTargetMatch && (
+                      <span className="rounded-full bg-emerald-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+                        Target company
+                      </span>
+                    )}
                   </p>
                   <p className="text-zinc-500 dark:text-zinc-400">
                     {formatDateLabel(row.entry.startDate)} – {formatDateLabel(row.entry.endDate)}
@@ -603,7 +673,8 @@ export function TrajectoryGraph({
                     </p>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

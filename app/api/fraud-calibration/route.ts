@@ -113,6 +113,14 @@ export async function DELETE(request: NextRequest) {
   const id = idParam ? parseInt(idParam, 10) : NaN;
   if (isNaN(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
 
-  await deleteFraudCalibrationExample(id);
-  return NextResponse.json({ ok: true });
+  // Real error handling, 2026-08-25 — deleteFraudCalibrationExample() throws
+  // raw on a Supabase error, unlike its siblings in lib/fraudCalibrationExamples.ts
+  // which fail closed internally; nothing here caught that before.
+  try {
+    await deleteFraudCalibrationExample(id);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("Fraud calibration example delete failed:", err);
+    return NextResponse.json({ error: "Could not delete — see server logs for the real cause" }, { status: 500 });
+  }
 }
