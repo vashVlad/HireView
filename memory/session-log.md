@@ -1915,3 +1915,13 @@ Wired through both DO-NOT-TOUCH routes (`screen-resumes/route.ts`, `screenings/s
 Removed the "— adjusts scoring for profile PDFs" / "— label only, scoring unaffected" / "— default, no scoring adjustment" description line under the Screen tab's source picker entirely, per Vlad's ask.
 
 `tsc` clean, all 11 tests pass, do-not-touch diff clean except the two flagged exceptions. Not live-tested, not migrated, left uncommitted, per standing instruction.
+
+## 2026-08-26 (Claude Code) — Full verify/split/live-test/merge pass on the Referred-source + Share-batch handoff
+
+Ran the handoff prompt (`memory/claude-code-handoff-2026-08-26-referred-source-and-share-batch.md`). Found the working tree bundled 5 separate uncommitted rounds, not just the 2 the handoff described — asked Vlad how to sequence them; he chose two stacked PRs. Split rounds 1-3 (LinkedIn link, score-consistency + GitHub-at-screening, consistency audit) into `fix/consistency-audit-and-github-linkedin`, rounds 4-5 (this handoff's actual task) into `feat/referred-source-and-share-batch` stacked on top — required line-level surgery across ~9 shared files; caught and fixed one real mistake mid-split (a GitHub-corroboration DO-NOT-TOUCH exception initially dropped from PR #1). Both branches verified independently (`tsc`, all 11 tests, do-not-touch diffs) before pushing.
+
+Vlad ran both pending migrations. Live-tested Steps 3-5 with a real headless-Chromium pass (installed Playwright + Chromium for this session) against an isolated throwaway recruiter/team/project created via the Supabase service-role key (zero writes to real production data) — full detail and screenshots taken during the run, all core paths PASS: 4-button picker, description text removed, Referred badge on ResultCard/Pipeline/All-Candidates, reload-survival (the actual point of `attachReferrerNames()`), FunnelView's 4th bucket, Share-batch button (no navigation, correct clipboard URL, direct-nav to the durable batch URL all confirmed). Found one real pre-existing bug during regression testing (Pipeline/All-Candidates popover can't switch away from Agency/Referred by direct click once a name is saved — confirmed present on `main` before this session, not a regression) — logged to `decisions-log.md` as a backlog item per Vlad's explicit "log, don't fix" call, not fixed. All throwaway test data (auth user, team, project, screenings) deleted after testing.
+
+Playwright kept as a permanent devDependency per Vlad's ask, for real click-through testing in future sessions instead of "not live-tested, per standing instruction."
+
+Vlad merged PR #1 to `main` himself; asked Claude Code to merge PR #2 on top (no `gh` on PATH, same as every prior round this session — done via direct git merge + push instead).
