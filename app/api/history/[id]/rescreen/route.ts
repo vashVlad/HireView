@@ -8,9 +8,25 @@ import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCor
 import { evaluateChecklist } from "@/lib/evaluateChecklist";
 import { computeTargetCompanyBoost, combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
-import type { ChecklistEvaluation } from "@/lib/types";
 
-export const maxDuration = 60;
+// Raised from 60 to 300, 2026-08-26 (found while investigating a real
+// "rescreen failed" report) — this route runs TWO real, sequential Claude
+// calls when the project has a checklist configured (scoreCandidate(), then
+// evaluateChecklist() below, one after the other), on top of resume
+// extraction and calibration-example loading. 60s was already a tight
+// budget for one scoreCandidate() call alone; two sequential calls can
+// plausibly exceed it, especially for a longer resume or a slow API
+// response — this route was simply never given the same fix
+// screen-resumes/route.ts and screenings/save-one/route.ts got on
+// 2026-07-29 for the exact same root cause (see decisions-log.md). Same
+// Vercel-plan caveat as those two files: this only deploys cleanly on a
+// Pro/Enterprise plan, or Hobby with Fluid Compute enabled (already proven
+// safe on this project's plan, since those two routes deploy fine at 300).
+// Paired with parallelizing evaluateChecklist() into the same Promise.all
+// as scoreCandidate() below — it doesn't depend on the score result, so
+// there's no reason to make it wait — which independently cuts the
+// worst-case duration roughly in half for a checklist-configured project.
+export const maxDuration = 300;
 
 /**
  * Re-runs scoring for an ALREADY-SAVED Pipeline candidate against the
@@ -80,7 +96,14 @@ export async function POST(
     // branch — username extraction is a synchronous regex match, cost-free
     // either way; the network fetch only fires when one was actually found.
     const githubUsername = extractGithubUsername(resumeText);
-    const [result, githubSignal] = await Promise.all([
+    // Checklist fetched here (cheap DB read, not a Claude call) so
+    // evaluateChecklist() below — a real, separate Claude call — can run
+    // IN PARALLEL with scoreCandidate() instead of waiting for it to finish
+    // first. Same maxDuration comment above explains why this mattered:
+    // two sequential Claude calls could plausibly exceed the old 60s ceiling
+    // on their own, even before adding this fix's own extra headroom.
+    const checklist = await getProjectChecklist(project.id).catch(() => null);
+    const [result, githubSignal, checklistEvaluation] = await Promise.all([
       scoreCandidate(
         project.jobDescription,
         resume.fileName,
@@ -93,6 +116,12 @@ export async function POST(
       githubUsername
         ? fetchGithubCorroboration(githubUsername).catch((err) => {
             console.error("GitHub corroboration lookup failed during rescreen (scoring unaffected):", err);
+            return null;
+          })
+        : Promise.resolve(null),
+      checklist
+        ? evaluateChecklist({ resumeText, checklist }).catch((err) => {
+            console.error("Checklist evaluation failed during rescreen (breakdown just won't show; score is unaffected either way):", err);
             return null;
           })
         : Promise.resolve(null),
@@ -124,15 +153,6 @@ export async function POST(
     // returned. Target-company boost below is unaffected — it's a small,
     // additive, code-computed bonus on top of the real score, not a
     // replacement of it, so it still applies here as before.
-    let checklistEvaluation: ChecklistEvaluation | null = null;
-    const checklist = await getProjectChecklist(project.id).catch(() => null);
-    if (checklist) {
-      checklistEvaluation = await evaluateChecklist({ resumeText, checklist }).catch((err) => {
-        console.error("Checklist evaluation failed during rescreen (breakdown just won't show; score is unaffected either way):", err);
-        return null;
-      });
-    }
-
     const targetCompanies = combineTargetCompanies(project.jdAnalysis?.wide?.targetCompanies, project.jdAnalysis?.narrow?.targetCompanies);
     if (targetCompanies.length > 0) {
       const boost = computeTargetCompanyBoost(resumeText, targetCompanies);
