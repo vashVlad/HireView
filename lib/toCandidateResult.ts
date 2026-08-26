@@ -57,5 +57,24 @@ export function toCandidateResult(s: ScreeningRecord): CandidateResult {
     // its own doc comment (lib/types.ts): that field is intentionally
     // ephemeral, screening-time-only, never persisted to ScreeningRecord.
     checklistEvaluation: s.checklistEvaluation,
+    // Same class of gap as checklistEvaluation above, found 2026-08-26:
+    // linkedinUrl is already carried on ScreeningRecord (attachLinkedinUrls,
+    // lib/screenings.ts) but was never mapped through to CandidateResult, so
+    // the LinkedIn link on ResultCard's Cross-Reference Check silently
+    // disappeared the moment a candidate was reopened via /candidates/[id]
+    // or the batches page, even though it showed correctly right after
+    // screening.
+    linkedinUrl: s.linkedinUrl,
+    // Same class of gap as linkedinUrl/checklistEvaluation above, 2026-08-26:
+    // githubSignal is already carried on ScreeningRecord (attachGithubSignals,
+    // lib/screenings.ts) but was never mapped through to CandidateResult.
+    githubSignal: s.githubSignal,
+    // Same class of gap, found by the 2026-08-26 full consistency audit —
+    // targetCompanyMatches had NO read-back path at all until
+    // attachTargetCompanyMatches was added (lib/screenings.ts); even once
+    // added, it still needed this mapping to actually reach ResultCard's
+    // "Target company match" badge and TrajectoryGraph's highlighting on
+    // /candidates/[id] and the batches page.
+    targetCompanyMatches: s.targetCompanyMatches,
   };
 }

@@ -8,6 +8,7 @@ import { BlacklistedPreScoreCard } from "@/components/BlacklistedPreScoreCard";
 import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CalibrationPanel } from "@/components/CalibrationPanel";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
+import { GithubSignalPanel, LinkedInLinkPanel } from "@/components/CredibilitySection";
 import { FraudRiskChecker } from "@/components/FraudRiskChecker";
 import { FilterSetView } from "@/components/FilterSetView";
 import { InsightList } from "@/components/InsightList";
@@ -2818,6 +2819,29 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                 {isTargetCompanyGateResult(s) && (
                   <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-700/50 dark:bg-rose-500/10 dark:text-rose-300">
                     Filtered out — resume didn't mention any of this project's target companies. Scoring was skipped.
+                  </div>
+                )}
+
+                {/* ── Personal details ──────────────────────────────────── */}
+                {/* Added 2026-08-26 (Vlad: "LinkedIn doesn't show up anywhere
+                    on the result card in the pipeline, GitHub only shows
+                    under cross-reference when it was ran") — this tab has its
+                    own hand-rolled card markup, separate from
+                    components/ResultCard.tsx, so ResultCard's new "Personal
+                    details" block (same day, same ask — LinkedIn/GitHub shown
+                    up top before the trajectory) never actually reached this
+                    tab. Same class of drift as the Gate 1 block above.
+                    Reuses the exact same GithubSignalPanel/LinkedInLinkPanel
+                    components ResultCard.tsx uses. */}
+                {(s.linkedinUrl || s.githubSignal) && (
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                      Personal details
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {s.linkedinUrl && <LinkedInLinkPanel url={s.linkedinUrl} />}
+                      {s.githubSignal && <GithubSignalPanel signal={s.githubSignal} />}
+                    </div>
                   </div>
                 )}
 

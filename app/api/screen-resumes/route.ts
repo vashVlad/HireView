@@ -4,6 +4,7 @@ import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
 import { generateFingerprint } from "@/lib/generateFingerprint";
+import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
 import { saveScreening, setScreeningEmbedding } from "@/lib/screenings";
 import { generateEmbedding, buildCandidateEmbeddingText } from "@/lib/embeddings";
 import { combineTargetCompanies, computeTargetCompanyBoost } from "@/lib/targetCompanyBoost";
@@ -350,7 +351,20 @@ export async function POST(request: NextRequest) {
         // sophisticated fraud attempt, not worth the token spend; they still
         // get the free resume_content_hash dedup check unconditionally
         // inside saveScreening() below, independent of this AI call.
-        const [scoreResult, fp] = await Promise.all([
+        // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's ask: "pull [GitHub
+        // links] and show them during the initial screening... up top nicely
+        // before the trajectory"). GitHub extraction/lookup was previously
+        // wired ONLY into the post-hoc cross-reference check
+        // (app/api/assess-credibility/route.ts) — same free, code-side,
+        // no-AI-cost helpers (lib/githubCorroboration.ts) now also run here,
+        // as a third parallel branch alongside scoring/fingerprinting, same
+        // fail-closed-to-null reasoning as generateFingerprint just below.
+        // extractGithubUsername is a synchronous regex match (no cost either
+        // way to run it unconditionally); the network fetch only fires when
+        // a username was actually found, so a resume with no GitHub link
+        // adds zero extra latency here.
+        const githubUsername = extractGithubUsername(resume.text);
+        const [scoreResult, fp, githubSignal] = await Promise.all([
           scoreCandidate(
             jobDescription,
             resume.fileName,
@@ -364,9 +378,16 @@ export async function POST(request: NextRequest) {
             console.error("Fingerprint generation failed (scoring unaffected):", err);
             return null;
           }),
+          githubUsername
+            ? fetchGithubCorroboration(githubUsername).catch((err) => {
+                console.error("GitHub corroboration lookup failed (scoring unaffected):", err);
+                return null;
+              })
+            : Promise.resolve(null),
         ]);
         result = scoreResult;
         fingerprint = fp;
+        if (githubSignal) result.githubSignal = githubSignal;
       }
       results.push(result);
 

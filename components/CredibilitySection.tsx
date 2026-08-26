@@ -55,32 +55,69 @@ function LinkedInSignalsPanel({ signals }: { signals: LinkedInSignals }) {
   );
 }
 
-// GitHub corroboration panel, 2026-08-17 (roadmap 2.5.3) — plain public
-// facts, not an AI verdict (see lib/githubCorroboration.ts's header comment
-// and CredibilityAssessment.githubSignal). Deliberately styled as neutral
-// info, not a pass/fail signal like the LinkedIn activity panel above —
-// this hasn't been reasoned about by anything, it's just what the profile
-// says, so the recruiter reads and judges it themselves.
-function GithubSignalPanel({ signal }: { signal: GithubCorroboration }) {
-  const chips: string[] = [];
-  chips.push(`${signal.publicRepos} public repo${signal.publicRepos !== 1 ? "s" : ""}`);
-  chips.push(`${signal.followers} follower${signal.followers !== 1 ? "s" : ""}`);
-  if (signal.accountCreatedYear) chips.push(`joined ${signal.accountCreatedYear}`);
-  if (signal.company) chips.push(signal.company);
-
+// Brand marks, 2026-08-26 (Vlad's ask: "use their logo chips and usernames
+// next to them, that's it" — simplified from the earlier stats-heavy
+// GithubSignalPanel/plain-text LinkedInLinkPanel design). Standard
+// monochrome brand SVG paths (matches the marks used on linkedin.com/
+// github.com themselves) so the chip is instantly recognizable without a
+// text label. GitHub's mark uses currentColor (its brand has no fixed
+// accent — shown in the surrounding text color); LinkedIn's uses its own
+// brand blue, same as everywhere else that mark appears.
+function LinkedInLogo() {
   return (
-    <a
-      href={signal.profileUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 transition-colors hover:border-zinc-200 dark:border-zinc-800 dark:bg-zinc-800/30 dark:hover:border-zinc-700"
-    >
-      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-        GitHub
-      </span>
-      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">@{signal.username}</span>
-      <span className="text-zinc-300 dark:text-zinc-600">·</span>
-      <span className="text-xs text-zinc-500 dark:text-zinc-400">{chips.join(" · ")}</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="#0A66C2" className="shrink-0">
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+    </svg>
+  );
+}
+
+function GithubLogo() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+    </svg>
+  );
+}
+
+const CHIP_CLASSES =
+  "inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800";
+
+/**
+ * GitHub identity chip — logo + username, nothing else. Only rendered in the
+ * "Personal details" block at the top of the card (ResultCard.tsx /
+ * PipelineTab) as of 2026-08-26 (Vlad: "don't show those links anywhere
+ * else. just up top") — previously also shown inside the cross-reference
+ * check panel with extra stats (public repos / followers / joined year /
+ * company); those are gone now, not just hidden — signal.publicRepos etc.
+ * are still fetched and stored (lib/githubCorroboration.ts), just not
+ * displayed anywhere, in case a future ask wants them back.
+ */
+export function GithubSignalPanel({ signal }: { signal: GithubCorroboration }) {
+  return (
+    <a href={signal.profileUrl} target="_blank" rel="noopener noreferrer" className={CHIP_CLASSES}>
+      <GithubLogo />
+      <span>{signal.username}</span>
+    </a>
+  );
+}
+
+/**
+ * LinkedIn counterpart to GithubSignalPanel directly above — same chip,
+ * logo + username. linkedinUrl is just a raw profile URL (no free API to
+ * pull a display name from, unlike GitHub), so the username shown here is
+ * the vanity slug parsed out of the URL itself (the part after "/in/") —
+ * that's genuinely what LinkedIn calls it, same string a recruiter would
+ * type to go straight to the profile. Falls back to "Profile" for the rare
+ * malformed/non-standard URL where that slug can't be found, rather than
+ * showing nothing or a raw URL that would break the chip's width.
+ */
+export function LinkedInLinkPanel({ url }: { url: string }) {
+  const match = url.match(/\/in\/([^/?#]+)/i);
+  const username = match ? decodeURIComponent(match[1]) : "Profile";
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className={CHIP_CLASSES}>
+      <LinkedInLogo />
+      <span>{username}</span>
     </a>
   );
 }
@@ -430,8 +467,11 @@ export function CredibilitySection({
             <LinkedInSignalsPanel signals={assessment.linkedInSignals} />
           )}
 
-          {/* GitHub corroboration panel — only when a GitHub URL was found in the resume and the lookup succeeded */}
-          {assessment.githubSignal && <GithubSignalPanel signal={assessment.githubSignal} />}
+          {/* GitHub identity chip REMOVED from this cross-reference panel,
+              2026-08-26 (Vlad: "don't show those links anywhere else. just
+              up top") — GithubSignalPanel now renders exclusively in the
+              "Personal details" block at the top of the card
+              (ResultCard.tsx / PipelineTab), not duplicated here too. */}
 
           {/* Summary — only shown when not lifted into parent */}
           {showSummary && (

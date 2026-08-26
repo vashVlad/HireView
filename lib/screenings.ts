@@ -23,7 +23,7 @@ import { computeChecklistPercentageScore } from "./evaluateChecklist";
 import { detectLinkedIn } from "./assessCredibility";
 import type {
   BlacklistEntry, CandidateResult, CandidateStatus, ChecklistEvaluation, CredibilityAssessment, FraudRiskAssessment, FullTrackerData,
-  Recommendation, RejectionHistoryEntry, ScreeningRecord, StoredFitSuggestion, TrackerEntry, TrackerStage, TrajectoryEntry,
+  GithubCorroboration, Recommendation, RejectionHistoryEntry, ScreeningRecord, StoredFitSuggestion, TrackerEntry, TrackerStage, TrajectoryEntry,
 } from "./types";
 import { DEFAULT_AUTO_ARCHIVE_REASON } from "./types";
 
@@ -295,6 +295,20 @@ export async function transferScreeningToProject(params: {
    */
   gate1Only?: boolean;
   checklistEvaluation?: ChecklistEvaluation | null;
+  /**
+   * Target-company boost passthrough, 2026-08-26 consistency-audit fix —
+   * real gap: this function's call into saveScreening() below never passed
+   * `targetCompanies` at all, so the boost condition in saveScreening()
+   * (`targetCompanies && targetCompanies.length > 0`) could never fire for
+   * either a manual "Transfer" or an Archive Fits "screen" decision, even
+   * though the destination project may have target companies configured —
+   * the exact boost a fresh screening into that same project would apply.
+   * Callers pass `combineTargetCompanies(destinationProject.jdAnalysis?.
+   * wide?.targetCompanies, ...narrow?.targetCompanies)`, same as every other
+   * scoreCandidate() call site. Undefined/omitted = no boost evaluated,
+   * same no-op-when-omitted behavior as gate1Only above.
+   */
+  targetCompanies?: string[];
 }): Promise<{ newScreeningId: number; destinationProjectName: string }> {
   const supabase = getSupabaseClient();
 
@@ -335,6 +349,46 @@ export async function transferScreeningToProject(params: {
     if (download.error) throw download.error;
     const resumeBuffer = Buffer.from(await download.data.arrayBuffer());
 
+    // "Copy" transfer, 2026-08-26 consistency-audit fix (Vlad: "run check
+    // through the code and see whether we use the proper information...
+    // They have to match and not be ran as two different things") — this
+    // branch (mode !== "rescore", just carrying an already-screened
+    // candidate's existing result into a new project row) previously built
+    // `result` from ONLY the plain columns in the .select() above, silently
+    // dropping every deferred-column field a real screening/rescore result
+    // carries: currentCompany/currentTitle/totalExperienceSummary/
+    // linkedinUrl/githubSignal/trajectoryEntries/targetCompanyMatches/
+    // checklistEvaluation. Reuses getScreeningsByIds() (already correctly,
+    // safely reads every deferred column via its own per-migration-group
+    // isolated fetches — attachLinkedinUrls/attachGithubSignals/
+    // attachTargetCompanyMatches/attachChecklistEvaluations) rather than
+    // duplicating that same isolated-fetch logic a second time here, so this
+    // path can never drift from the real read path again. Only needed for
+    // "copy" — a real "rescore" already gets all of these straight from its
+    // own scoreCandidate() call in params.rescoredResult.
+    const deferredFields: Partial<CandidateResult> =
+      params.mode === "rescore"
+        ? {}
+        : await getScreeningsByIds([params.screeningId])
+            .then(([source]) =>
+              source
+                ? {
+                    currentCompany: source.currentCompany,
+                    currentTitle: source.currentTitle,
+                    totalExperienceSummary: source.totalExperienceSummary,
+                    linkedinUrl: source.linkedinUrl,
+                    githubSignal: source.githubSignal,
+                    trajectoryEntries: source.trajectoryEntries,
+                    targetCompanyMatches: source.targetCompanyMatches,
+                    checklistEvaluation: source.checklistEvaluation,
+                  }
+                : {}
+            )
+            .catch((err) => {
+              console.error("Copy-transfer: deferred fields unavailable — transfer continues without them:", err);
+              return {};
+            });
+
     const result: CandidateResult =
       params.mode === "rescore" && params.rescoredResult
         ? params.rescoredResult
@@ -349,6 +403,7 @@ export async function transferScreeningToProject(params: {
             concerns: row.concerns,
             careerTrajectory: row.career_trajectory ?? undefined,
             recommendation: row.recommendation ?? "decline",
+            ...deferredFields,
           };
 
     const saved = await saveScreening({
@@ -369,6 +424,9 @@ export async function transferScreeningToProject(params: {
       // already has for every other caller.
       gate1Only: params.gate1Only,
       checklistEvaluation: params.checklistEvaluation,
+      // Target-company boost passthrough — see this function's own param
+      // comment above.
+      targetCompanies: params.targetCompanies,
     });
     newScreeningId = saved.id;
   }
@@ -1146,6 +1204,14 @@ export async function saveScreening(params: {
       currentTitle: result.currentTitle,
       totalExperienceSummary: result.totalExperienceSummary,
       linkedinUrl: result.linkedinUrl,
+      // GitHub corroboration, 2026-08-26 — same deferred-migration reasoning
+      // as the four fields above (supabase-migration-github-signal.sql),
+      // folded into this same best-effort call. Only set when
+      // screen-resumes/route.ts's third parallel branch actually found a
+      // GitHub link (undefined = none found, or the public lookup
+      // failed/no such user — skip entirely, same convention as
+      // targetCompanyMatches/checklistEvaluation below).
+      ...(result.githubSignal !== undefined ? { githubSignal: result.githubSignal } : {}),
       // Structured trajectory, 2026-08-17 (roadmap 2.5.2) — same deferred-
       // migration reasoning as the four fields above (supabase-migration-
       // trajectory-entries.sql), folded into this same best-effort call.
@@ -1466,6 +1532,106 @@ async function attachChecklistEvaluations(records: ScreeningRecord[]): Promise<S
 }
 
 /**
+ * linkedin_url, 2026-08-26 (Vlad's ask: surface the candidate's LinkedIn
+ * profile next to the Cross-Reference Check so a recruiter can open it,
+ * grab a fresh "Save to PDF" export, and drop that straight into the
+ * uploader right there). Same isolated, scoped, best-effort pattern as
+ * attachChecklistEvaluations directly above — linkedin_url is already a
+ * deferred column (kept out of SCREENING_COLUMNS, see that constant's
+ * comment) and was already being written on every save via saveScreening(),
+ * it just had no read path back out for anything other than the live
+ * Screen-tab result (which gets it for free from the same scoreCandidate()
+ * call, no DB round-trip needed). This closes that gap for reloaded views —
+ * Pipeline tab, /candidates/[id], batch pages.
+ */
+async function attachLinkedinUrls(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  if (records.length === 0) return records;
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase
+      .from("screenings")
+      .select("id, linkedin_url")
+      .in("id", records.map((r) => r.id))
+      .returns<{ id: number; linkedin_url: string | null }[]>();
+    if (error) throw error;
+    const byId = new Map((data ?? []).map((r) => [r.id, r.linkedin_url]));
+    return records.map((r) => {
+      const url = byId.get(r.id);
+      return url ? { ...r, linkedinUrl: url } : r;
+    });
+  } catch (err) {
+    console.error("linkedin_url unavailable (migration likely not run yet) — degrading to undefined for this field only:", err);
+    return records;
+  }
+}
+
+/**
+ * github_signal, 2026-08-26 (Vlad's ask: surface GitHub during the initial
+ * screening — "up top nicely before the trajectory," alongside LinkedIn).
+ * Exact mirror of attachLinkedinUrls directly above, same reasoning — a
+ * deferred jsonb column, already written on every save via saveScreening(),
+ * with no read path back out for anything other than the live Screen-tab
+ * result (which gets it for free from the same third-parallel-branch fetch
+ * in screen-resumes/route.ts, no DB round-trip needed). Closes the same
+ * reload gap for Pipeline tab, /candidates/[id], and batch pages.
+ */
+async function attachGithubSignals(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  if (records.length === 0) return records;
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase
+      .from("screenings")
+      .select("id, github_signal")
+      .in("id", records.map((r) => r.id))
+      .returns<{ id: number; github_signal: GithubCorroboration | null }[]>();
+    if (error) throw error;
+    const byId = new Map((data ?? []).map((r) => [r.id, r.github_signal]));
+    return records.map((r) => {
+      const signal = byId.get(r.id);
+      return signal ? { ...r, githubSignal: signal } : r;
+    });
+  } catch (err) {
+    console.error("github_signal unavailable (migration likely not run yet) — degrading to undefined for this field only:", err);
+    return records;
+  }
+}
+
+/**
+ * target_company_matches, 2026-08-26 — real gap found during a full
+ * consistency audit (Vlad: "run check through the code and see whether we
+ * use the proper information on each page... They have to match and not be
+ * ran as two different things"). This column has been written on every save
+ * since 2026-08-07 (saveScreening's best-effort call, updateScreening field
+ * support) but had NO read-back function at all — not even a bundled one —
+ * so the "Target company match" badge and TrajectoryGraph's target-company
+ * highlighting (both built 2026-08-25) only ever worked on the live
+ * post-screening result and silently vanished on every reload (Pipeline
+ * tab, /candidates/[id], batch pages), the exact same class of gap
+ * attachLinkedinUrls/attachGithubSignals directly above were built to close
+ * for their own fields. Same isolated, scoped, best-effort pattern.
+ */
+async function attachTargetCompanyMatches(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  if (records.length === 0) return records;
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase
+      .from("screenings")
+      .select("id, target_company_matches")
+      .in("id", records.map((r) => r.id))
+      .returns<{ id: number; target_company_matches: string[] | null }[]>();
+    if (error) throw error;
+    const byId = new Map((data ?? []).map((r) => [r.id, r.target_company_matches]));
+    return records.map((r) => {
+      const matches = byId.get(r.id);
+      return matches ? { ...r, targetCompanyMatches: matches } : r;
+    });
+  } catch (err) {
+    console.error("target_company_matches unavailable (migration likely not run yet) — degrading to undefined for this field only:", err);
+    return records;
+  }
+}
+
+/**
  * embedding, 2026-08-17 (roadmap 2.5.9, global talent search) — same
  * isolated-write reasoning as attachChecklistEvaluations above: `embedding`
  * is a brand new, not-yet-migrated column
@@ -1533,7 +1699,7 @@ export async function listScreenings(
   if (error) throw error;
 
   return attachRecruiterEmails(
-    await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))
+    await attachTargetCompanyMatches(await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord)))))))
   );
 }
 
@@ -1546,7 +1712,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
     .returns<ScreeningRow[]>();
   if (error) throw error;
   return attachRecruiterEmails(
-    await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))
+    await attachTargetCompanyMatches(await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord)))))))
   );
 }
 
@@ -1574,7 +1740,16 @@ export async function listScreeningsByBatch(projectId: number, batchId: string):
     .order("score", { ascending: false })
     .returns<ScreeningRow[]>();
   if (error) throw error;
-  return attachRecruiterEmails(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))));
+  // 2026-08-26 consistency audit — this function was the only one of the
+  // three missing attachChecklistEvaluations (batch page showed no
+  // checklist breakdown for a Gate-1-archived or checklist-scored
+  // candidate) and, until today, all three were missing
+  // attachTargetCompanyMatches (see that function's own comment).
+  return attachRecruiterEmails(
+    await attachTargetCompanyMatches(
+      await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))))
+    )
+  );
 }
 
 // ── Get resume ─────────────────────────────────────────────────────────────
@@ -1876,6 +2051,16 @@ export async function updateScreening(
     totalExperienceSummary?: string;
     /** Same deferred-column pattern as currentCompany above — see lib/types.ts's ScreeningRecord.linkedinUrl. Added 2026-08-06. */
     linkedinUrl?: string;
+    /**
+     * GitHub corroboration, 2026-08-26 (Vlad's ask: surface it during the
+     * initial screening, not just the cross-reference check). Same
+     * deferred-column pattern as linkedinUrl above — requires
+     * supabase-migration-github-signal.sql, NOT YET CONFIRMED RUN. Written
+     * by saveScreening()'s best-effort call only when screen-resumes/
+     * route.ts's third parallel branch actually found a GitHub link. See
+     * lib/types.ts's GithubCorroboration for shape.
+     */
+    githubSignal?: GithubCorroboration;
     /** Same deferred-column pattern as currentCompany above — see lib/types.ts's ScreeningRecord.targetCompanyMatches. Added 2026-08-07. */
     targetCompanyMatches?: string[];
     /**
@@ -1930,6 +2115,9 @@ export async function updateScreening(
   if (fields.currentTitle !== undefined) update.current_title = fields.currentTitle;
   if (fields.totalExperienceSummary !== undefined) update.total_experience_summary = fields.totalExperienceSummary;
   if (fields.linkedinUrl !== undefined) update.linkedin_url = fields.linkedinUrl;
+  // github_signal requires supabase-migration-github-signal.sql — NOT YET
+  // CONFIRMED RUN. Same deferred-wiring pattern as linkedin_url above.
+  if (fields.githubSignal !== undefined) update.github_signal = fields.githubSignal;
   if (fields.targetCompanyMatches !== undefined) update.target_company_matches = fields.targetCompanyMatches;
   // trajectory_entries requires supabase-migration-trajectory-entries.sql —
   // NOT YET CONFIRMED RUN. Same deferred-wiring pattern as

@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { BlacklistEntry, CandidateResult, CandidateStatus, CredibilityAssessment, ExistingCandidateRef, FraudRiskAssessment, RejectionHistoryEntry, Recommendation, TrackerStage } from "@/lib/types";
 
 import { CrossReferenceChecker } from "./CredibilityChecker";
+import { GithubSignalPanel, LinkedInLinkPanel } from "./CredibilitySection";
 import { FraudRiskChecker } from "./FraudRiskChecker";
 import { InsightList } from "./InsightList";
 import { RecommendationBadge } from "./RecommendationBadge";
@@ -780,6 +781,33 @@ export function ResultCard({
           >
             {transferredTo.projectName}
           </Link>
+        </div>
+      )}
+
+      {/* Personal details, 2026-08-26 (Vlad's ask: "pull and show [GitHub
+          links] during the initial screening... up top nicely before the
+          trajectory. That's where all of the personal details will be
+          held.") LinkedIn was already extracted at scoring time
+          (result.linkedinUrl, since 2026-08-06); GitHub extraction/lookup
+          existed but only ran during the cross-reference check — now also
+          runs during initial screening (screen-resumes/route.ts's third
+          parallel branch) so both are available here immediately, no
+          cross-reference check required. Reuses GithubSignalPanel/
+          LinkedInLinkPanel from CredibilitySection.tsx rather than
+          duplicating the styling — same panels the cross-reference check
+          already renders. Renders nothing when neither is present (most
+          resumes don't list a GitHub link; both are equally absent for a
+          gate-1/target-company-gate stand-in result, same as every other
+          scoreCandidate()-derived field). */}
+      {(result.linkedinUrl || result.githubSignal) && (
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+            Personal details
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {result.linkedinUrl && <LinkedInLinkPanel url={result.linkedinUrl} />}
+            {result.githubSignal && <GithubSignalPanel signal={result.githubSignal} />}
+          </div>
         </div>
       )}
 

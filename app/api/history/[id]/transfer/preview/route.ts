@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getScreeningsByIds, getScreeningResume } from "@/lib/screenings";
-import { getProject } from "@/lib/projects";
+import { getProject, getProjectChecklist } from "@/lib/projects";
 import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
+import { evaluateGate1 } from "@/lib/evaluateGate1";
+import { buildGate1ArchivedResult } from "@/lib/buildGate1ArchivedResult";
+import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
+import { combineTargetCompanies, computeTargetCompanyBoost } from "@/lib/targetCompanyBoost";
 import { canAccessScreening, canAccessProject, getAuthUser } from "@/lib/auth";
 import { errorMessage } from "@/lib/errorMessage";
+import type { CandidateResult } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -65,17 +70,63 @@ export async function POST(
 
     const calibrationExamples = await listCalibrationExamples(destinationProject.id).catch(() => []);
 
-    const result = await scoreCandidate(
-      destinationProject.jobDescription,
-      resume.fileName,
-      resumeText,
-      calibrationExamples,
-      roleContext,
-      destinationProject.jdAnalysis?.linkedInContext ?? undefined,
-      screening.linkedInMode
-    );
+    // 2026-08-26 consistency-audit fix (Vlad's explicit answer to "should
+    // Transfer preview gate like every other scoreCandidate() path": "Yes,
+    // add Gate 1"). Same cheap-before-expensive shape as
+    // archive-fits/decide/route.ts — evaluateChecklist() runs first if the
+    // DESTINATION project has one configured; below its threshold, the
+    // preview returns the same buildGate1ArchivedResult stand-in a fresh
+    // screening into that project would produce, instead of silently
+    // bypassing a gate every other entry point respects.
+    const checklist = await getProjectChecklist(destinationProject.id).catch(() => null);
+    const gate1 = await evaluateGate1({ checklist, resumeText, scoreThreshold: destinationProject.scoreThreshold });
+    const checklistEvaluation = gate1.checklistEvaluation;
 
-    return NextResponse.json({ result });
+    const githubUsername = extractGithubUsername(resumeText);
+
+    let result: CandidateResult;
+    if (gate1.gate1Only) {
+      result = await buildGate1ArchivedResult({
+        fileName: resume.fileName,
+        resumeText,
+        checklistScore: gate1.checklistScore!,
+        checklistEvaluation: checklistEvaluation!,
+      });
+    } else {
+      // Same consistency-audit fix — GitHub extraction (every other
+      // scoreCandidate() path runs this) and the target-company boost
+      // (every other path that persists a real screening applies this) were
+      // both silently skipped here, so a previewed score could differ from
+      // what actually gets saved once the recruiter accepts the transfer.
+      const [scoreResult, githubSignal] = await Promise.all([
+        scoreCandidate(
+          destinationProject.jobDescription,
+          resume.fileName,
+          resumeText,
+          calibrationExamples,
+          roleContext,
+          destinationProject.jdAnalysis?.linkedInContext ?? undefined,
+          screening.linkedInMode
+        ),
+        githubUsername
+          ? fetchGithubCorroboration(githubUsername).catch((err) => {
+              console.error("GitHub corroboration lookup failed during transfer preview (scoring unaffected):", err);
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
+      result = scoreResult;
+      if (githubSignal) result.githubSignal = githubSignal;
+
+      const targetCompanies = combineTargetCompanies(destinationProject.jdAnalysis?.wide?.targetCompanies, destinationProject.jdAnalysis?.narrow?.targetCompanies);
+      if (targetCompanies.length > 0) {
+        const boost = computeTargetCompanyBoost(resumeText, targetCompanies);
+        if (boost.matched) result.score = Math.min(100, result.score + boost.bonus);
+        result.targetCompanyMatches = boost.matchedCompanies;
+      }
+    }
+
+    return NextResponse.json({ result, checklistEvaluation: checklistEvaluation ?? undefined, gate1Only: gate1.gate1Only });
   } catch (err) {
     console.error("Transfer preview failed:", err);
     // See lib/errorMessage.ts — Supabase throws plain PostgrestError-shaped
