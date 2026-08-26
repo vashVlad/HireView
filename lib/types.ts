@@ -501,6 +501,14 @@ export interface CandidateResult {
   /** Mirrors ScreeningRecord.agencyName — same reload-avoidance reason as linkedInMode above. Added 2026-07-20. */
   agencyName?: string;
   /**
+   * Mirrors ScreeningRecord.referrerName — same reload-avoidance reason as
+   * agencyName above. The "Referred" source type's person-name counterpart
+   * to agencyName's agency-name (added 2026-08-26, Vlad's ask: mirror
+   * Agency's mechanism exactly, but for a person who referred the
+   * candidate rather than an agency).
+   */
+  referrerName?: string;
+  /**
    * Fraud/match signals mirrored from ScreeningRecord so they can render on
    * the post-screening ResultCard immediately, not just after a reload —
    * saveScreening already computes these synchronously at save time.
@@ -820,6 +828,21 @@ export interface ScreeningRecord {
    * deploys, full stop — see that file's header.
    */
   agencyName?: string;
+  /**
+   * "Referred" source type, added 2026-08-26 (Vlad's ask) — mirrors
+   * agencyName's mechanism exactly (a name captured alongside the source
+   * type) but for a person who referred the candidate rather than an
+   * agency. UNLIKE agencyName (which predates the deferred-column
+   * convention and is wired unconditionally into every insert), this one
+   * follows the now-established safer pattern: read via an isolated
+   * attachReferrerNames() fetch, written via the best-effort updateScreening()
+   * call in saveScreening(), not the main unconditional INSERT — so a not-
+   * yet-run supabase-migration-referrer-name.sql degrades gracefully
+   * (screening still saves, just without this field) instead of failing the
+   * whole save. See lib/screenings.ts's attachLinkedinUrls/attachGithubSignals
+   * for the pattern this mirrors.
+   */
+  referrerName?: string;
   /**
    * Real-content LinkedIn detection — see CandidateResult.resumeIsLinkedIn
    * for the full explanation (this is the same field, mirrored here for the

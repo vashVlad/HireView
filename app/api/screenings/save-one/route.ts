@@ -46,6 +46,10 @@ export async function POST(request: NextRequest) {
   const projectIdField = formData.get("projectId");
   const linkedInModeField = formData.get("linkedInMode");
   const agencyNameField = formData.get("agencyName");
+  // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's ask — see decisions-log.md):
+  // "Referred" source, exact mirror of the agencyName exception right above
+  // (same additive-metadata shape, no scoring involvement).
+  const referrerNameField = formData.get("referrerName");
 
   if (typeof resultJsonField !== "string" || !(resumeFile instanceof File) || typeof jobDescriptionField !== "string") {
     return NextResponse.json({ error: "resultJson, resumeFile, and jobDescription are required" }, { status: 400 });
@@ -77,6 +81,8 @@ export async function POST(request: NextRequest) {
   // fully-scored JSON passed in from the client (this route never calls
   // scoreCandidate at all).
   const agencyName = typeof agencyNameField === "string" && agencyNameField.trim() ? agencyNameField.trim() : undefined;
+  // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's ask): mirrors agencyName directly above.
+  const referrerName = typeof referrerNameField === "string" && referrerNameField.trim() ? referrerNameField.trim() : undefined;
   const mimeType = resolveMimeType(resumeFile);
 
   const buffer = Buffer.from(await resumeFile.arrayBuffer());
@@ -150,6 +156,8 @@ export async function POST(request: NextRequest) {
       fingerprint,
       linkedInMode,
       agencyName,
+      // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's ask): mirrors agencyName directly above.
+      referrerName,
       projectId,
       userId,
       scoreThreshold,

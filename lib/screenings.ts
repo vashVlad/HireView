@@ -381,6 +381,7 @@ export async function transferScreeningToProject(params: {
                     trajectoryEntries: source.trajectoryEntries,
                     targetCompanyMatches: source.targetCompanyMatches,
                     checklistEvaluation: source.checklistEvaluation,
+                    referrerName: source.referrerName,
                   }
                 : {}
             )
@@ -413,6 +414,13 @@ export async function transferScreeningToProject(params: {
       resumeMimeType: row.resume_mime_type,
       linkedInMode: row.linkedin_mode,
       agencyName: row.agency_name ?? undefined,
+      // "referred" is deferred (unlike agency_name), so it isn't in the
+      // hand-rolled .select() above — sourced from deferredFields (via
+      // getScreeningsByIds's attachReferrerNames) same as every other
+      // deferred field on this "copy" path. Undefined for a "rescore" mode
+      // call too (deferredFields is {} there — result.referrerName, already
+      // spread into `result` above via params.rescoredResult, covers it).
+      referrerName: params.mode === "rescore" ? result.referrerName : deferredFields.referrerName,
       projectId: params.destinationProjectId,
       userId: params.actingUserId,
       scoreThreshold: destinationProject.scoreThreshold,
@@ -846,6 +854,17 @@ export async function saveScreening(params: {
    * the column unconditionally, every save, not just agency-sourced ones).
    */
   agencyName?: string;
+  /**
+   * Free-text referrer name, set only when this candidate was referred by a
+   * person (mutually exclusive with linkedInMode/agencyName in the
+   * ScreenTab UI, though this function doesn't enforce that — see
+   * lib/sourceType.ts). Undefined for Applicant/LinkedIn/Agency sources.
+   * Added 2026-08-26. UNLIKE agencyName, does NOT need
+   * supabase-migration-referrer-name.sql confirmed run before deploy — see
+   * this field's write-side handling below (folded into the best-effort
+   * updateScreening() call, not the unconditional insert).
+   */
+  referrerName?: string;
   projectId?: number;
   userId?: string;
   /**
@@ -971,7 +990,7 @@ export async function saveScreening(params: {
    */
   targetCompanyGateFailed?: boolean;
 }): Promise<{ id: number }> {
-  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, projectId, userId, scoreThreshold, batchId, targetCompanies, checklistEvaluation, gate1Only, targetCompanyGateFailed } = params;
+  const { result, jobDescription, resumeFile, resumeMimeType, linkedInMode, agencyName, referrerName, projectId, userId, scoreThreshold, batchId, targetCompanies, checklistEvaluation, gate1Only, targetCompanyGateFailed } = params;
   const supabase = getSupabaseClient();
 
   // Real bug found 2026-07-20 (Vlad: "FunnelView didn't save the recruiter
@@ -1230,6 +1249,11 @@ export async function saveScreening(params: {
       // was actually configured+evaluated for this project (undefined = no
       // checklist, skip entirely, same convention as targetCompanyMatches).
       ...(result.checklistEvaluation !== undefined ? { checklistEvaluation: result.checklistEvaluation } : {}),
+      // "Referred" source type, 2026-08-26 — same deferred-migration
+      // reasoning as the fields above (supabase-migration-referrer-name.sql),
+      // folded into this same best-effort call rather than the unconditional
+      // insert (unlike agencyName, which predates this convention).
+      ...(referrerName ? { referrerName } : {}),
     });
   } catch {
     /* pre-migration or other non-fatal failure — the screening itself already saved above */
@@ -1252,6 +1276,7 @@ export async function saveScreening(params: {
   // for a reload. Added 2026-07-16.
   result.linkedInMode = linkedInMode ?? false;
   if (agencyName) result.agencyName = agencyName;
+  if (referrerName) result.referrerName = referrerName;
 
   // resume_is_linkedin, 2026-07-31 (Vlad's ask) — real-content LinkedIn
   // detection, independent of linkedin_mode (the recruiter's manual
@@ -1632,6 +1657,34 @@ async function attachTargetCompanyMatches(records: ScreeningRecord[]): Promise<S
 }
 
 /**
+ * referrer_name, 2026-08-26 (Vlad's ask: a new "Referred" source type,
+ * mirroring Agency's mechanism exactly but capturing the referring person's
+ * name instead of an agency's). Exact mirror of attachLinkedinUrls/
+ * attachGithubSignals/attachTargetCompanyMatches directly above, same
+ * isolated deferred-column read pattern.
+ */
+async function attachReferrerNames(records: ScreeningRecord[]): Promise<ScreeningRecord[]> {
+  if (records.length === 0) return records;
+  const supabase = getSupabaseClient();
+  try {
+    const { data, error } = await supabase
+      .from("screenings")
+      .select("id, referrer_name")
+      .in("id", records.map((r) => r.id))
+      .returns<{ id: number; referrer_name: string | null }[]>();
+    if (error) throw error;
+    const byId = new Map((data ?? []).map((r) => [r.id, r.referrer_name]));
+    return records.map((r) => {
+      const name = byId.get(r.id);
+      return name ? { ...r, referrerName: name } : r;
+    });
+  } catch (err) {
+    console.error("referrer_name unavailable (migration likely not run yet) — degrading to undefined for this field only:", err);
+    return records;
+  }
+}
+
+/**
  * embedding, 2026-08-17 (roadmap 2.5.9, global talent search) — same
  * isolated-write reasoning as attachChecklistEvaluations above: `embedding`
  * is a brand new, not-yet-migrated column
@@ -1699,7 +1752,7 @@ export async function listScreenings(
   if (error) throw error;
 
   return attachRecruiterEmails(
-    await attachTargetCompanyMatches(await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord)))))))
+    await attachReferrerNames(await attachTargetCompanyMatches(await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))))))
   );
 }
 
@@ -1712,7 +1765,7 @@ export async function getScreeningsByIds(ids: number[]): Promise<ScreeningRecord
     .returns<ScreeningRow[]>();
   if (error) throw error;
   return attachRecruiterEmails(
-    await attachTargetCompanyMatches(await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord)))))))
+    await attachReferrerNames(await attachTargetCompanyMatches(await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))))))
   );
 }
 
@@ -1746,8 +1799,10 @@ export async function listScreeningsByBatch(projectId: number, batchId: string):
   // candidate) and, until today, all three were missing
   // attachTargetCompanyMatches (see that function's own comment).
   return attachRecruiterEmails(
-    await attachTargetCompanyMatches(
-      await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))))
+    await attachReferrerNames(
+      await attachTargetCompanyMatches(
+        await attachGithubSignals(await attachLinkedinUrls(await attachChecklistEvaluations(await enrichTransferInfo(await enrichHistoryAlerts((data ?? []).map(rowToRecord))))))
+      )
     )
   );
 }
@@ -2003,6 +2058,12 @@ export async function updateScreening(
     linkedInMode?: boolean;
     agencyName?: string;
     /**
+     * "Referred" source type, 2026-08-26 — mirrors agencyName immediately
+     * above, deferred-column write (see referrer_name's own comment on
+     * saveScreening's params and supabase-migration-referrer-name.sql).
+     */
+    referrerName?: string;
+    /**
      * Rescore fields, added 2026-07-27 (Vlad's ask: "add a rescreen button on
      * actual pipeline cards") — app/api/history/[id]/rescreen/route.ts is the
      * only caller. Deliberately excludes candidateName, fileName, and status:
@@ -2152,6 +2213,14 @@ export async function updateScreening(
   // (see decisions-log.md, 2026-07-20) — same column already wired into
   // saveScreening()'s INSERT unconditionally, so it's already a live column.
   if (fields.agencyName !== undefined) update.agency_name = fields.agencyName || null;
+  // referrer_name, 2026-08-26 — deferred column (supabase-migration-
+  // referrer-name.sql), same "not yet confirmed run" caveat as the fields
+  // in saveScreening()'s best-effort call. This function's own caller
+  // (screen-resumes/route.ts's do-not-touch exception via saveScreening,
+  // or the Pipeline-tab source-correction PATCH route) already wraps calls
+  // to updateScreening in a try/catch or best-effort context, so a missing
+  // column here degrades the same way every other deferred field does.
+  if (fields.referrerName !== undefined) update.referrer_name = fields.referrerName || null;
   if (fields.score !== undefined) update.score = fields.score;
   if (fields.mustHaveScore !== undefined) update.must_have_score = fields.mustHaveScore;
   if (fields.niceToHaveScore !== undefined) update.nice_to_have_score = fields.niceToHaveScore;

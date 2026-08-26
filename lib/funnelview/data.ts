@@ -77,7 +77,7 @@ interface ScreeningCurrentRoleRow {
  */
 async function fetchCurrentRoleColumn(
   supabase: ReturnType<typeof getSupabaseClient>,
-  column: "current_company" | "current_title" | "total_experience_summary" | "linkedin_url"
+  column: "current_company" | "current_title" | "total_experience_summary" | "linkedin_url" | "referrer_name"
 ): Promise<Map<number, string | null>> {
   try {
     const { data, error } = await supabase
@@ -170,9 +170,12 @@ function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { 
   const inboundCandidates = candidates.filter((c) => c.source === "inbound");
   const outboundCandidates = candidates.filter((c) => c.source === "outbound");
   const agencyCandidates = candidates.filter((c) => c.source === "agency");
+  // Referred, 2026-08-26 (Vlad's ask) — exact mirror of agencyCandidates above.
+  const referredCandidates = candidates.filter((c) => c.source === "referred");
   const rawInbound = computeRawStageCounts(inboundCandidates.length, inboundCandidates);
   const rawOutbound = computeRawStageCounts(outboundCandidates.length, outboundCandidates);
   const rawAgency = computeRawStageCounts(agencyCandidates.length, agencyCandidates);
+  const rawReferred = computeRawStageCounts(referredCandidates.length, referredCandidates);
 
   const stages: FunnelStageCount[] = rawStages.map((s, i) => {
     const prev = i > 0 ? rawStages[i - 1].count : null;
@@ -185,6 +188,7 @@ function computeStages(totalScreened: number, candidates: FunnelCandidate[]): { 
         inbound: rawInbound[i].count,
         outbound: rawOutbound[i].count,
         agency: rawAgency[i].count,
+        referred: rawReferred[i].count,
       },
     };
   });
@@ -231,11 +235,17 @@ export async function getFunnelData(): Promise<FunnelData> {
   // column (migration not yet run) just means that ONE field comes back
   // null for everyone, same as any candidate not yet backfilled — every
   // other field, and the rest of FunnelView, is unaffected.
-  const [companyById, titleById, experienceById, linkedinById] = await Promise.all([
+  // referrerNameById, 2026-08-26 (Vlad's ask: a new "Referred" source type)
+  // — referrer_name is a deferred column (supabase-migration-referrer-
+  // name.sql), same isolated-fetch treatment as the four columns above,
+  // NOT bundled into the required screenings select (unlike agency_name,
+  // which predates the deferred-column convention).
+  const [companyById, titleById, experienceById, linkedinById, referrerNameById] = await Promise.all([
     fetchCurrentRoleColumn(supabase, "current_company"),
     fetchCurrentRoleColumn(supabase, "current_title"),
     fetchCurrentRoleColumn(supabase, "total_experience_summary"),
     fetchCurrentRoleColumn(supabase, "linkedin_url"),
+    fetchCurrentRoleColumn(supabase, "referrer_name"),
   ]);
   const currentRoleByScreeningId = new Map<number, ScreeningCurrentRoleRow>();
   for (const s of screeningsRes.data ?? []) {
@@ -278,8 +288,9 @@ export async function getFunnelData(): Promise<FunnelData> {
       // 2026-08-15 do-not-touch exception in lib/scoreCandidate.ts.
       topStrength: s.strengths && s.strengths.length > 0 ? s.strengths[0] : null,
       topConcern: s.concerns && s.concerns.length > 0 ? s.concerns[0] : null,
-      source: s.linkedin_mode ? "outbound" : s.agency_name ? "agency" : "inbound",
+      source: s.linkedin_mode ? "outbound" : s.agency_name ? "agency" : (referrerNameById.get(s.id) ? "referred" : "inbound"),
       ...(s.agency_name ? { agencyName: s.agency_name } : {}),
+      ...(referrerNameById.get(s.id) ? { referrerName: referrerNameById.get(s.id) } : {}),
       score: s.score,
       passedThreshold: s.score >= threshold,
       hasFraudFlag: Boolean(s.duplicate_flag) || s.history_alert_type != null,
@@ -298,6 +309,7 @@ export async function getFunnelData(): Promise<FunnelData> {
     inbound: candidates.filter((c) => c.source === "inbound").length,
     outbound: candidates.filter((c) => c.source === "outbound").length,
     agency: candidates.filter((c) => c.source === "agency").length,
+    referred: candidates.filter((c) => c.source === "referred").length,
   };
 
   // Per-project breakdown — same funnel shape as above, scoped to one project

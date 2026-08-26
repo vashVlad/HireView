@@ -10,15 +10,17 @@ import { avatarColor, avatarInitial } from "@/lib/avatarColor";
 import type { FunnelCandidate, FunnelData } from "@/lib/funnelview/types";
 import { candidateMatchesStageKey } from "@/lib/funnelview/stageMatch";
 
-// FunnelCandidate.source uses "inbound"/"outbound"/"agency" (kept distinct
-// from lib/sourceType.ts's "applicant"/"linkedin"/"agency" naming to
-// minimize churn across this file's many existing c.source checks — see
-// lib/funnelview/types.ts). Maps to the shared SourceIcon's type for the
-// table badge, 2026-07-20 (Vlad's ask — Applicant had no icon here, unlike
-// ResultCard/Candidates/Pipeline which all show one via showApplicant).
-function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "linkedin" | "agency" {
+// FunnelCandidate.source uses "inbound"/"outbound"/"agency"/"referred"
+// (kept distinct from lib/sourceType.ts's "applicant"/"linkedin"/"agency"/
+// "referred" naming to minimize churn across this file's many existing
+// c.source checks — see lib/funnelview/types.ts). Maps to the shared
+// SourceIcon's type for the table badge, 2026-07-20 (Vlad's ask — Applicant
+// had no icon here, unlike ResultCard/Candidates/Pipeline which all show one
+// via showApplicant). "referred" added 2026-08-26, Vlad's ask.
+function toSourceIconType(source: FunnelCandidate["source"]): "applicant" | "linkedin" | "agency" | "referred" {
   if (source === "outbound") return "linkedin";
   if (source === "agency") return "agency";
+  if (source === "referred") return "referred";
   return "applicant";
 }
 
@@ -79,7 +81,11 @@ function StageBar({
         const barWidthPct = Math.max((s.count / max) * 100, s.count > 0 ? 2 : 0);
         const inboundPct = s.count > 0 ? (s.bySource.inbound / s.count) * 100 : 0;
         const outboundPct = s.count > 0 ? (s.bySource.outbound / s.count) * 100 : 0;
-        const agencyPct = s.count > 0 ? Math.max(0, 100 - inboundPct - outboundPct) : 0;
+        const agencyPct = s.count > 0 ? (s.bySource.agency / s.count) * 100 : 0;
+        // Referred, 2026-08-26 (Vlad's ask) — last segment, so it absorbs
+        // rounding remainder the same way agencyPct used to (a fourth exact
+        // fraction would leave a hairline gap at the bar's end otherwise).
+        const referredPct = s.count > 0 ? Math.max(0, 100 - inboundPct - outboundPct - agencyPct) : 0;
         const isHovered = hover?.key === s.key;
         const isSelected = selectedKey === s.key;
         return (
@@ -114,6 +120,7 @@ function StageBar({
                   {s.bySource.inbound > 0 && <div className="h-full bg-zinc-400 dark:bg-zinc-500" style={{ width: `${inboundPct}%` }} />}
                   {s.bySource.outbound > 0 && <div className="h-full bg-[#0A66C2]" style={{ width: `${outboundPct}%` }} />}
                   {s.bySource.agency > 0 && <div className="h-full bg-orange-500" style={{ width: `${agencyPct}%` }} />}
+                  {s.bySource.referred > 0 && <div className="h-full bg-teal-500" style={{ width: `${referredPct}%` }} />}
                 </div>
               </div>
               {isHovered && (
@@ -155,6 +162,14 @@ function StageBar({
                         {s.bySource.agency.toLocaleString()} ({Math.round(agencyPct)}%)
                       </span>
                     </div>
+                    <div className="flex items-center justify-between gap-2 text-zinc-600 dark:text-zinc-300">
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 rounded-full bg-teal-500" /> Referred
+                      </span>
+                      <span className="tabular-nums">
+                        {s.bySource.referred.toLocaleString()} ({Math.round(referredPct)}%)
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -186,6 +201,9 @@ function SourceLegend() {
       </span>
       <span className="flex items-center gap-1.5">
         <span className="h-2.5 w-2.5 rounded-full bg-orange-500" /> Agency
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-full bg-teal-500" /> Referred
       </span>
     </div>
   );
@@ -273,8 +291,9 @@ export default function FunnelViewPage() {
         inbound: activeCandidates.filter((c) => c.source === "inbound").length,
         outbound: activeCandidates.filter((c) => c.source === "outbound").length,
         agency: activeCandidates.filter((c) => c.source === "agency").length,
+        referred: activeCandidates.filter((c) => c.source === "referred").length,
       }
-    : (data?.sourceSplit ?? { inbound: 0, outbound: 0, agency: 0 });
+    : (data?.sourceSplit ?? { inbound: 0, outbound: 0, agency: 0, referred: 0 });
 
   // Recruiter(s) working the active view — surfaced prominently in the Funnel
   // card header rather than only buried in the candidate table below. Added
@@ -342,6 +361,7 @@ export default function FunnelViewPage() {
     summaryRows.push({ Stage: "Archived/Rejected", Count: activeArchivedOrRejected, "% of Previous Stage": "—" });
     summaryRows.push({ Stage: "Sourced", Count: activeSourceSplit.outbound, "% of Previous Stage": "—" });
     summaryRows.push({ Stage: "Agency", Count: activeSourceSplit.agency, "% of Previous Stage": "—" });
+    summaryRows.push({ Stage: "Referred", Count: activeSourceSplit.referred, "% of Previous Stage": "—" });
     summaryRows.push({ Stage: "Applied", Count: activeSourceSplit.inbound, "% of Previous Stage": "—" });
     const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
     summarySheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 20 }];
@@ -591,17 +611,19 @@ export default function FunnelViewPage() {
                         </td>
                         <td className="px-4 py-3 text-sm">
                           <span
-                            title={c.source === "agency" ? `Agency: ${c.agencyName ?? "—"}` : undefined}
+                            title={c.source === "agency" ? `Agency: ${c.agencyName ?? "—"}` : c.source === "referred" ? `Referred by: ${c.referrerName ?? "—"}` : undefined}
                             className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
                               c.source === "outbound"
                                 ? "bg-[#0A66C2]/10 text-[#0A66C2] dark:bg-[#0A66C2]/20 dark:text-[#5B9BD5]"
                                 : c.source === "agency"
                                 ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
+                                : c.source === "referred"
+                                ? "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-400"
                                 : "bg-zinc-100 text-zinc-600 dark:bg-zinc-500/20 dark:text-zinc-400"
                             }`}
                           >
-                            <SourceIcon type={toSourceIconType(c.source)} agencyName={c.agencyName} size={11} showApplicant />
-                            {c.source === "outbound" ? "Sourced" : c.source === "agency" ? (c.agencyName ?? "Agency") : "Applied"}
+                            <SourceIcon type={toSourceIconType(c.source)} agencyName={c.agencyName} referrerName={c.referrerName} size={11} showApplicant />
+                            {c.source === "outbound" ? "Sourced" : c.source === "agency" ? (c.agencyName ?? "Agency") : c.source === "referred" ? (c.referrerName ?? "Referred") : "Applied"}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">

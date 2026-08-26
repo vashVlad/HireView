@@ -111,6 +111,11 @@ export async function POST(request: NextRequest) {
   // scoreCandidate() or affect scoring in any way, unlike linkedInMode.
   const agencyNameField = formData.get("agencyName");
   const agencyName = typeof agencyNameField === "string" && agencyNameField.trim() ? agencyNameField.trim() : undefined;
+  // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's ask — see decisions-log.md):
+  // "Referred" source, exact mirror of the agencyName exception right above
+  // (same purely additive metadata plumbing, no scoring involvement).
+  const referrerNameField = formData.get("referrerName");
+  const referrerName = typeof referrerNameField === "string" && referrerNameField.trim() ? referrerNameField.trim() : undefined;
 
   let jobDescription: string;
 
@@ -270,6 +275,8 @@ export async function POST(request: NextRequest) {
               fingerprint: null,
               linkedInMode: linkedInModeOverride,
               agencyName,
+              // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's ask): mirrors agencyName directly above.
+              referrerName,
               projectId,
               userId,
               scoreThreshold,
@@ -422,6 +429,8 @@ export async function POST(request: NextRequest) {
           fingerprint,
           linkedInMode: linkedInModeOverride,
           agencyName,
+          // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's ask): mirrors agencyName directly above.
+          referrerName,
           projectId,
           userId,
           scoreThreshold,
