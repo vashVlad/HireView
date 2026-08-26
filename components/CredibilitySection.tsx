@@ -114,8 +114,18 @@ export function GithubSignalPanel({ signal }: { signal: GithubCorroboration }) {
 export function LinkedInLinkPanel({ url }: { url: string }) {
   const match = url.match(/\/in\/([^/?#]+)/i);
   const username = match ? decodeURIComponent(match[1]) : "Profile";
+  // Real bug found 2026-08-26 (Vlad: "linkedin links give 404 error") —
+  // scoreCandidate.ts's own extraction prompt explicitly allows a bare
+  // domain string like "linkedin.com/in/janedoe" (no protocol), matching
+  // exactly how it's commonly written on a resume. `href` never normalized
+  // that anywhere, so a protocol-less value rendered as a RELATIVE link —
+  // the browser resolved it against this app's own origin
+  // (`{origin}/linkedin.com/in/janedoe`) instead of navigating to LinkedIn,
+  // hitting this app's own 404 page instead. Prepend https:// whenever the
+  // stored value doesn't already start with a protocol.
+  const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className={CHIP_CLASSES}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={CHIP_CLASSES}>
       <LinkedInLogo />
       <span>{username}</span>
     </a>
