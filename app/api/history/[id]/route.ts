@@ -109,13 +109,16 @@ export async function PATCH(
       await updateScreeningFraudRisk(numId, body.fraudRisk, actorUserId);
     }
     // Source edit, 2026-07-20 (Vlad's ask) — lets a recruiter correct/set
-    // source (Applicant/LinkedIn/Agency) after the fact from the Pipeline
-    // card, not just at initial screening time. Pure metadata patch, see
-    // lib/screenings.ts's updateScreening() comment — never re-triggers scoring.
-    if (body.linkedInMode !== undefined || body.agencyName !== undefined) {
+    // source (Applicant/LinkedIn/Agency/Referred) after the fact from the
+    // Pipeline card, not just at initial screening time. Pure metadata
+    // patch, see lib/screenings.ts's updateScreening() comment — never
+    // re-triggers scoring. referrerName added 2026-08-26 (Vlad's ask),
+    // mirrors agencyName exactly.
+    if (body.linkedInMode !== undefined || body.agencyName !== undefined || body.referrerName !== undefined) {
       await updateScreening(numId, {
         ...(body.linkedInMode !== undefined ? { linkedInMode: Boolean(body.linkedInMode) } : {}),
         ...(body.agencyName !== undefined ? { agencyName: String(body.agencyName) } : {}),
+        ...(body.referrerName !== undefined ? { referrerName: String(body.referrerName) } : {}),
       });
     }
     // Blacklist, 2026-07-31 (Vlad's ask) — set from the archive-reason

@@ -27,16 +27,24 @@ import { sourceLabelWithDetail } from "@/lib/sourceType";
  * label on ResultCard/Pipeline/All Candidates, the agency-name input's focus
  * ring) was updated to the same three tokens in the same pass — see
  * decisions-log.md.
+ *
+ * Referred, added 2026-08-26 (Vlad's ask) — teal (#14B8A6, Tailwind
+ * teal-500), distinct from all three existing tokens above. Mirrors Agency's
+ * mechanism exactly (a name captured alongside the type) but represents a
+ * person-to-person referral rather than an agency relationship, hence the
+ * two-person glyph instead of a briefcase.
  */
 export default function SourceIcon({
   type,
   agencyName,
+  referrerName,
   size = 14,
   showApplicant = false,
   contentIsLinkedIn,
 }: {
   type: SourceType;
   agencyName?: string | null;
+  referrerName?: string | null;
   size?: number;
   showApplicant?: boolean;
   /**
@@ -59,7 +67,7 @@ export default function SourceIcon({
 }) {
   if (type === "applicant" && !showApplicant) return null;
 
-  const title = sourceLabelWithDetail(type, agencyName);
+  const title = sourceLabelWithDetail(type, agencyName, referrerName);
 
   if (type === "linkedin" && contentIsLinkedIn === false) {
     return (
@@ -98,6 +106,20 @@ export default function SourceIcon({
             d="M8 8V6.8a1.6 1.6 0 0 1 1.6-1.6h4.8A1.6 1.6 0 0 1 16 6.8V8m-11 0h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"
           />
           <path fill="none" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" d="M4 13h16" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (type === "referred") {
+    return (
+      <span title={title} className="shrink-0">
+        <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Referred" className="shrink-0">
+          <rect width="24" height="24" rx="4" fill="#14B8A6" />
+          <circle cx="8.5" cy="9" r="2.1" fill="none" stroke="#fff" strokeWidth="1.4" />
+          <path d="M5 17v-0.8c0-1.9 1.6-3.2 3.5-3.2s3.5 1.3 3.5 3.2V17" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="15.5" cy="9" r="2.1" fill="none" stroke="#fff" strokeWidth="1.4" />
+          <path d="M12 17v-0.8c0-1.9 1.6-3.2 3.5-3.2s3.5 1.3 3.5 3.2V17" fill="none" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>
     );

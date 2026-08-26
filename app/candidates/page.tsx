@@ -143,7 +143,7 @@ function CandidateCard({
    * this page had no click-to-edit affordance the way PipelineTab does.
    * Mirrors PipelineTab's handleSourceChange exactly (same PATCH shape).
    */
-  onSourceChange: (id: number, linkedInMode: boolean, agencyName: string) => void;
+  onSourceChange: (id: number, linkedInMode: boolean, agencyName: string, referrerName?: string) => void;
   onFraudRiskComplete: (id: number, assessment: FraudRiskAssessment) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -152,6 +152,7 @@ function CandidateCard({
   const [pendingSource, setPendingSource] = useState(false);
   const [pendingSourceType, setPendingSourceType] = useState<SourceType>(getSourceType(s));
   const [pendingSourceAgencyName, setPendingSourceAgencyName] = useState(s.agencyName ?? "");
+  const [pendingSourceReferrerName, setPendingSourceReferrerName] = useState(s.referrerName ?? "");
   const [noteText, setNoteText] = useState(s.notes ?? "");
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [credibility, setCredibility] = useState<CredibilityAssessment | undefined>(s.credibility);
@@ -325,18 +326,25 @@ function CandidateCard({
                 if (pendingSource) { setPendingSource(false); return; }
                 setPendingSourceType(getSourceType(s));
                 setPendingSourceAgencyName(s.agencyName ?? "");
+                setPendingSourceReferrerName(s.referrerName ?? "");
                 setPendingSource(true);
               }}
               title="Click to set source"
               className="shrink-0 rounded-full transition-opacity hover:opacity-70">
-              <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} contentIsLinkedIn={s.resumeIsLinkedIn} showApplicant />
+              <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} referrerName={s.referrerName} contentIsLinkedIn={s.resumeIsLinkedIn} showApplicant />
             </button>
             {/* Visible agency name, added 2026-07-27 (Vlad's ask) — matches
                 the same addition on ResultCard.tsx and the Pipeline tab
-                card, so all three source-badge surfaces stay in sync. */}
+                card, so all three source-badge surfaces stay in sync.
+                Visible referrer name added 2026-08-26, exact mirror. */}
             {!pendingSource && getSourceType(s) === "agency" && s.agencyName && (
               <span className="shrink-0 truncate text-[11px] font-medium text-orange-600 dark:text-orange-400">
                 {s.agencyName}
+              </span>
+            )}
+            {!pendingSource && getSourceType(s) === "referred" && s.referrerName && (
+              <span className="shrink-0 truncate text-[11px] font-medium text-teal-600 dark:text-teal-400">
+                {s.referrerName}
               </span>
             )}
             {pendingSource && (
@@ -378,6 +386,31 @@ function CandidateCard({
                     onClick={() => setPendingSourceType("agency")}
                     className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-orange-400" : "opacity-40 hover:opacity-100"}`}>
                     <SourceIcon type="agency" agencyName={s.agencyName} size={13} />
+                  </button>
+                )}
+                {/* Referred, added 2026-08-26 (Vlad's ask), exact mirror of Agency directly above. */}
+                {pendingSourceType === "referred" ? (
+                  <input
+                    autoFocus
+                    type="text"
+                    value={pendingSourceReferrerName}
+                    onChange={(e) => setPendingSourceReferrerName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && pendingSourceReferrerName.trim()) { setPendingSource(false); onSourceChange(s.id, false, "", pendingSourceReferrerName); }
+                      if (e.key === "Escape") setPendingSource(false);
+                    }}
+                    onBlur={() => {
+                      if (pendingSourceReferrerName.trim()) { setPendingSource(false); onSourceChange(s.id, false, "", pendingSourceReferrerName); }
+                      else setPendingSource(false);
+                    }}
+                    placeholder="Referred by…"
+                    className="w-28 rounded-full border border-teal-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-teal-500 dark:border-teal-500/40 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                ) : (
+                  <button type="button" title="Referred"
+                    onClick={() => setPendingSourceType("referred")}
+                    className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "referred" ? "ring-2 ring-teal-400" : "opacity-40 hover:opacity-100"}`}>
+                    <SourceIcon type="referred" referrerName={s.referrerName} size={13} />
                   </button>
                 )}
               </div>
@@ -1047,15 +1080,17 @@ export default function CandidatesPage() {
 
   // Editable source, 2026-07-20 (Vlad's ask) — mirrors PipelineTab's
   // handleSourceChange (app/projects/[id]/page.tsx) exactly, including the
-  // optimistic-update-with-rollback shape.
-  function handleSourceChange(id: number, linkedInMode: boolean, agencyName: string) {
+  // optimistic-update-with-rollback shape. referrerName param added
+  // 2026-08-26 (Vlad's ask), exact mirror of agencyName.
+  function handleSourceChange(id: number, linkedInMode: boolean, agencyName: string, referrerName: string = "") {
     const trimmedAgencyName = linkedInMode ? "" : agencyName.trim();
+    const trimmedReferrerName = linkedInMode ? "" : referrerName.trim();
     const previous = screenings.find((s) => s.id === id);
-    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, linkedInMode, agencyName: trimmedAgencyName || undefined } : s));
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, linkedInMode, agencyName: trimmedAgencyName || undefined, referrerName: trimmedReferrerName || undefined } : s));
     fetch(`/api/history/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ linkedInMode, agencyName: trimmedAgencyName }),
+      body: JSON.stringify({ linkedInMode, agencyName: trimmedAgencyName, referrerName: trimmedReferrerName }),
     }).catch(() => {
       if (previous) setScreenings((prev) => prev.map((s) => s.id === id ? previous : s));
     });

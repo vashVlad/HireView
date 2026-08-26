@@ -10,16 +10,20 @@ export interface FunnelCandidate {
   recruiterEmail: string | null;
   /**
    * "outbound" = LinkedIn-sourced (linkedin_mode), "agency" = came in via an
-   * agency (agency_name set), "inbound" = ordinary applicant, the default.
-   * Kept as this inbound/outbound/agency naming rather than switching to
-   * lib/sourceType.ts's applicant/linkedin/agency strings, to minimize churn
-   * across this file's many existing `c.source === "outbound"` call sites —
-   * same three-way classification underneath (see getSourceType()). Agency
-   * added 2026-07-20, Vlad's ask.
+   * agency (agency_name set), "referred" = referred by a person
+   * (referrer_name set), "inbound" = ordinary applicant, the default. Kept
+   * as this inbound/outbound/agency/referred naming rather than switching to
+   * lib/sourceType.ts's applicant/linkedin/agency/referred strings, to
+   * minimize churn across this file's many existing
+   * `c.source === "outbound"` call sites — same four-way classification
+   * underneath (see getSourceType()). Agency added 2026-07-20, referred
+   * added 2026-08-26, both Vlad's ask.
    */
-  source: "inbound" | "outbound" | "agency";
+  source: "inbound" | "outbound" | "agency" | "referred";
   /** Set only when source === "agency". */
   agencyName?: string | null;
+  /** Set only when source === "referred". */
+  referrerName?: string | null;
   score: number;
   /** True if this score cleared the candidate's own project's score_threshold (defaults to 45 if the project has none set, or no project at all) — independent of current status, so a candidate manually archived later for an unrelated reason still counts as having passed. */
   passedThreshold: boolean;
@@ -98,6 +102,8 @@ export interface FunnelSourceSplit {
   inbound: number;
   outbound: number;
   agency: number;
+  /** Added 2026-08-26 (Vlad's ask) — exact mirror of agency's slot. */
+  referred: number;
 }
 
 /** Same funnel shape as FunnelData's top-level stages, scoped to one project instead of blended across all of them. */

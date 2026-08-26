@@ -804,13 +804,15 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
   // page itself — nothing here is shared across users, only the URL it
   // points to is.
   const [currentBatchId, setCurrentBatchId] = useState<string | undefined>(() => initialBatch?.batchId);
-  // "Link to this batch" also copies the URL to the clipboard, 2026-08-04
-  // (Vlad's ask) — same origin+path copy pattern already used for the
-  // per-candidate share link (handleCopyLink in this file's PipelineTab) and
-  // app/candidates/page.tsx. Does not prevent the normal navigation — the
-  // link still works as a link, this just also puts the URL on the
-  // clipboard so the recruiter can paste it somewhere (Slack, email) without
-  // a separate copy step.
+  // "Share this batch", 2026-08-04 (Vlad's ask), redesigned 2026-08-26
+  // (Vlad's ask — "I'd like to have a share this batch button so I can
+  // share it") from a navigating `<Link>` that also copied on click into a
+  // pure copy-only button, same origin+path copy pattern and same pill/icon
+  // styling as the per-candidate share link (handleCopyLink in this file's
+  // PipelineTab and app/candidates/page.tsx) — no navigation, just puts the
+  // durable /projects/[id]/batches/[batchId] URL on the clipboard so the
+  // recruiter can paste it somewhere (Slack, email) without a separate copy
+  // step or leaving the page they're already on.
   const [batchLinkCopied, setBatchLinkCopied] = useState(false);
   async function handleCopyBatchLink(batchId: string) {
     await navigator.clipboard.writeText(`${window.location.origin}/projects/${project.id}/batches/${batchId}`);
@@ -874,15 +876,20 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
   const [blacklistMatches, setBlacklistMatches] = useState<Map<string, BlacklistEntry>>(
     () => new Map(initialBatch?.blacklistMatches ?? [])
   );
-  // Source picker, 2026-07-20 (Vlad's ask): three mutually-exclusive types —
+  // Source picker, 2026-07-20 (Vlad's ask): mutually-exclusive types —
   // Applicant (default), LinkedIn (existing linkedin_mode, unchanged scoring
-  // behavior via isLinkedInMode below), Agency (new, carries a free-text
-  // agency name, no scoring impact — see lib/sourceType.ts). `isLinkedInMode`
-  // kept as a derived const rather than removed so every existing
+  // behavior via isLinkedInMode below), Agency (carries a free-text agency
+  // name, no scoring impact — see lib/sourceType.ts). `isLinkedInMode` kept
+  // as a derived const rather than removed so every existing
   // isLinkedInMode-keyed copy string/behavior below (screen button label,
   // loading text, formData wiring) needed zero other changes.
+  //
+  // Referred, added 2026-08-26 (Vlad's ask) — a fourth type, exact mirror of
+  // Agency's mechanism but for a person's name instead of an agency's. See
+  // lib/sourceType.ts's getSourceType().
   const [sourceType, setSourceType] = useState<SourceType>("applicant");
   const [agencyNameInput, setAgencyNameInput] = useState("");
+  const [referrerNameInput, setReferrerNameInput] = useState("");
   const isLinkedInMode = sourceType === "linkedin";
   // undefined = not checked yet, 0 = checked and there's nothing to suggest against.
   const [otherActiveCount, setOtherActiveCount] = useState<number | undefined>(undefined);
@@ -1003,6 +1010,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
     formData.set("projectId", String(project.id));
     if (isLinkedInMode) formData.set("linkedInMode", "true");
     if (sourceType === "agency" && agencyNameInput.trim()) formData.set("agencyName", agencyNameInput.trim());
+    if (sourceType === "referred" && referrerNameInput.trim()) formData.set("referrerName", referrerNameInput.trim());
     filesToScore.forEach((f) => formData.append("resumes", f));
 
     const res = await fetch("/api/screen-resumes", { method: "POST", body: formData, signal });
@@ -1294,32 +1302,35 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Durable, bookmarkable/shareable link to this exact batch —
-                Vlad's ask, 2026-07-28. Only present once at least one new
+            {/* Share this batch — copies the durable, bookmarkable
+                /projects/[id]/batches/[batchId] URL to the clipboard.
+                Vlad's ask, 2026-07-28, redesigned 2026-08-26 into a pure
+                copy-only button (no navigation) matching the per-candidate
+                "Share link" pill styling. Only present once at least one new
                 candidate was actually scored (see currentBatchId above). */}
             {currentBatchId && (
-              <Link
-                href={`/projects/${project.id}/batches/${currentBatchId}`}
+              <button
+                type="button"
                 onClick={() => handleCopyBatchLink(currentBatchId)}
-                className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                className="inline-flex items-center gap-1.5 rounded-full bg-zinc-100 px-3.5 py-1.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
               >
                 {batchLinkCopied ? (
                   <>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    Link copied
+                    Copied
                   </>
                 ) : (
                   <>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" strokeLinecap="round" strokeLinejoin="round" />
+                      <rect x="9" y="9" width="11" height="11" rx="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                     </svg>
-                    Link to this batch
+                    Share this batch
                   </>
                 )}
-              </Link>
+              </button>
             )}
             <button type="button" onClick={handleReset}
               className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900">
@@ -1451,6 +1462,7 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
                 fd.set("projectId", String(suggestion.projectId));
                 if (isLinkedInMode) fd.set("linkedInMode", "true");
                 if (sourceType === "agency" && agencyNameInput.trim()) fd.set("agencyName", agencyNameInput.trim());
+                if (sourceType === "referred" && referrerNameInput.trim()) fd.set("referrerName", referrerNameInput.trim());
                 const res = await fetch("/api/screenings/save-one", { method: "POST", body: fd });
                 if (!res.ok) {
                   const body = await res.json().catch(() => null);
@@ -1515,7 +1527,9 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
       <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
         <div className="flex flex-wrap gap-1.5">
           {/* Colors updated 2026-07-27 (Vlad's ask) — gray/LinkedIn-blue/orange
-              everywhere a source is shown; see SourceIcon.tsx's header comment. */}
+              everywhere a source is shown; see SourceIcon.tsx's header comment.
+              Referred (teal) added 2026-08-26, same convention. Description
+              text below each picker removed the same day (Vlad's ask). */}
           <button type="button" onClick={() => setSourceType("applicant")}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
               sourceType === "applicant"
@@ -1543,14 +1557,16 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
             <SourceIcon type="agency" size={14} />
             Agency
           </button>
+          <button type="button" onClick={() => setSourceType("referred")}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors ${
+              sourceType === "referred"
+                ? "bg-teal-500 text-white"
+                : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+            }`}>
+            <SourceIcon type="referred" size={14} />
+            Referred
+          </button>
         </div>
-        <span className="text-sm text-zinc-400 dark:text-zinc-500">
-          {sourceType === "linkedin"
-            ? "— adjusts scoring for profile PDFs"
-            : sourceType === "agency"
-            ? "— label only, scoring unaffected"
-            : "— default, no scoring adjustment"}
-        </span>
         {sourceType === "agency" && (
           <input
             type="text"
@@ -1558,6 +1574,15 @@ function ScreenTab({ project, onScreeningsSaved, onScreeningFieldSaved, stagesMa
             value={agencyNameInput}
             onChange={(e) => setAgencyNameInput(e.target.value)}
             className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm placeholder-zinc-400 focus:border-orange-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
+          />
+        )}
+        {sourceType === "referred" && (
+          <input
+            type="text"
+            placeholder="Referred by…"
+            value={referrerNameInput}
+            onChange={(e) => setReferrerNameInput(e.target.value)}
+            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm placeholder-zinc-400 focus:border-teal-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder-zinc-500"
           />
         )}
       </div>
@@ -1738,13 +1763,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   const [pendingFlagNote, setPendingFlagNote] = useState("");
   // Editable source, 2026-07-20 (Vlad's ask): clicking the SourceIcon on a
   // Pipeline card opens an inline popover (same pattern as the flag-note
-  // popover right above) to set/correct Applicant/LinkedIn/Agency after the
-  // fact. pendingSourceAgencyName is seeded from the candidate's current
-  // value when the popover opens (see the click handler below), not always
-  // starting blank, so correcting a typo doesn't mean retyping the whole name.
+  // popover right above) to set/correct Applicant/LinkedIn/Agency/Referred
+  // after the fact. pendingSourceAgencyName/pendingSourceReferrerName are
+  // seeded from the candidate's current value when the popover opens (see
+  // the click handler below), not always starting blank, so correcting a
+  // typo doesn't mean retyping the whole name. Referred added 2026-08-26
+  // (Vlad's ask), exact mirror of Agency.
   const [pendingSourceId, setPendingSourceId] = useState<number | null>(null);
   const [pendingSourceType, setPendingSourceType] = useState<SourceType>("applicant");
   const [pendingSourceAgencyName, setPendingSourceAgencyName] = useState("");
+  const [pendingSourceReferrerName, setPendingSourceReferrerName] = useState("");
   // Tracks candidates flipped to "archived" via the status dropdown during
   // THIS session, specifically so the reason picker stays visible in place
   // instead of the card sinking immediately (see isSettledArchived below).
@@ -2124,22 +2152,26 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   }
 
   // Saves the source picked in the popover below. Applicant/LinkedIn clear
-  // any stored agency name (mutually exclusive, matches ScreenTab's picker);
-  // Agency requires a non-empty name or the save is a no-op (button is
-  // disabled in that case too — see the popover JSX).
-  async function handleSourceChange(id: number, type: SourceType, agencyName: string) {
+  // any stored agency/referrer name (mutually exclusive, matches ScreenTab's
+  // picker); Agency/Referred each require a non-empty name or the save is a
+  // no-op (button is disabled in that case too — see the popover JSX).
+  // referrerName param + "referred" handling added 2026-08-26 (Vlad's ask),
+  // exact mirror of agencyName's handling.
+  async function handleSourceChange(id: number, type: SourceType, agencyName: string, referrerName: string = "") {
     const linkedInMode = type === "linkedin";
     const trimmedAgencyName = type === "agency" ? agencyName.trim() : "";
+    const trimmedReferrerName = type === "referred" ? referrerName.trim() : "";
     if (type === "agency" && !trimmedAgencyName) return;
+    if (type === "referred" && !trimmedReferrerName) return;
     const previous = screenings.find((s) => s.id === id);
     setPendingSourceId(null);
-    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, linkedInMode, agencyName: trimmedAgencyName || undefined } : s));
-    onScreeningFieldSaved?.(id, { linkedInMode, agencyName: trimmedAgencyName || undefined });
+    setScreenings((prev) => prev.map((s) => s.id === id ? { ...s, linkedInMode, agencyName: trimmedAgencyName || undefined, referrerName: trimmedReferrerName || undefined } : s));
+    onScreeningFieldSaved?.(id, { linkedInMode, agencyName: trimmedAgencyName || undefined, referrerName: trimmedReferrerName || undefined });
     try {
       await fetch(`/api/history/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linkedInMode, agencyName: trimmedAgencyName }),
+        body: JSON.stringify({ linkedInMode, agencyName: trimmedAgencyName, referrerName: trimmedReferrerName }),
       });
     } catch {
       if (previous) {
@@ -2589,20 +2621,27 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       if (pendingSourceId === s.id) { setPendingSourceId(null); return; }
                       setPendingSourceType(getSourceType(s));
                       setPendingSourceAgencyName(s.agencyName ?? "");
+                      setPendingSourceReferrerName(s.referrerName ?? "");
                       setPendingSourceId(s.id);
                     }}
                     title="Click to set source"
                     className="shrink-0 rounded-full transition-opacity hover:opacity-70">
-                    <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} contentIsLinkedIn={s.resumeIsLinkedIn} showApplicant />
+                    <SourceIcon type={getSourceType(s)} agencyName={s.agencyName} referrerName={s.referrerName} contentIsLinkedIn={s.resumeIsLinkedIn} showApplicant />
                   </button>
                   {/* Visible agency name, added 2026-07-27 (Vlad's ask) —
                       matches the same addition on ResultCard.tsx and
                       app/candidates/page.tsx, so all three source-badge
                       surfaces stay in sync (same convention as the LinkedIn
-                      badge consistency fix, 2026-07-17). */}
+                      badge consistency fix, 2026-07-17). Visible referrer
+                      name added 2026-08-26, exact mirror. */}
                   {pendingSourceId !== s.id && getSourceType(s) === "agency" && s.agencyName && (
                     <span className="shrink-0 truncate text-[11px] font-medium text-orange-600 dark:text-orange-400">
                       {s.agencyName}
+                    </span>
+                  )}
+                  {pendingSourceId !== s.id && getSourceType(s) === "referred" && s.referrerName && (
+                    <span className="shrink-0 truncate text-[11px] font-medium text-teal-600 dark:text-teal-400">
+                      {s.referrerName}
                     </span>
                   )}
                   {pendingSourceId === s.id && (
@@ -2644,6 +2683,31 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                           onClick={() => setPendingSourceType("agency")}
                           className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "agency" ? "ring-2 ring-orange-400" : "opacity-40 hover:opacity-100"}`}>
                           <SourceIcon type="agency" agencyName={s.agencyName} size={13} />
+                        </button>
+                      )}
+                      {/* Referred, added 2026-08-26 (Vlad's ask), exact mirror of Agency directly above. */}
+                      {pendingSourceType === "referred" ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={pendingSourceReferrerName}
+                          onChange={(e) => setPendingSourceReferrerName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleSourceChange(s.id, "referred", "", pendingSourceReferrerName);
+                            if (e.key === "Escape") setPendingSourceId(null);
+                          }}
+                          onBlur={() => {
+                            if (pendingSourceReferrerName.trim()) handleSourceChange(s.id, "referred", "", pendingSourceReferrerName);
+                            else setPendingSourceId(null);
+                          }}
+                          placeholder="Referred by…"
+                          className="w-28 rounded-full border border-teal-300 bg-white px-2 py-0.5 text-[11px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-teal-500 dark:border-teal-500/40 dark:bg-zinc-900 dark:text-zinc-100"
+                        />
+                      ) : (
+                        <button type="button" title="Referred"
+                          onClick={() => setPendingSourceType("referred")}
+                          className={`rounded-full p-0.5 transition-opacity ${getSourceType(s) === "referred" ? "ring-2 ring-teal-400" : "opacity-40 hover:opacity-100"}`}>
+                          <SourceIcon type="referred" referrerName={s.referrerName} size={13} />
                         </button>
                       )}
                     </div>

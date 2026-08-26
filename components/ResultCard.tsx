@@ -441,16 +441,23 @@ export function ResultCard({
                 (lib/screenings.ts's saveScreening(), see decisions-log.md's
                 2026-08-17 checklist-scoring entry) — this is purely about
                 not calling it out as a separate visible line on the card. */}
-            <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} contentIsLinkedIn={result.resumeIsLinkedIn} />
+            <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} referrerName={result.referrerName} contentIsLinkedIn={result.resumeIsLinkedIn} />
             {/* Visible agency name, added 2026-07-27 (Vlad's ask: "also show
                 agency name when it's given") — previously only surfaced as a
                 hover tooltip via SourceIcon's title (sourceLabelWithDetail),
                 easy to miss. Red to match the agency icon/badge's existing
                 accent color elsewhere in this app (the agency-name input
-                field's border, the Agency picker's selected-ring color). */}
+                field's border, the Agency picker's selected-ring color).
+                Visible referrer name added 2026-08-26, exact mirror (teal to
+                match the Referred icon/picker). */}
             {getSourceType(result) === "agency" && result.agencyName && (
               <span className={`shrink-0 font-medium text-orange-600 dark:text-orange-400 ${solo ? "text-sm" : "text-xs"}`}>
                 {result.agencyName}
+              </span>
+            )}
+            {getSourceType(result) === "referred" && result.referrerName && (
+              <span className={`shrink-0 font-medium text-teal-600 dark:text-teal-400 ${solo ? "text-sm" : "text-xs"}`}>
+                {result.referrerName}
               </span>
             )}
           </div>

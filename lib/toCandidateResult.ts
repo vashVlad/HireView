@@ -34,6 +34,7 @@ export function toCandidateResult(s: ScreeningRecord): CandidateResult {
     notes: s.notes,
     linkedInMode: s.linkedInMode,
     agencyName: s.agencyName,
+    referrerName: s.referrerName,
     duplicateFlag: s.duplicateFlag,
     duplicateMatchId: s.duplicateMatchId,
     historyAlertType: s.historyAlertType,
