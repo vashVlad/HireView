@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
+import { listCalibrationExamples } from "@/lib/calibrationExamples";
+import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
+import { combineTargetCompanies, computeTargetCompanyBoost } from "@/lib/targetCompanyBoost";
 import { getFitExclusionMap, getProjectChecklist, listProjects } from "@/lib/projects";
 import { evaluateGate1 } from "@/lib/evaluateGate1";
 import { getUserTeamIds } from "@/lib/teams";
@@ -291,6 +294,26 @@ export async function POST(request: NextRequest) {
   // rate-limit reason. The full result + jobDescription ride along so a
   // "Transfer" action can save directly via /api/screenings/save-one
   // without re-scoring.
+  // 2026-08-26 consistency-audit fix (Vlad: "run check through the code and
+  // see whether we use the proper information... They have to match and not
+  // be ran as two different things") — this loop previously hardcoded `[]`
+  // for calibrationExamples on every project and never ran GitHub
+  // extraction, even though a "Transfer" action can persist this exact
+  // result as-is (see the comment on `scored` below) — so an accepted
+  // suggestion could get saved as a real screening that never benefited
+  // from that project's calibration library or carried a GitHub signal,
+  // unlike every other path that produces a persisted screening. GitHub
+  // extraction only needs to run once per candidate (not once per project
+  // scored against), unlike calibration examples which are genuinely
+  // per-project.
+  const githubUsername = extractGithubUsername(resumeText);
+  const githubSignal = githubUsername
+    ? await fetchGithubCorroboration(githubUsername).catch((err) => {
+        console.error("GitHub corroboration lookup failed during cross-project-fit (scoring unaffected):", err);
+        return null;
+      })
+    : null;
+
   const scored: {
     projectId: number;
     projectName: string;
@@ -305,7 +328,21 @@ export async function POST(request: NextRequest) {
     const results = await Promise.all(
       batch.map(async (project) => {
         try {
-          const result = await scoreCandidate(project.jobDescription, resumeFileName, resumeText, [], project.name);
+          const calibrationExamples = await listCalibrationExamples(project.id).catch(() => []);
+          const result = await scoreCandidate(project.jobDescription, resumeFileName, resumeText, calibrationExamples, project.name);
+          if (githubSignal) result.githubSignal = githubSignal;
+          // Target-company boost — same gap as calibration/GitHub above,
+          // never applied here even though it's a deterministic bonus every
+          // other scoreCandidate() path applies for its own project. Mirrors
+          // saveScreening()'s own boost block exactly (lib/screenings.ts) so
+          // the suggestion's displayed score matches what actually gets
+          // saved if the recruiter accepts it via Transfer.
+          const targetCompanies = combineTargetCompanies(project.jdAnalysis?.wide?.targetCompanies, project.jdAnalysis?.narrow?.targetCompanies);
+          if (targetCompanies.length > 0) {
+            const boost = computeTargetCompanyBoost(resumeText, targetCompanies);
+            if (boost.matched) result.score = Math.min(100, result.score + boost.bonus);
+            result.targetCompanyMatches = boost.matchedCompanies;
+          }
           return {
             projectId: project.id,
             projectName: project.name,

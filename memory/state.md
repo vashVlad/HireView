@@ -1,6 +1,6 @@
 # Cirot — Current State
 
-*Last updated: 2026-08-24 (seeded from Cirot-Dev-Log.docx, Architecture-Redesign doc, and git log — update this in place as state changes, don't just append)*
+*Last updated: 2026-08-26 (later) (seeded from Cirot-Dev-Log.docx, Architecture-Redesign doc, and git log — update this in place as state changes, don't just append)*
 
 ## Status: live, in active use at Brillio
 
@@ -695,3 +695,25 @@ Full detail in `decisions-log.md`'s matching 2026-08-25 entry — short pointer 
 - New `companyMatchesAny()` helper (`lib/targetCompanyBoost.ts`) threaded through `CrossReferenceChecker` -> `CredibilitySection` -> `TrajectoryGraph` (`targetCompanyMatches` prop) — a role at one of the candidate's matched target companies now gets a distinct emerald ring on its trajectory-graph dot (both resume and cross-reference lines), a mention in the hover tooltip and click-to-expand detail panel, and a conditional legend entry.
 - **Verified:** `tsc` clean, all 11 tests pass (new cases for `companyMatchesAny` in `test_target_company_boost.mjs`), do-not-touch diff clean (this round touched no do-not-touch file).
 - **Not live-tested, left uncommitted**, per standing instruction.
+
+## 2026-08-26 — LinkedIn profile link surfaced next to Cross-Reference Check
+
+Full detail in `decisions-log.md`'s matching 2026-08-26 entry — short pointer here per convention.
+
+- `CandidateResult.linkedinUrl` (AI-extracted since 2026-08-06, previously unused in any UI) now renders as a "View LinkedIn profile ↗" link directly above the upload dropzone in `CrossReferenceChecker` (`components/CredibilityChecker.tsx`) — lets a recruiter open the profile, grab a LinkedIn "Save to PDF" export, and drop it straight into the slot beneath.
+- Closed the reload gap so this also survives Pipeline tab / `/candidates/[id]` / batch-page reloads, not just the live Screen tab: new `attachLinkedinUrls()` in `lib/screenings.ts` (mirrors the existing `attachChecklistEvaluations` isolated-fetch pattern for this same deferred column), wired into `listScreenings`, `getScreeningsByIds`, `listScreeningsByBatch`; `lib/toCandidateResult.ts` gained the missing `linkedinUrl` mapping (same class of gap as the `checklistEvaluation` fix from 2026-08-20).
+- **Verified:** `tsc` clean, `git diff --stat -w` shows exactly the 4 intended files changed, do-not-touch diff clean (no do-not-touch file needed changes — the type fields already existed).
+- **Not live-tested, left uncommitted**, per standing instruction.
+
+## 2026-08-26 (later) — Score consistency fix + GitHub surfaced at initial screening
+
+Full detail in `decisions-log.md`'s matching 2026-08-26 (later) entry — short pointer here per convention.
+
+- **`score` is now computed in code** from `mustHaveScore`/`niceToHaveScore` (`lib/scoreCandidate.ts`, DO-NOT-TOUCH EXCEPTION) instead of trusting Claude's own top-line number — fixes a real reported bug (89 on first screen, 100 on rescreen with the same 90/80 sub-scores, which the formula says should be 86.5). Applies to every caller of `scoreCandidate()` automatically (initial screening, rescreen, Archive Fits decide, cross-project-fit, transfer/preview).
+- **GitHub corroboration now runs during initial screening**, not just the cross-reference check — `app/api/screen-resumes/route.ts` (DO-NOT-TOUCH EXCEPTION) gained a third parallel branch alongside scoring/fingerprinting using the existing free `lib/githubCorroboration.ts` helpers. New `github_signal` jsonb column (`supabase-migration-github-signal.sql`, NOT YET RUN), same deferred-column/isolated-fetch pattern as `linkedin_url` from earlier today (`attachGithubSignals()` mirrors `attachLinkedinUrls()`).
+- **New "Personal details" block on `ResultCard.tsx`**, directly above Career trajectory — shows LinkedIn + GitHub together (`LinkedInLinkPanel`/`GithubSignalPanel`, both now exported from `components/CredibilitySection.tsx` for reuse).
+- **Verified:** `tsc` clean, all 11 tests pass, do-not-touch diff clean except the two flagged exceptions (`scoreCandidate.ts`, `screen-resumes/route.ts`).
+- **Not live-tested, not migrated, left uncommitted**, per standing instruction.
+- **Follow-up, same session:** `app/api/history/[id]/rescreen/route.ts` fixed to reach full parity with initial screening — it was silently dropping `currentCompany`/`currentTitle`/`totalExperienceSummary`/`linkedinUrl` on every rescreen (pre-existing gap, calls `scoreCandidate()` directly, never `saveScreening()`), and never ran GitHub extraction at all. Both now included, matching Vlad's ask: "Rescreening must serve exactly the same purpose as the initial screening."
+- **Follow-up, same session — display simplified:** LinkedIn/GitHub now show as a single minimal chip (brand logo + username) in exactly one place — the Personal Details block, top of card. Removed from the cross-reference-check panel and the old upload-adjacent link entirely.
+- **Follow-up, same session — full consistency audit, 8 fixes:** `targetCompanyMatches` had no DB read-back path at all (new `attachTargetCompanyMatches`); `listScreeningsByBatch` missing checklist enrichment; Copy-transfer dropped 8 fields; cross-project-fit + Archive-Fits-screen never used real calibration examples; target-company boost never applied on Transfer/Archive-Fits-screen; GitHub extraction missing from 3 more scoring paths; `/transfer/preview` gained the Gate 1 pre-filter every other path already had. Full detail in `decisions-log.md`'s matching entry.

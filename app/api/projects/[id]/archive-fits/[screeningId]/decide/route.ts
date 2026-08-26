@@ -7,6 +7,9 @@ import { scoreCandidate } from "@/lib/scoreCandidate";
 import { evaluateGate1 } from "@/lib/evaluateGate1";
 import { buildGate1ArchivedResult } from "@/lib/buildGate1ArchivedResult";
 import { decideArchiveFit, getArchiveFitRow } from "@/lib/archiveFits";
+import { listCalibrationExamples } from "@/lib/calibrationExamples";
+import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
+import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import type { CandidateResult } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -91,6 +94,19 @@ export async function POST(
     const gate1 = await evaluateGate1({ checklist, resumeText, scoreThreshold: project.scoreThreshold });
     const checklistEvaluation = gate1.checklistEvaluation;
 
+    // 2026-08-26 consistency-audit fix (Vlad: "run check through the code
+    // and see whether we use the proper information... They have to match
+    // and not be ran as two different things") — this route previously
+    // hardcoded `[]` for calibrationExamples and never ran GitHub
+    // extraction, even though it's scoring the SAME candidate against a
+    // real project's JD exactly like screen-resumes/route.ts and the
+    // rescreen route do (both of which fetch real calibration examples and
+    // run GitHub extraction). Fixed to match: real calibration examples for
+    // the destination project, and the same third-parallel-branch GitHub
+    // pattern used everywhere else scoreCandidate() runs.
+    const calibrationExamples = await listCalibrationExamples(project.id).catch(() => []);
+    const githubUsername = extractGithubUsername(resumeText);
+
     let rescoredResult: CandidateResult;
     if (gate1.gate1Only) {
       rescoredResult = await buildGate1ArchivedResult({
@@ -100,8 +116,24 @@ export async function POST(
         checklistEvaluation: checklistEvaluation!,
       });
     } else {
-      rescoredResult = await scoreCandidate(project.jobDescription, resume.fileName, resumeText, [], project.name);
+      const [scoreResult, githubSignal] = await Promise.all([
+        scoreCandidate(project.jobDescription, resume.fileName, resumeText, calibrationExamples, project.name),
+        githubUsername
+          ? fetchGithubCorroboration(githubUsername).catch((err) => {
+              console.error("GitHub corroboration lookup failed during Archive Fits screen (scoring unaffected):", err);
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
+      rescoredResult = scoreResult;
+      if (githubSignal) rescoredResult.githubSignal = githubSignal;
     }
+
+    // Same consistency-audit fix — targetCompanies was never passed through
+    // to transferScreeningToProject, so the target-company boost (a
+    // deterministic, code-computed bonus every other scoreCandidate() path
+    // applies) never fired for an Archive Fits "screen" decision either.
+    const targetCompanies = combineTargetCompanies(project.jdAnalysis?.wide?.targetCompanies, project.jdAnalysis?.narrow?.targetCompanies);
 
     const { newScreeningId } = await transferScreeningToProject({
       screeningId,
@@ -111,6 +143,7 @@ export async function POST(
       rescoredResult,
       gate1Only: gate1.gate1Only,
       checklistEvaluation,
+      targetCompanies,
     });
 
     await decideArchiveFit(row.id, "screened", newScreeningId, user.id);

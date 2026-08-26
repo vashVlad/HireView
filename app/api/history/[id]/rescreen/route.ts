@@ -4,7 +4,8 @@ import { getProject, getProjectChecklist } from "@/lib/projects";
 import { listCalibrationExamples } from "@/lib/calibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { scoreCandidate } from "@/lib/scoreCandidate";
-import { evaluateChecklist, computeChecklistPercentageScore } from "@/lib/evaluateChecklist";
+import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
+import { evaluateChecklist } from "@/lib/evaluateChecklist";
 import { computeTargetCompanyBoost, combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import type { ChecklistEvaluation } from "@/lib/types";
@@ -70,43 +71,66 @@ export async function POST(
 
     const calibrationExamples = await listCalibrationExamples(project.id).catch(() => []);
 
-    const result = await scoreCandidate(
-      project.jobDescription,
-      resume.fileName,
-      resumeText,
-      calibrationExamples,
-      roleContext,
-      project.jdAnalysis?.linkedInContext ?? undefined,
-      screening.linkedInMode
-    );
+    // Real gap found 2026-08-26 (Vlad: "Rescreening must serve exactly the
+    // same purpose as the initial screening") — GitHub extraction/lookup
+    // (lib/githubCorroboration.ts, added to screen-resumes/route.ts earlier
+    // the same day) never ran here at all, so a rescreen could only ever
+    // leave a candidate's GitHub panel stale or blank. Same free, code-side,
+    // best-effort pattern as screen-resumes/route.ts's third parallel
+    // branch — username extraction is a synchronous regex match, cost-free
+    // either way; the network fetch only fires when one was actually found.
+    const githubUsername = extractGithubUsername(resumeText);
+    const [result, githubSignal] = await Promise.all([
+      scoreCandidate(
+        project.jobDescription,
+        resume.fileName,
+        resumeText,
+        calibrationExamples,
+        roleContext,
+        project.jdAnalysis?.linkedInContext ?? undefined,
+        screening.linkedInMode
+      ),
+      githubUsername
+        ? fetchGithubCorroboration(githubUsername).catch((err) => {
+            console.error("GitHub corroboration lookup failed during rescreen (scoring unaffected):", err);
+            return null;
+          })
+        : Promise.resolve(null),
+    ]);
+    if (githubSignal) result.githubSignal = githubSignal;
 
-    // Real gap found 2026-08-17 (checklist-only-scoring round): this route
-    // called scoreCandidate() directly and wrote its raw result.score with
-    // no checklist or target-company adjustment at all — the ONLY caller of
-    // saveScreening() (app/api/screen-resumes/route.ts, do-not-touch) got
-    // both, but a rescreen bypasses saveScreening() entirely (it patches an
-    // existing row via updateScreening() instead), so neither ever applied
-    // here. Harmless under the old additive model (a rescore just missed a
-    // small bonus), but a real correctness bug now that a project WITH a
-    // checklist configured is supposed to have score computed ENTIRELY from
-    // it (Vlad's explicit ask — see lib/evaluateChecklist.ts's
-    // computeChecklistPercentageScore comment) — rescreening such a
-    // candidate would have silently reverted them to the AI's own 0-100
-    // judgment instead. Mirrors lib/screenings.ts's saveScreening() ordering
-    // exactly: checklist sets the base score first (falls back to the AI's
-    // own score if no checklist, or the checklist has zero total points),
-    // target-company boost stacks on top of whichever base that leaves.
+    // REVISED 2026-08-26 (Vlad's explicit rule, after reviewing a rescreen
+    // that stayed pinned at 100 despite mustHaveScore 92 / niceHaveScore 78):
+    // "The checklist score must be overwritten with actual screening score
+    // after candidate passes first gate. That score has to be used strictly
+    // for gate one[,] including cross-project fit suggestions." This route
+    // ALWAYS runs a real, full scoreCandidate() call above — unlike
+    // screen-resumes/route.ts and archive-fits/decide/route.ts, it has no
+    // Gate 1 short-circuit at all, so every candidate reaching this block
+    // has, by construction, already cleared Gate 1 (or the project has no
+    // checklist/gate configured). The checklist score therefore must NEVER
+    // overwrite result.score here — doing so was the original 2026-08-17
+    // "checklist-only-scoring round" bug, superseded once the real Gate 1/
+    // Gate 2 split landed (2026-08-19/20): lib/screenings.ts's
+    // saveScreening() already only lets checklistScore override score when
+    // gate1Only is true (i.e. scoreCandidate() never ran, there's no real
+    // score to protect) — this route's unconditional override was simply
+    // never brought in line with that same rule when it was written. Fixed:
+    // checklistEvaluation is still computed and attached (still needed for
+    // the matched/unmatched breakdown display and the trajectory graph's
+    // per-role checklist evidence), but result.score/mustHaveScore/
+    // niceToHaveScore stay exactly what scoreCandidate() (and, as of the
+    // score-consistency fix earlier today, its own code-computed formula)
+    // returned. Target-company boost below is unaffected — it's a small,
+    // additive, code-computed bonus on top of the real score, not a
+    // replacement of it, so it still applies here as before.
     let checklistEvaluation: ChecklistEvaluation | null = null;
     const checklist = await getProjectChecklist(project.id).catch(() => null);
     if (checklist) {
       checklistEvaluation = await evaluateChecklist({ resumeText, checklist }).catch((err) => {
-        console.error("Checklist evaluation failed during rescreen (score falls back to the AI's own judgment):", err);
+        console.error("Checklist evaluation failed during rescreen (breakdown just won't show; score is unaffected either way):", err);
         return null;
       });
-      if (checklistEvaluation) {
-        const checklistScore = computeChecklistPercentageScore(checklistEvaluation.results);
-        if (checklistScore !== null) result.score = checklistScore;
-      }
     }
 
     const targetCompanies = combineTargetCompanies(project.jdAnalysis?.wide?.targetCompanies, project.jdAnalysis?.narrow?.targetCompanies);
@@ -128,6 +152,23 @@ export async function POST(
         strengths: result.strengths,
         concerns: result.concerns,
         careerTrajectory: result.careerTrajectory,
+        // Real gap found 2026-08-26 (Vlad: "Rescreening must serve exactly
+        // the same purpose as the initial screening") — scoreCandidate()
+        // has generated currentCompany/currentTitle/totalExperienceSummary/
+        // linkedinUrl in the same call as scoring since 2026-08-06 (do-not-
+        // touch exception), and screen-resumes/route.ts's best-effort call
+        // has always written all four for a NEW screening — but this
+        // route's own payload never included any of them, so rescreening an
+        // already-saved candidate silently left these four (plus, as of
+        // today, githubSignal) frozen at whatever they were the day the
+        // candidate was first screened, even if the resume file itself
+        // changed since. Same "silently dropped on rescreen" bug class as
+        // trajectoryEntries above.
+        currentCompany: result.currentCompany,
+        currentTitle: result.currentTitle,
+        totalExperienceSummary: result.totalExperienceSummary,
+        linkedinUrl: result.linkedinUrl,
+        ...(result.githubSignal !== undefined ? { githubSignal: result.githubSignal } : {}),
         // Real gap found and fixed 2026-08-17 (roadmap 2.5.2 verification
         // pass): scoreCandidate() has returned trajectoryEntries since the
         // do-not-touch exception landed, and updateScreening() has
@@ -160,6 +201,11 @@ export async function POST(
         recommendation: result.recommendation,
         checklistEvaluation: checklistEvaluation ?? undefined,
         targetCompanyMatches: result.targetCompanyMatches,
+        currentCompany: result.currentCompany,
+        currentTitle: result.currentTitle,
+        totalExperienceSummary: result.totalExperienceSummary,
+        linkedinUrl: result.linkedinUrl,
+        githubSignal: result.githubSignal,
       },
     });
   } catch (err) {

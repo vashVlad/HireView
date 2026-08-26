@@ -404,6 +404,19 @@ export interface CandidateResult {
   totalExperienceSummary?: string;
   linkedinUrl?: string;
   /**
+   * GitHub corroboration, 2026-08-26 (Vlad's ask: pull GitHub during the
+   * initial screening, not just the cross-reference check — see
+   * CredibilityAssessment.githubSignal above, which this reuses the exact
+   * same GithubCorroboration shape as). Set by app/api/screen-resumes/
+   * route.ts (do-not-touch exception) straight from the free, code-side
+   * lib/githubCorroboration.ts helpers — no AI call, no extra cost, runs
+   * alongside scoring/fingerprinting. Mirrors ScreeningRecord.githubSignal
+   * for the same "post-screening ResultCard predates a real ScreeningRecord
+   * read-back" reason as linkedinUrl above. Undefined = no GitHub URL found
+   * in the resume, or the public lookup failed/no such user.
+   */
+  githubSignal?: GithubCorroboration;
+  /**
    * Target-company score boost, 2026-08-07 (Vlad's ask: "add companies in
    * there that would increase the score if it matches with the candidate's
    * resume"). Set by saveScreening() (lib/screenings.ts) — a deterministic,
@@ -758,6 +771,18 @@ export interface ScreeningRecord {
    * currentCompany above.
    */
   linkedinUrl?: string;
+  /**
+   * GitHub corroboration, 2026-08-26 (Vlad's ask: surface this during the
+   * initial screening too, not just the cross-reference check). Same
+   * deferred-column pattern as currentCompany/linkedinUrl above
+   * (supabase-migration-github-signal.sql) — written on the main insert in
+   * saveScreening() from result.githubSignal (screen-resumes/route.ts, do-
+   * not-touch exception), read back via a separate attachGithubSignals()
+   * isolated fetch mirroring attachLinkedinUrls. See CandidateResult.
+   * githubSignal and CredibilityAssessment.githubSignal for the shared
+   * GithubCorroboration shape this reuses.
+   */
+  githubSignal?: GithubCorroboration;
   /**
    * Target-company score boost, 2026-08-07 (Vlad's ask). Which of the
    * project's configured "score boost companies" (JD Analyzer, reuses

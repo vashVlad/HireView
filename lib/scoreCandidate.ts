@@ -301,13 +301,34 @@ ${jobDescription}`,
 
   const input = toolUse.input as Omit<CandidateResult, "fileName" | "recommendation" | "status" | "id">;
 
+  // DO-NOT-TOUCH EXCEPTION (2026-08-26, Vlad's explicit ask) — `score`'s own
+  // schema description above (line 44) says it should be
+  // (mustHaveScore × 0.65) + (niceToHaveScore × 0.35), rounded, but that was
+  // only ever a natural-language instruction to Claude, never enforced.
+  // Claude can and does return an internally-inconsistent top-line score
+  // (e.g. mustHaveScore 90 / niceToHaveScore 80 — formula says 86.5 — but
+  // `score` came back 100) because it fills in all three numbers itself in
+  // one shot and doesn't reliably keep its own arithmetic consistent.
+  // Recomputed here in code instead of trusting Claude's raw `score` value —
+  // this doesn't change what mustHaveScore/niceToHaveScore mean or how
+  // they're judged, it just makes the one number that everything else in the
+  // app gates on (thresholds, archiving, ranking, "proceed"/"decline") match
+  // the two sub-scores that actually did the judging, every time. Applies to
+  // every caller of scoreCandidate() uniformly — initial screening
+  // (screen-resumes/route.ts), the rescreen route
+  // (history/[id]/rescreen/route.ts), Archive Fits' decide route, cross-
+  // project-fit, and transfer/preview — since they all funnel through this
+  // one function rather than each computing score independently.
+  const computedScore = Math.max(0, Math.min(100, Math.round((input.mustHaveScore ?? 0) * 0.65 + (input.niceToHaveScore ?? 0) * 0.35)));
+
   return {
     fileName,
     ...input,
+    score: computedScore,
     // Empty string (schema's "genuinely doesn't list one" case) isn't a real
     // URL — normalize to undefined so downstream code can use a plain
     // truthiness/undefined check instead of also handling "".
     linkedinUrl: input.linkedinUrl ? input.linkedinUrl : undefined,
-    recommendation: input.score > 50 ? "proceed" : "decline",
+    recommendation: computedScore > 50 ? "proceed" : "decline",
   };
 }
