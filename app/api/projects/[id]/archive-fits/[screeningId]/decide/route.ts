@@ -12,7 +12,19 @@ import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCor
 import { combineTargetCompanies } from "@/lib/targetCompanyBoost";
 import type { CandidateResult } from "@/lib/types";
 
-export const maxDuration = 60;
+// Raised from 60 to 300, 2026-08-26 (found while investigating a real
+// "rescreen failed" report, then auditing every route with this same
+// shape) — this route shares rescreen/route.ts's exact architecture:
+// evaluateGate1() runs a real Claude call (evaluateChecklist under the
+// hood) that MUST resolve before deciding whether to call scoreCandidate()
+// at all — two sequential real Claude calls when a checklist exists and
+// gate1 passes, the identical shape that broke rescreen at 60s. The
+// 30->60 raise on 2026-08-20 (see comment below) accounted for adding a
+// SECOND Claude call here at all, but not for how close that pushed this
+// route to the same ceiling every genuinely two-sequential-call route
+// needs 300 for (screen-resumes/route.ts, screenings/save-one/route.ts,
+// rescreen/route.ts). Same Vercel-plan caveat as those files.
+export const maxDuration = 300;
 
 /**
  * Archive Fits, 2026-07-30 — a recruiter's decision on one queued match.

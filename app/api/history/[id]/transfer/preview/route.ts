@@ -12,7 +12,19 @@ import { canAccessScreening, canAccessProject, getAuthUser } from "@/lib/auth";
 import { errorMessage } from "@/lib/errorMessage";
 import type { CandidateResult } from "@/lib/types";
 
-export const maxDuration = 60;
+// Raised from 60 to 300, 2026-08-26 (found while investigating a real
+// "rescreen failed" report, then auditing every route with this same
+// shape) — Gate 1 was added to THIS route earlier today (see this file's
+// own header comment: "same pattern as rescreen/route.ts") and shares its
+// exact architecture: evaluateGate1() runs a real Claude call
+// (evaluateChecklist under the hood) that MUST resolve before deciding
+// whether to call scoreCandidate() at all — two sequential real Claude
+// calls when a checklist exists and gate1 passes, the identical shape that
+// broke rescreen at 60s. Raised to match the established precedent
+// (screen-resumes/route.ts, screenings/save-one/route.ts, rescreen/route.ts
+// all at 300 for this same root cause) rather than wait for this route to
+// fail the same way. Same Vercel-plan caveat as those files.
+export const maxDuration = 300;
 
 /**
  * Step 2 of the redesigned Transfer flow (Vlad's ask, 2026-07-29) — only

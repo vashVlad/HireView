@@ -17,7 +17,18 @@ import {
 } from "@/lib/screenings";
 import type { CandidateResult, StoredFitSuggestion } from "@/lib/types";
 
-export const maxDuration = 60;
+// Raised from 60 to 300, 2026-08-26 (found while investigating a real
+// "rescreen failed" report, then auditing every route with this same
+// shape) — this route already runs two sequential waves of real Claude
+// calls (evaluateGate1() across every other active project, THEN
+// scoreCandidate() for whichever projects passed gate1 — see this file's
+// own comments below on why those two waves can't be collapsed into one).
+// Today's session (2026-08-26 consistency audit) also added a GitHub
+// corroboration lookup here. Same root cause and same established fix as
+// screen-resumes/route.ts, screenings/save-one/route.ts, rescreen/route.ts,
+// transfer/preview/route.ts, and archive-fits/decide/route.ts — raised to
+// match. Same Vercel-plan caveat as those files.
+export const maxDuration = 300;
 
 /**
  * A suggestion has to actually clear the other project's own bar by a real
