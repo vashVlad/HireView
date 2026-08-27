@@ -1793,6 +1793,18 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
   // treatment, since hiding a suspected-fraud duplicate by default would be
   // exactly the wrong instinct. Keyed by matchClusters' cluster.index.
   const [expandedClusters, setExpandedClusters] = useState<Set<number>>(new Set());
+  // Target company chip, 2026-08-27 (Vlad's ask: "have the chip in the
+  // pipelines of 'target companie' if was found... same logic [as] when I
+  // do a mouse over the score - a tab shows up") — mirrors ResultCard.tsx's
+  // chip exactly (this tab has its own separate hand-rolled card markup,
+  // same drift class as the Gate-1/Personal-Details gaps fixed before it:
+  // targetCompanyMatches was already threaded into this tab's own
+  // CrossReferenceChecker call for trajectory-graph highlighting, but no
+  // chip existed anywhere in this tab to show the match itself), which
+  // itself mirrors ScoreBadge.tsx's hover-tooltip pattern. One Set instead
+  // of ResultCard's single boolean since this tab renders every candidate's
+  // card — and hover state — at once, not one card per component instance.
+  const [hoveredTargetCompanyIds, setHoveredTargetCompanyIds] = useState<Set<number>>(new Set());
   const [notesMap, setNotesMap] = useState<Record<number, { text: string; saveState: "idle" | "saving" | "saved" }>>({});
   const [credibilityMap, setCredibilityMap] = useState<Record<number, CredibilityAssessment>>({});
   // Mirrors credibilityMap exactly — added 2026-07-30, same gap Activity
@@ -2611,6 +2623,53 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                     >
                       Name match
                     </button>
+                  )}
+                  {/* Target company chip, 2026-08-27 — exact mirror of
+                      ResultCard.tsx's chip, which itself mirrors
+                      ScoreBadge.tsx's hover-tooltip pattern (Vlad's ask:
+                      "same logic [as] when I do a mouse over the score - a
+                      tab shows up"). onMouseEnter/onMouseLeave here don't
+                      need stopPropagation — hovering never triggers the card
+                      header's own onClick (that's a click handler, not a
+                      hover one), only the actual click-to-expand-card
+                      gesture would need it, and this chip has no click
+                      handler of its own anymore. */}
+                  {s.targetCompanyMatches && s.targetCompanyMatches.length > 0 && (
+                    <div
+                      className="relative inline-flex shrink-0"
+                      onMouseEnter={(e) => { e.stopPropagation(); setHoveredTargetCompanyIds((prev) => new Set(prev).add(s.id)); }}
+                      onMouseLeave={(e) => {
+                        e.stopPropagation();
+                        setHoveredTargetCompanyIds((prev) => {
+                          const next = new Set(prev);
+                          next.delete(s.id);
+                          return next;
+                        });
+                      }}
+                    >
+                      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+                        Target company
+                      </span>
+                      {hoveredTargetCompanyIds.has(s.id) && (
+                        <div
+                          role="tooltip"
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-2.5 text-left text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                        >
+                          <p className="mb-1.5 font-semibold text-zinc-500 dark:text-zinc-400">Score boosted +5 for matching:</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {s.targetCompanyMatches.map((c) => (
+                              <span
+                                key={c}
+                                className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-300"
+                              >
+                                {c}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {/* "Multiple roles" toggle lives as a full-width bar above
                       the card now (2026-07-30) — see the <li> rendered just

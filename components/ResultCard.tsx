@@ -209,8 +209,10 @@ export function ResultCard({
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [showNameCompare, setShowNameCompare] = useState(false);
   const [nameCompareAssessment, setNameCompareAssessment] = useState<CredibilityAssessment | null>(null);
-  // Target company match list, 2026-08-25 (Vlad's ask) — see the badge's own comment below.
-  const [showTargetCompanies, setShowTargetCompanies] = useState(false);
+  // Target company chip, redesigned 2026-08-27 (Vlad's ask: "same logic [as]
+  // when I do a mouse over the score - a tab shows up") — see the chip's own
+  // comment below.
+  const [targetCompanyHovered, setTargetCompanyHovered] = useState(false);
   const [checkingGate, setCheckingGate] = useState(false);
   const [gateChecked, setGateChecked] = useState(false);
   const [checkingFit, setCheckingFit] = useState(false);
@@ -408,30 +410,45 @@ export function ResultCard({
                 {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
-            {/* Target company score boost, 2026-08-07 (Vlad's ask) — only
-                shown when a match was actually found (see
-                lib/targetCompanyBoost.ts); an empty array (checked, no
-                match) or undefined (no target companies configured) both
-                render nothing, matching this row's "only surface a signal,
-                not a reassurance" convention (same as the duplicate/history
-                badges above).
-                Interactive as of 2026-08-25 (Vlad's ask: "show the
-                companies that were found during the screening, not just
-                the chip... make the chip interactive"). The hover title=
-                still works as a quick preview, but the real list now also
-                renders as its own row (below, next to the other badges)
-                once clicked — a hover-only tooltip is easy to miss and
-                doesn't work at all on touch devices, same reasoning as
-                TrajectoryGraph's click-to-expand detail panel. */}
+            {/* Target company chip, 2026-08-07 (Vlad's ask) — only shown when
+                a match was actually found (see lib/targetCompanyBoost.ts); an
+                empty array (checked, no match) or undefined (no target
+                companies configured) both render nothing, matching this
+                row's "only surface a signal, not a reassurance" convention
+                (same as the duplicate/history badges above).
+                Redesigned 2026-08-27 (Vlad's ask: "same logic [as] when I do
+                a mouse over the score - a tab shows up") — exact mirror of
+                ScoreBadge.tsx's hover-tooltip pattern (onMouseEnter/
+                onMouseLeave + an absolutely-positioned floating panel)
+                instead of the previous click-to-expand pill row. */}
             {result.targetCompanyMatches && result.targetCompanyMatches.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowTargetCompanies((v) => !v)}
-                title={`Score boosted +5 for matching: ${result.targetCompanyMatches.join(", ")}`}
-                className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 transition-colors hover:bg-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-400 dark:hover:bg-emerald-500/25"
+              <div
+                className="relative inline-flex shrink-0"
+                onMouseEnter={() => setTargetCompanyHovered(true)}
+                onMouseLeave={() => setTargetCompanyHovered(false)}
               >
-                Target company match {showTargetCompanies ? "▴" : "▾"}
-              </button>
+                <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
+                  Target company
+                </span>
+                {targetCompanyHovered && (
+                  <div
+                    role="tooltip"
+                    className="absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-2.5 text-left text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                  >
+                    <p className="mb-1.5 font-semibold text-zinc-500 dark:text-zinc-400">Score boosted +5 for matching:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {result.targetCompanyMatches.map((c) => (
+                        <span
+                          key={c}
+                          className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-300"
+                        >
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
             {/* JD checklist net-delta badge REMOVED 2026-08-18 (Vlad, direct
                 card-density feedback: "don't show the checklist at all" —
@@ -461,23 +478,6 @@ export function ResultCard({
               </span>
             )}
           </div>
-          {/* Target company match list, 2026-08-25 — expands under the badge
-              row when "Target company match" is clicked. Each pill names one
-              matched company directly, not just a hover-only tooltip
-              (result.targetCompanyMatches — same data the badge's title=
-              already summarized, now genuinely readable/tappable). */}
-          {showTargetCompanies && result.targetCompanyMatches && result.targetCompanyMatches.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {result.targetCompanyMatches.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-300"
-                >
-                  {c}
-                </span>
-              ))}
-            </div>
-          )}
           {savedId !== undefined && result.status !== undefined && onStatusChange && (
             <div onClick={(e) => e.stopPropagation()}>
               <StatusStageControl
