@@ -555,10 +555,10 @@ function CandidateCard({
           <ScreeningStepper steps={buildScreeningSteps(s)} />
           <AttributePills pills={buildAttributePills(s)} />
 
-          {/* ── Career story ─────────────────────────────────────────── */}
+          {/* ── Experience at a glance ──────────────────────────────── */}
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career story</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Experience at a glance</p>
               {credibility && (() => {
                 const sig = SIGNAL_BADGE[credibility.overallSignal] ?? SIGNAL_BADGE.minor_concerns;
                 return (

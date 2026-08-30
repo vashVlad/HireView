@@ -2982,17 +2982,17 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   </div>
                 )}
 
-                {/* ── Career story ──────────────────────────────────────── */}
+                {/* ── Experience at a glance ────────────────────────────── */}
                 {/* Gated on actual content existing, 2026-08-20 — previously
                     unconditional, so a gate1Only candidate (empty
-                    careerTrajectory AND empty summary) rendered a "Career
-                    story" header with nothing under it, part of the same
-                    blank-card bug fixed above. Matches ResultCard.tsx's own
-                    trajectoryText gate (only renders when there's text). */}
+                    careerTrajectory AND empty summary) rendered this header
+                    with nothing under it, part of the same blank-card bug
+                    fixed above. Matches ResultCard.tsx's own trajectoryText
+                    gate (only renders when there's text). */}
                 {(s.careerTrajectory || s.summary) && (
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Career story</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Experience at a glance</p>
                     {credibilityMap[s.id] && (() => {
                       const sig = SIGNAL_BADGE[credibilityMap[s.id].overallSignal] ?? SIGNAL_BADGE.minor_concerns;
                       return (
@@ -3005,8 +3005,9 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   {/* Task #98, 2026-08-28 — mirrors ResultCard.tsx's own
                       swap from a bare TrajectoryRenderer paragraph to
                       bullets + collapsible full text. hideLabel since the
-                      "Career story" header right above already serves as
-                      this section's label. */}
+                      header right above already serves as this section's
+                      label (renamed 2026-08-30 from "Career story" to
+                      "Experience at a glance", matching ResultCard.tsx). */}
                   <ExperienceHighlightsList
                     highlights={buildExperienceHighlights(s)}
                     trajectoryText={s.careerTrajectory ?? s.summary}

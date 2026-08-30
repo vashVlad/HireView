@@ -29,10 +29,10 @@ export function ExperienceHighlightsList({
   className?: string;
   highlightsProp?: { must: string[]; nice: string[] };
   /**
-   * Task #98, 2026-08-28 — the Pipeline tab card already has its own
-   * "Career story" header (with a credibility signal badge ResultCard
-   * doesn't have) sitting directly above where this renders; a second
-   * "Experience at a glance" label there would be a redundant, adjacent
+   * Task #98, 2026-08-28 — the Pipeline tab and All Candidates cards already
+   * render their own "Experience at a glance" header (with a credibility
+   * signal badge ResultCard doesn't have) directly above where this renders;
+   * a second copy of the same label here would be a redundant, adjacent
    * duplicate. ResultCard.tsx has no such header, so it keeps the label.
    */
   hideLabel?: boolean;
