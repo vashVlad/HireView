@@ -439,6 +439,23 @@ function describeFlaggedRow(row: TrajectoryComparisonRow, index: number): string
  * industryNote, resumeDelta, resolvedConcerns, linkedInSignals) that have
  * nothing to do with trajectory comparison specifically.
  */
+// Pure, exported for unit testing (test_assess_credibility_reuse.mjs).
+// Reuse audit, 2026-08-28 (Vlad's ask: "see if we can connect and reuse
+// some of the outputs" across the AI pipeline files) — this file already
+// accepts candidateTrajectoryEntries (structured), but its own
+// trajectoryNote/industryNote judgments were still being read purely off
+// raw resumeText, re-deriving a narrative scoreCandidate.ts already wrote.
+// This block lets the judgment build on that existing read instead of
+// re-litigating it from scratch.
+export function buildExistingNarrativeBlock(params: { careerTrajectory?: string; totalExperienceSummary?: string }): string {
+  const { careerTrajectory, totalExperienceSummary } = params;
+  if (!careerTrajectory && !totalExperienceSummary) return "";
+  const lines: string[] = [];
+  if (careerTrajectory) lines.push(`Career trajectory (already written during initial screening): ${careerTrajectory}`);
+  if (totalExperienceSummary) lines.push(`Total experience summary (already written during initial screening): ${totalExperienceSummary}`);
+  return `\nThe initial JD-fit screening already produced a read on this candidate's background:\n${lines.join("\n")}\nBuild on this existing read rather than re-deriving it from scratch — only note something new if the resume text itself reveals more than this summary already captured.\n`;
+}
+
 async function judgeTrajectoryComparison(params: {
   flaggedRows: TrajectoryComparisonRow[];
   resumeText: string;
@@ -447,6 +464,8 @@ async function judgeTrajectoryComparison(params: {
   isLinkedIn?: boolean;
   originalConcerns?: string[];
   roleContext?: string;
+  careerTrajectory?: string;
+  totalExperienceSummary?: string;
 }): Promise<{
   judgedRows: TrajectoryComparisonRow[];
   trajectoryNote: string;
@@ -455,7 +474,7 @@ async function judgeTrajectoryComparison(params: {
   resolvedConcerns?: { concern: string; explanation: string }[];
   linkedInSignals?: CredibilityAssessment["linkedInSignals"];
 }> {
-  const { flaggedRows, resumeText, crossRefText, crossRefLabel, isLinkedIn, originalConcerns, roleContext } = params;
+  const { flaggedRows, resumeText, crossRefText, crossRefLabel, isLinkedIn, originalConcerns, roleContext, careerTrajectory, totalExperienceSummary } = params;
 
   const hasOriginalConcerns = Boolean(originalConcerns && originalConcerns.length > 0);
   const flaggedRowsBlock =
@@ -486,7 +505,7 @@ ${roleNote}
 
 FLAGGED COMPARISONS:
 ${flaggedRowsBlock}
-
+${buildExistingNarrativeBlock({ careerTrajectory, totalExperienceSummary })}
 Your job:
 1. For each flagged comparison above, decide status/severity/note per the tool schema's tolerance rules. Be precise — over-flagging stylistic differences as full discrepancies erodes trust in this tool as much as missing a real one does.
 2. Read the RESUME's own trajectory for consistency and signs of inflation — trajectoryNote, one sentence.
@@ -596,8 +615,10 @@ async function assessCredibilityWithTrajectoryComparison(params: {
   roleContext?: string;
   isLinkedIn?: boolean;
   originalConcerns?: string[];
+  careerTrajectory?: string;
+  totalExperienceSummary?: string;
 }): Promise<CredibilityAssessment> {
-  const { resumeText, crossRefText, candidateTrajectoryEntries, roleContext, isLinkedIn, originalConcerns } = params;
+  const { resumeText, crossRefText, candidateTrajectoryEntries, roleContext, isLinkedIn, originalConcerns, careerTrajectory, totalExperienceSummary } = params;
   const crossRefLabel = isLinkedIn ? "LinkedIn profile" : "cross-reference document";
 
   const extraction = await extractCrossRefTrajectory(resumeText, crossRefText);
@@ -613,6 +634,8 @@ async function assessCredibilityWithTrajectoryComparison(params: {
     isLinkedIn,
     originalConcerns,
     roleContext,
+    careerTrajectory,
+    totalExperienceSummary,
   });
 
   // Merge judged rows back into the full set, by position — flaggedRows was
@@ -691,8 +714,18 @@ export async function assessCredibility(params: {
    * every deferred field in this codebase already follows.
    */
   candidateTrajectoryEntries?: TrajectoryEntry[];
+  /**
+   * Reuse audit, 2026-08-28 — scoreCandidate.ts's own prose careerTrajectory
+   * and totalExperienceSummary, so this check's trajectoryNote/industryNote
+   * judgments build on the existing read instead of re-deriving it from raw
+   * resumeText a second time. See buildExistingNarrativeBlock's doc comment.
+   * Optional, same graceful-degradation convention as every other field
+   * here — omit for a screening that predates this or simply has neither.
+   */
+  careerTrajectory?: string;
+  totalExperienceSummary?: string;
 }): Promise<CredibilityAssessment> {
-  const { resumeText, crossRefText, roleContext, isLinkedIn, originalConcerns, candidateTrajectoryEntries } = params;
+  const { resumeText, crossRefText, roleContext, isLinkedIn, originalConcerns, candidateTrajectoryEntries, careerTrajectory, totalExperienceSummary } = params;
 
   if (crossRefText && candidateTrajectoryEntries && candidateTrajectoryEntries.length > 0) {
     return assessCredibilityWithTrajectoryComparison({
@@ -702,6 +735,8 @@ export async function assessCredibility(params: {
       roleContext,
       isLinkedIn,
       originalConcerns,
+      careerTrajectory,
+      totalExperienceSummary,
     });
   }
 
@@ -762,7 +797,7 @@ ${linkedInStep}
 ${resolvedConcernsStep}
 
 Be precise and brief. trajectoryNote and industryNote must be one sentence each — no exceptions. Do not write paragraphs.
-
+${buildExistingNarrativeBlock({ careerTrajectory, totalExperienceSummary })}
 RESUME:
 ${resumeText}${crossRefSection}`;
 

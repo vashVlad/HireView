@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { assessCredibility, detectLinkedIn } from "@/lib/assessCredibility";
 import { extractResumeText } from "@/lib/parseResume";
-import { getScreeningConcerns, getScreeningResume, getScreeningTrajectoryEntries, updateScreening } from "@/lib/screenings";
+import { getScreeningConcerns, getScreeningNarrativeContext, getScreeningResume, getScreeningTrajectoryEntries, updateScreening } from "@/lib/screenings";
 import { getSupabaseClient, RESUME_BUCKET } from "@/lib/supabase";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
 import { extractGithubUsername, fetchGithubCorroboration } from "@/lib/githubCorroboration";
@@ -153,6 +153,7 @@ export async function POST(request: NextRequest) {
   let crossRefPath: string | undefined;
   let originalConcerns: string[];
   let candidateTrajectoryEntries: Awaited<ReturnType<typeof getScreeningTrajectoryEntries>>;
+  let narrativeContext: Awaited<ReturnType<typeof getScreeningNarrativeContext>>;
   try {
     // originalConcerns (added 2026-07-29, positive-scoring feature) is an
     // independent read, same reasoning as the main-resume/cross-ref split
@@ -163,17 +164,19 @@ export async function POST(request: NextRequest) {
     // fails-the-request read — getScreeningTrajectoryEntries fails closed to
     // null (not thrown), which assessCredibility() reads as "fall back to
     // the legacy single-call comparison," never as a request failure.
-    const [main, crossRef, concerns, trajectoryEntries] = await Promise.all([
+    const [main, crossRef, concerns, trajectoryEntries, narrative] = await Promise.all([
       loadMainResume(),
       loadCrossRef(),
       getScreeningConcerns(screeningId),
       getScreeningTrajectoryEntries(screeningId),
+      getScreeningNarrativeContext(screeningId),
     ]);
     resumeText = main;
     crossRefText = crossRef.crossRefText;
     crossRefPath = crossRef.crossRefPath;
     originalConcerns = concerns;
     candidateTrajectoryEntries = trajectoryEntries;
+    narrativeContext = narrative;
   } catch (err) {
     if (err instanceof RouteError) return err.response;
     throw err;
@@ -217,6 +220,8 @@ export async function POST(request: NextRequest) {
       // here just means "no stored trajectory yet," same "fall back to legacy
       // flow" outcome as undefined, so the conversion is purely a type nicety.
       candidateTrajectoryEntries: candidateTrajectoryEntries ?? undefined,
+      careerTrajectory: narrativeContext.careerTrajectory,
+      totalExperienceSummary: narrativeContext.totalExperienceSummary,
     });
   } catch (err) {
     console.error("Credibility assessment failed:", err);

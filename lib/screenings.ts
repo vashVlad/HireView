@@ -1908,6 +1908,31 @@ export async function getScreeningFitContext(id: number): Promise<{ candidateNam
  * lib/types.ts's CredibilityAssessment.trajectoryComparison comment) while
  * the latter is a real, meaningful empty result.
  */
+/**
+ * Reuse audit, 2026-08-28 — isolated read for assessCredibility.ts's new
+ * careerTrajectory/totalExperienceSummary params (app/api/assess-credibility/
+ * route.ts). Same fail-closed pattern as getScreeningConcerns above: a
+ * missing/unreadable value degrades to undefined, which assessCredibility()
+ * already treats as "skip this context block," never a request failure.
+ * career_trajectory is in the shared SCREENING_COLUMNS select already;
+ * total_experience_summary is not (see the "current role" backfill comment
+ * a few lines below) — fetched together here since both feed the same
+ * single param object at the call site, one isolated query instead of two.
+ */
+export async function getScreeningNarrativeContext(id: number): Promise<{ careerTrajectory?: string; totalExperienceSummary?: string }> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("screenings")
+    .select("career_trajectory, total_experience_summary")
+    .eq("id", id)
+    .maybeSingle<{ career_trajectory: string | null; total_experience_summary: string | null }>();
+  if (error || !data) return {};
+  return {
+    ...(data.career_trajectory ? { careerTrajectory: data.career_trajectory } : {}),
+    ...(data.total_experience_summary ? { totalExperienceSummary: data.total_experience_summary } : {}),
+  };
+}
+
 export async function getScreeningTrajectoryEntries(id: number): Promise<TrajectoryEntry[] | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
@@ -1933,17 +1958,20 @@ export async function getScreeningRoleFitContext(id: number): Promise<{
   strengths: string[];
   careerTrajectory?: string;
   suggestedRoleFits: string[];
+  /** Reuse audit, 2026-08-28 — see generateRoleFit()'s concerns param doc comment. */
+  concerns?: string[];
 } | null> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("screenings")
-    .select("summary, strengths, career_trajectory, suggested_role_fits")
+    .select("summary, strengths, career_trajectory, suggested_role_fits, concerns")
     .eq("id", id)
     .maybeSingle<{
       summary: string;
       strengths: string[];
       career_trajectory: string | null;
       suggested_role_fits: string[] | null;
+      concerns: string[] | null;
     }>();
   if (error || !data) return null;
   return {
@@ -1951,6 +1979,7 @@ export async function getScreeningRoleFitContext(id: number): Promise<{
     strengths: data.strengths ?? [],
     ...(data.career_trajectory != null ? { careerTrajectory: data.career_trajectory } : {}),
     suggestedRoleFits: data.suggested_role_fits ?? [],
+    ...(data.concerns != null ? { concerns: data.concerns } : {}),
   };
 }
 
