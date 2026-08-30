@@ -3,7 +3,7 @@ import { getSupabaseClient } from "@/lib/supabase";
 import { generateInterviewQuestions, hasFraudSignal, type FraudSignals } from "@/lib/generateInterviewQuestions";
 import { updateScreening } from "@/lib/screenings";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
-import type { CredibilityAssessment } from "@/lib/types";
+import type { CredibilityAssessment, FraudRiskAssessment } from "@/lib/types";
 
 export const maxDuration = 30;
 
@@ -26,7 +26,7 @@ export async function GET(
   // Fetch the screening record
   const { data: row, error } = await supabase
     .from("screenings")
-    .select("candidate_name, career_trajectory, summary, concerns, job_description, interview_questions, duplicate_flag, history_alert_type, credibility")
+    .select("candidate_name, career_trajectory, summary, concerns, job_description, interview_questions, duplicate_flag, history_alert_type, credibility, fraud_risk")
     .eq("id", numId)
     .single<{
       candidate_name: string;
@@ -38,6 +38,7 @@ export async function GET(
       duplicate_flag: boolean | null;
       history_alert_type: "previously_seen" | "known_fraud_pattern" | null;
       credibility: CredibilityAssessment | null;
+      fraud_risk: FraudRiskAssessment | null;
     }>();
 
   if (error || !row) {
@@ -66,6 +67,12 @@ export async function GET(
     credibilityDiscrepancies: (row.credibility?.rows ?? [])
       .filter((r) => r.status === "discrepancy" && r.severity === "material")
       .map((r) => `${r.field} — resume says "${r.resume}", cross-reference says "${r.crossRef}"`),
+    // Reuse audit, 2026-08-28 — see FraudSignals.fraudRiskSignals' doc
+    // comment in lib/generateInterviewQuestions.ts. Only populated when a
+    // fraud-risk check has actually run (most candidates never trigger it).
+    ...(row.fraud_risk?.signals?.length
+      ? { fraudRiskSignals: row.fraud_risk.signals.map((s) => ({ patternType: s.patternType, explanation: s.explanation })) }
+      : {}),
   };
 
   // Generate and cache

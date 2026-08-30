@@ -1,6 +1,40 @@
 import { getAnthropicClient, CLAUDE_MODEL } from "./anthropic";
 import { FRAUD_PATTERN_TYPES } from "./types";
-import type { FraudRiskAssessment, FraudRiskSignal, FraudCalibrationExample, FraudPatternType } from "./types";
+import type { FraudRiskAssessment, FraudRiskSignal, FraudCalibrationExample, FraudPatternType, CredibilityAssessment } from "./types";
+
+// Pure, exported for unit testing (test_assessFraudRisk.mjs) — see that
+// file for cases. Reuse audit, 2026-08-28 (Vlad's ask: "see if we can
+// connect and reuse some of the outputs" across the AI pipeline files):
+// this check previously ran completely blind to what the initial
+// screening (scoreCandidate.ts) already flagged in result.concerns, so it
+// could re-surface the exact same issue (an employment gap, say) as a
+// scarier "fraud signal" with a percentage attached, with no awareness the
+// recruiter already saw it as a routine concern. Mirrors the pattern
+// assessCredibility.ts already uses for its own originalConcerns param.
+export function buildKnownConcernsBlock(concerns?: string[]): string {
+  if (!concerns || concerns.length === 0) return "";
+  return `\nThis candidate's initial screening already flagged these concerns — do NOT re-list something already covered here as a new fraud signal unless it reveals something these concerns didn't already say:\n${concerns.map((c) => `- ${c}`).join("\n")}\n`;
+}
+
+// Pure, exported for unit testing. Same reuse-audit motivation as
+// buildKnownConcernsBlock above — when a credibility cross-reference check
+// has already run for this candidate, its findings (discrepancies already
+// explained or resolved) should inform this check instead of being
+// independently re-derived from the raw resume a second time.
+export function buildCredibilityContextBlock(credibility?: CredibilityAssessment): string {
+  if (!credibility) return "";
+  const lines: string[] = [];
+  for (const row of credibility.rows ?? []) {
+    if (row.status === "discrepancy") {
+      lines.push(`- Discrepancy already found: ${row.field} — resume says "${row.resume}", cross-reference says "${row.crossRef}"${row.note ? ` (${row.note})` : ""}`);
+    }
+  }
+  for (const resolved of credibility.resolvedConcerns ?? []) {
+    lines.push(`- Already resolved with evidence, not a fraud signal: ${resolved}`);
+  }
+  if (lines.length === 0) return "";
+  return `\nA credibility cross-reference check has already run for this candidate. Its findings:\n${lines.join("\n")}\nDo not re-derive or re-flag any of the above from scratch — only add a signal here if it's genuinely separate from what's listed.\n`;
+}
 
 // Bounded the same way scoreCandidate.ts's buildCalibrationBlock caps its
 // per-project example set — fraud_calibration_examples is system-wide, so
@@ -136,14 +170,22 @@ export async function assessFraudRisk(params: {
   resumeText: string;
   roleContext?: string;
   calibrationExamples?: FraudCalibrationExample[];
+  /** scoreCandidate.ts's own result.concerns — see buildKnownConcernsBlock's doc comment. */
+  concerns?: string[];
+  /** scoreCandidate.ts's own result.strengths — passed for the same "don't work blind" reason as concerns, currently only used if a future prompt tweak wants it; not yet referenced in userContent below beyond concerns. */
+  strengths?: string[];
+  /** An already-run credibility cross-reference assessment, if one exists — see buildCredibilityContextBlock's doc comment. */
+  credibility?: CredibilityAssessment;
 }): Promise<FraudRiskAssessment> {
-  const { resumeText, roleContext, calibrationExamples = [] } = params;
+  const { resumeText, roleContext, calibrationExamples = [], concerns, credibility } = params;
 
   const roleNote = roleContext
     ? `The recruiter is screening for: ${roleContext}. Use this only to judge whether a title/seniority claim is plausible for someone at that level — do not flag a candidate merely for being a strong fit.`
     : "";
 
   const calibrationBlock = buildFraudCalibrationBlock(calibrationExamples, calibrationExamples.length);
+  const knownConcernsBlock = buildKnownConcernsBlock(concerns);
+  const credibilityContextBlock = buildCredibilityContextBlock(credibility);
 
   // Grounds "is this date plausible" reasoning in the ACTUAL current date —
   // added 2026-08-04, real bug Vlad caught: a resume's real, past end date
@@ -162,7 +204,7 @@ ${todayNote}
 ${roleNote}
 
 ${calibrationBlock}
-
+${knownConcernsBlock}${credibilityContextBlock}
 Your job: read the resume below and identify any specific signals of fabricated or misrepresented experience. Look specifically at:
 - Age/experience math: does claimed seniority or years of experience add up against graduation year or earliest listed role?
 - Graduation year vs. role start dates: does the timeline make sense, or does experience appear to predate a claimed degree without explanation (e.g. part-time/concurrent study)?

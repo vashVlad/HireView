@@ -38,6 +38,17 @@ export async function generateRoleFit(candidate: {
   strengths: string[];
   careerTrajectory?: string;
   resumeText?: string;
+  /**
+   * Reuse audit, 2026-08-28 (Vlad's ask: "see if we can connect and reuse
+   * some of the outputs" across the AI pipeline files) — scoreCandidate.ts's
+   * own result.concerns, previously never passed here. Lets the suggested
+   * alternate role implicitly steer away from the candidate's known weak
+   * points instead of only reasoning from their strengths. Only used in the
+   * summary-based branch below — the resumeText branch (Gate-1-only
+   * candidates) has no concerns to draw from, since no AI scoring call ever
+   * ran for them.
+   */
+  concerns?: string[];
 }): Promise<string> {
   const usingResumeText = !candidate.summary && !!candidate.resumeText;
   const promptText = usingResumeText
@@ -54,7 +65,11 @@ STRENGTHS:
 ${candidate.strengths.join(", ")}
 
 CAREER TRAJECTORY:
-${candidate.careerTrajectory ?? "(not available)"}`;
+${candidate.careerTrajectory ?? "(not available)"}${
+        candidate.concerns && candidate.concerns.length > 0
+          ? `\n\nCONCERNS FLAGGED IN THE ROLE THEY WERE JUST ARCHIVED FROM:\n${candidate.concerns.join(", ")}\nFactor these in — don't suggest a role that would hit the same concerns again.`
+          : ""
+      }`;
 
   const message = await getAnthropicClient().messages.create({
     model: CLAUDE_MODEL,

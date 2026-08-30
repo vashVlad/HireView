@@ -22,11 +22,23 @@ export interface FraudSignals {
   duplicateFlag: boolean;
   historyAlertType?: "previously_seen" | "known_fraud_pattern";
   credibilityDiscrepancies: string[];
+  /**
+   * Reuse audit, 2026-08-28 (Vlad's ask: "see if we can connect and reuse
+   * some of the outputs" across the AI pipeline files) — this used to only
+   * ever carry credibilityDiscrepancies, a thin string summary. When an
+   * assessFraudRisk.ts check has actually run for this candidate, its
+   * richer signals[] (patternType + the specific explanation, e.g. "8 years
+   * claimed since a 2020 graduation") should feed interview questions too,
+   * so a generated question can target the exact flagged claim instead of
+   * a generic credibility row. Optional — most candidates never had a
+   * fraud-risk check run (manual, gated on score >= 75).
+   */
+  fraudRiskSignals?: { patternType: string; explanation: string }[];
 }
 
 /** True if there's anything worth asking about — callers should omit fraudSignals entirely otherwise. */
 export function hasFraudSignal(s: FraudSignals): boolean {
-  return s.duplicateFlag || s.historyAlertType != null || s.credibilityDiscrepancies.length > 0;
+  return s.duplicateFlag || s.historyAlertType != null || s.credibilityDiscrepancies.length > 0 || (s.fraudRiskSignals?.length ?? 0) > 0;
 }
 
 function buildFraudBlock(s: FraudSignals): string {
@@ -35,6 +47,7 @@ function buildFraudBlock(s: FraudSignals): string {
   if (s.historyAlertType === "known_fraud_pattern") lines.push("- This content pattern has a confirmed fraud history in another role.");
   else if (s.historyAlertType === "previously_seen") lines.push("- This content pattern was previously submitted to a different role.");
   for (const d of s.credibilityDiscrepancies) lines.push(`- Credibility check discrepancy: ${d}`);
+  for (const f of s.fraudRiskSignals ?? []) lines.push(`- Fraud risk signal (${f.patternType}): ${f.explanation}`);
   return lines.join("\n");
 }
 

@@ -4,6 +4,8 @@ import { listFraudCalibrationExamples } from "@/lib/fraudCalibrationExamples";
 import { extractResumeText } from "@/lib/parseResume";
 import { getScreeningResume } from "@/lib/screenings";
 import { canAccessScreening, getAuthUser } from "@/lib/auth";
+import { getSupabaseClient } from "@/lib/supabase";
+import type { CredibilityAssessment } from "@/lib/types";
 
 // Manual-trigger only, capped at 60s — Vlad's ask, 2026-07-29: fraud risk
 // checking must never run inside the batch-screening path (a slow/failed
@@ -37,9 +39,30 @@ export async function POST(request: NextRequest) {
 
   const calibrationExamples = await listFraudCalibrationExamples();
 
+  // Reuse audit, 2026-08-28 — this check used to run completely blind to
+  // what the initial screening and any prior credibility check already
+  // found (see buildKnownConcernsBlock/buildCredibilityContextBlock's doc
+  // comments in lib/assessFraudRisk.ts). Best-effort: a failed fetch here
+  // degrades to the old blind behavior rather than failing the whole check.
+  let concerns: string[] | undefined;
+  let strengths: string[] | undefined;
+  let credibility: CredibilityAssessment | undefined;
+  try {
+    const { data: row } = await getSupabaseClient()
+      .from("screenings")
+      .select("concerns, strengths, credibility")
+      .eq("id", screeningId)
+      .single<{ concerns: string[] | null; strengths: string[] | null; credibility: CredibilityAssessment | null }>();
+    concerns = row?.concerns ?? undefined;
+    strengths = row?.strengths ?? undefined;
+    credibility = row?.credibility ?? undefined;
+  } catch {
+    // Degrade gracefully — see comment above.
+  }
+
   let assessment;
   try {
-    assessment = await assessFraudRisk({ resumeText, roleContext, calibrationExamples });
+    assessment = await assessFraudRisk({ resumeText, roleContext, calibrationExamples, concerns, strengths, credibility });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Fraud risk check failed" },

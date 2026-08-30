@@ -12,7 +12,6 @@ import { RecommendationBadge } from "./RecommendationBadge";
 import { ScoreBadge } from "./ScoreBadge";
 import { ScoringLoader } from "./ScoringLoader";
 import { StatusStageControl } from "./StatusStageControl";
-import { TrajectoryRenderer } from "./TrajectoryRenderer";
 import { ActivityTimeline } from "./ActivityTimeline";
 import SourceIcon from "./SourceIcon";
 import { getSourceType } from "@/lib/sourceType";
@@ -21,6 +20,11 @@ import { Gate1ChecklistBreakdown } from "./Gate1ChecklistBreakdown";
 import { isTargetCompanyGateResult } from "@/lib/isTargetCompanyGateResult";
 import type { JDAnalysis } from "@/lib/types";
 import type { ScreeningAction } from "@/lib/screeningActions";
+import { ScreeningStepper } from "./ScreeningStepper";
+import { AttributePills } from "./AttributePills";
+import { ExperienceHighlightsList } from "./ExperienceHighlightsList";
+import { buildScreeningSteps, buildAttributePills } from "@/lib/reasonedSignalPills";
+import { buildExperienceHighlights } from "@/lib/experienceHighlights";
 
 // ── Main ResultCard ─────────────────────────────────────────────────────────
 
@@ -209,10 +213,6 @@ export function ResultCard({
   const [noteSaveState, setNoteSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [showNameCompare, setShowNameCompare] = useState(false);
   const [nameCompareAssessment, setNameCompareAssessment] = useState<CredibilityAssessment | null>(null);
-  // Target company chip, redesigned 2026-08-27 (Vlad's ask: "same logic [as]
-  // when I do a mouse over the score - a tab shows up") — see the chip's own
-  // comment below.
-  const [targetCompanyHovered, setTargetCompanyHovered] = useState(false);
   const [checkingGate, setCheckingGate] = useState(false);
   const [gateChecked, setGateChecked] = useState(false);
   const [checkingFit, setCheckingFit] = useState(false);
@@ -410,46 +410,6 @@ export function ResultCard({
                 {result.historyAlertType === "known_fraud_pattern" ? "Known fraud pattern" : "Previously seen"}
               </Link>
             )}
-            {/* Target company chip, 2026-08-07 (Vlad's ask) — only shown when
-                a match was actually found (see lib/targetCompanyBoost.ts); an
-                empty array (checked, no match) or undefined (no target
-                companies configured) both render nothing, matching this
-                row's "only surface a signal, not a reassurance" convention
-                (same as the duplicate/history badges above).
-                Redesigned 2026-08-27 (Vlad's ask: "same logic [as] when I do
-                a mouse over the score - a tab shows up") — exact mirror of
-                ScoreBadge.tsx's hover-tooltip pattern (onMouseEnter/
-                onMouseLeave + an absolutely-positioned floating panel)
-                instead of the previous click-to-expand pill row. */}
-            {result.targetCompanyMatches && result.targetCompanyMatches.length > 0 && (
-              <div
-                className="relative inline-flex shrink-0"
-                onMouseEnter={() => setTargetCompanyHovered(true)}
-                onMouseLeave={() => setTargetCompanyHovered(false)}
-              >
-                <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
-                  Target company
-                </span>
-                {targetCompanyHovered && (
-                  <div
-                    role="tooltip"
-                    className="absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-2.5 text-left text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
-                  >
-                    <p className="mb-1.5 font-semibold text-zinc-500 dark:text-zinc-400">Score boosted +5 for matching:</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {result.targetCompanyMatches.map((c) => (
-                        <span
-                          key={c}
-                          className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-500/10 dark:text-emerald-300"
-                        >
-                          {c}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
             {/* JD checklist net-delta badge REMOVED 2026-08-18 (Vlad, direct
                 card-density feedback: "don't show the checklist at all" —
                 asked specifically whether that meant dropping just the
@@ -459,6 +419,10 @@ export function ResultCard({
                 2026-08-17 checklist-scoring entry) — this is purely about
                 not calling it out as a separate visible line on the card. */}
             <SourceIcon type={getSourceType(result)} agencyName={result.agencyName} referrerName={result.referrerName} contentIsLinkedIn={result.resumeIsLinkedIn} />
+            {/* Target company chip REMOVED from here 2026-08-28 — folded into
+                the new reasoned attribute-pill row (buildAttributePills),
+                which sits right below the status control. See that pill's
+                own tone/reason instead of a hover tooltip here. */}
             {/* Visible agency name, added 2026-07-27 (Vlad's ask: "also show
                 agency name when it's given") — previously only surfaced as a
                 hover tooltip via SourceIcon's title (sourceLabelWithDetail),
@@ -500,28 +464,13 @@ export function ResultCard({
               />
             </div>
           )}
-          {(result.mustHaveScore !== undefined || result.niceToHaveScore !== undefined) && (
-            <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {/* Keyword match counts ("X/Y kw") removed 2026-07-27, Vlad's
-                  ask — the actual keyword highlighting stays completely
-                  intact, it lives entirely in the `highlights` prop passed
-                  to TrajectoryRenderer below (mustSkills/niceSkills), which
-                  this badge never fed into or gated — it was purely an extra
-                  numeric label alongside it. mustMatched/niceMatched (the
-                  removed counts) and the now-unused countKeywordMatches
-                  import were deleted outright rather than left as dead code. */}
-              {result.mustHaveScore !== undefined && (
-                <span className={`inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 ${solo ? "text-sm" : "text-xs"}`}>
-                  Must-have {result.mustHaveScore}
-                </span>
-              )}
-              {result.niceToHaveScore !== undefined && (
-                <span className={`inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400 ${solo ? "text-sm" : "text-xs"}`}>
-                  Nice-to-have {result.niceToHaveScore}
-                </span>
-              )}
-            </div>
-          )}
+          {/* Bare "Must-have X / Nice-to-have Y" badges REMOVED 2026-08-28 —
+              replaced by the reasoned "Domain fit" attribute pill below,
+              same underlying mustHaveScore, reasoned instead of raw (Vlad's
+              ask: "not just check list looking, but having some reason").
+              The keyword highlighting itself is untouched — still lives
+              entirely in the `highlights` prop passed to TrajectoryRenderer
+              inside ExperienceHighlightsList below. */}
           {/* Cross-project NAME match, added 2026-07-27 (Vlad: "just
               mentions that this person was also screened in a different
               project"). Repositioned twice same day per Vlad's follow-ups:
@@ -647,149 +596,13 @@ export function ResultCard({
         </p>
       )}
 
-      {/* Already-in-project mention, added 2026-07-28 (Vlad's ask), redesigned
-          2026-07-30 into a plain line per candidate instead of a boxed
-          paragraph: "these projects were excluded from scoring entirely
-          (free name-match pre-check, no Claude call spent) since there's
-          nothing to suggest where the candidate already exists — just say
-          so." Pulled out of the violet fit-suggestion box below (that box is
-          now only about the actionable "check other roles" flow) and shown
-          independently of fitChecked/fitSuggestion, since it can resolve
-          from either the gate call or the full check. Links straight to the
-          matched screening's own candidate page and shows its score, now
-          that alreadyInProjects carries both (see AlreadyInProject above). */}
-      {eligibleForFitCheck && !transferredTo && hasOtherActiveProjects && alreadyInProjects.length > 0 && (
-        <div className="mt-3 flex flex-col gap-1">
-          {alreadyInProjects.map((p) => (
-            <p key={p.projectId} className="text-xs text-zinc-500 dark:text-zinc-400">
-              Also screened in{" "}
-              <Link
-                // returnTo, 2026-08-11 (Vlad's ask, same fix as the matching
-                // link in app/projects/[id]/page.tsx) — without this,
-                // /candidates/[id]'s Back button falls back to the MATCHED
-                // screening's own project, not wherever this ResultCard was
-                // actually being viewed from (Screen tab results, a batch
-                // page, or the standalone candidate page itself).
-                href={`/candidates/${p.screeningId}${
-                  typeof window !== "undefined"
-                    ? `?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
-                    : ""
-                }`}
-                className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
-              >
-                {p.projectName}
-              </Link>
-              {" "}— Scored {p.score}
-            </p>
-          ))}
-        </div>
-      )}
-
-      {/* Cross-project fit — surfaced immediately, right before Career Trajectory,
-          so a recruiter sees it before reading anything else. Every candidate is
-          already saved regardless of score; this is purely about whether a
-          stronger-fitting open role exists elsewhere. A cheap Claude gate decides
-          whether to auto-fire the real check; manual link otherwise. */}
-      {eligibleForFitCheck && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
-        <div className="mt-3 flex flex-col gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 dark:border-violet-500/30 dark:bg-violet-500/10">
-          {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
-          {!fitError && (checkingGate || checkingFit) && (
-            <div className="flex items-center gap-2 text-xs text-violet-500 dark:text-violet-400">
-              <ScoringLoader className="h-4 w-14" strokeWidth={9} stroke="currentColor" />
-              Checking other active roles…
-            </div>
-          )}
-          {!fitError && !checkingGate && !checkingFit && fitChecked && (
-            // Layout bug fixed 2026-07-20 (Vlad shared a screenshot): this row
-            // used to be a plain `flex items-center justify-between` with no
-            // `min-w-0` on the text and no responsive stacking — on a narrow
-            // viewport neither the paragraph nor the "Transfer to X" button had
-            // room to actually lay out, so both got squeezed into unreadable,
-            // overlapping-looking narrow columns instead of wrapping properly.
-            // Stacking vertically below `sm:` (text on top, button full-width
-            // underneath) and giving the paragraph `min-w-0` so it can wrap
-            // within its own row once side-by-side again at `sm:` and up.
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-              <p className="min-w-0 text-xs text-zinc-600 dark:text-zinc-300">
-                {fitSuggestion ? (
-                  <>
-                    Stronger fit for <span className="font-semibold text-violet-600 dark:text-violet-400">{fitSuggestion.projectName}</span> — scored {fitSuggestion.score} there
-                  </>
-                ) : (
-                  "No stronger fit found among your other active roles."
-                )}
-              </p>
-              {fitSuggestion && onTransferToProject && (
-                <div className="flex items-center gap-2 sm:shrink-0">
-                  {transferError && <span className="text-xs text-rose-500">{transferError}</span>}
-                  <button
-                    type="button"
-                    onClick={handleTransfer}
-                    disabled={transferring}
-                    className="flex w-full shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
-                  >
-                    {transferring ? (
-                      <>
-                        <ScoringLoader className="h-4 w-14" strokeWidth={9} stroke="currentColor" />
-                        Transferring…
-                      </>
-                    ) : (
-                      `Transfer to ${fitSuggestion.projectName}`
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          {!fitError && !checkingGate && !checkingFit && !fitChecked && (gateChecked || !onCheckCrossProjectPromise) && (
-            <button
-              type="button"
-              onClick={handleFindBetterFit}
-              className="text-xs font-medium text-violet-500 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
-            >
-              Check other active roles
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Archive Fits role-type suggestion, 2026-08-20 (Vlad's ask: connect
-          the open-role fit-suggestion above with the older, JD-independent
-          suggested_role_fits mechanism, on the same card). Genuinely
-          different signal from the box above — that one only ever names a
-          project this recruiter is CURRENTLY hiring for; this one is a bare
-          role/title suggestion based on the candidate's own background,
-          shown even when nothing open matches. Real gap fixed alongside
-          this: suggestedRoleFits already existed on every screening (Archive
-          Fits, 2026-07-30) but was never actually rendered anywhere as a
-          readable list before now — it only ever fed the separate Archive
-          Fits matching queue behind the scenes. */}
-      {suggestedRoleFits && suggestedRoleFits.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-xs dark:border-zinc-800 dark:bg-zinc-800/40">
-          <span className="text-zinc-500 dark:text-zinc-400">Might also fit:</span>
-          {suggestedRoleFits.map((roleFit) => (
-            <span
-              key={roleFit}
-              className="rounded-full bg-zinc-200 px-2 py-0.5 font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200"
-            >
-              {roleFit}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Transferred confirmation — replaces the fit-suggestion block once a transfer succeeds */}
-      {transferredTo && (
-        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
-          Transferred to{" "}
-          <Link
-            href={`/projects/${transferredTo.projectId}?tab=pipeline`}
-            className="font-semibold underline underline-offset-2 hover:text-emerald-800 dark:hover:text-emerald-300"
-          >
-            {transferredTo.projectName}
-          </Link>
-        </div>
-      )}
+      {/* Reasoned screening-progress stepper + attribute pills, 2026-08-28
+          (Vlad's ask: "not just check list looking, but having some
+          reason" — each gate/agent's own output, curated into what's worth
+          showing). Sits right after the Tier-0 alerts above, above Personal
+          details, per Vlad's explicit placement call. */}
+      <ScreeningStepper steps={buildScreeningSteps(result)} />
+      <AttributePills pills={buildAttributePills(result)} />
 
       {/* Personal details, 2026-08-26 (Vlad's ask: "pull and show [GitHub
           links] during the initial screening... up top nicely before the
@@ -818,16 +631,173 @@ export function ResultCard({
         </div>
       )}
 
-      {trajectoryText && (
-        <div className="mt-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Career trajectory
+      {/* Experience at a glance — bullets from buildExperienceHighlights
+          (deterministic, reused from data already on `result` — no new AI
+          call), full narrative collapsed below by default. Replaces the old
+          always-expanded "Career trajectory" paragraph, 2026-08-28. */}
+      <ExperienceHighlightsList
+        highlights={buildExperienceHighlights(result)}
+        trajectoryText={trajectoryText}
+        className={solo ? "text-base" : "text-sm"}
+        highlightsProp={mustSkills.length || niceSkills.length ? { must: mustSkills, nice: niceSkills } : undefined}
+      />
+
+      {/* Other opportunities — merged 2026-08-28 (Vlad's ask: fold the three
+          previously-separate boxes below into one shared section) from what
+          used to be three independently-styled blocks: already-in-project
+          mentions, the cross-project "check other roles" box, and Archive
+          Fits' suggested-role-title chips. Every inner conditional, handler,
+          and comment below is unchanged from those three original blocks —
+          this is a wrapper-and-heading change only, not a logic change. */}
+      {(
+        // Mirrors each inner block's own top-level condition, OR'd together,
+        // so the shared wrapper never renders an empty shell. See each
+        // inner block below for the authoritative per-block condition.
+        (eligibleForFitCheck && !transferredTo && hasOtherActiveProjects) ||
+        (suggestedRoleFits && suggestedRoleFits.length > 0) ||
+        Boolean(transferredTo)
+      ) && (
+        <div className="mt-3 flex flex-col gap-2.5 rounded-xl border border-violet-200 bg-violet-50/40 px-4 py-3 dark:border-violet-500/20 dark:bg-violet-500/5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-violet-500 dark:text-violet-400">
+            Other opportunities
           </p>
-          <TrajectoryRenderer
-            text={trajectoryText}
-            className={solo ? "text-base" : "text-sm"}
-            highlights={mustSkills.length || niceSkills.length ? { must: mustSkills, nice: niceSkills } : undefined}
-          />
+
+          {/* Already-in-project mention, added 2026-07-28 (Vlad's ask), redesigned
+              2026-07-30 into a plain line per candidate instead of a boxed
+              paragraph: "these projects were excluded from scoring entirely
+              (free name-match pre-check, no Claude call spent) since there's
+              nothing to suggest where the candidate already exists — just say
+              so." Shown independently of fitChecked/fitSuggestion, since it can
+              resolve from either the gate call or the full check. Links straight
+              to the matched screening's own candidate page and shows its score,
+              now that alreadyInProjects carries both (see AlreadyInProject above). */}
+          {eligibleForFitCheck && !transferredTo && hasOtherActiveProjects && alreadyInProjects.length > 0 && (
+            <div className="flex flex-col gap-1">
+              {alreadyInProjects.map((p) => (
+                <p key={p.projectId} className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Also screened in{" "}
+                  <Link
+                    // returnTo, 2026-08-11 (Vlad's ask, same fix as the matching
+                    // link in app/projects/[id]/page.tsx) — without this,
+                    // /candidates/[id]'s Back button falls back to the MATCHED
+                    // screening's own project, not wherever this ResultCard was
+                    // actually being viewed from (Screen tab results, a batch
+                    // page, or the standalone candidate page itself).
+                    href={`/candidates/${p.screeningId}${
+                      typeof window !== "undefined"
+                        ? `?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`
+                        : ""
+                    }`}
+                    className="font-medium text-violet-600 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                  >
+                    {p.projectName}
+                  </Link>
+                  {" "}— Scored {p.score}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {/* Cross-project fit — every candidate is already saved regardless of
+              score; this is purely about whether a stronger-fitting open role
+              exists elsewhere. A cheap Claude gate decides whether to auto-fire
+              the real check; manual link otherwise. */}
+          {eligibleForFitCheck && !transferredTo && onFindBetterFit && hasOtherActiveProjects && (
+            <div className="flex flex-col gap-1.5">
+              {fitError && <p className="text-xs text-rose-500">{fitError}</p>}
+              {!fitError && (checkingGate || checkingFit) && (
+                <div className="flex items-center gap-2 text-xs text-violet-500 dark:text-violet-400">
+                  <ScoringLoader className="h-4 w-14" strokeWidth={9} stroke="currentColor" />
+                  Checking other active roles…
+                </div>
+              )}
+              {!fitError && !checkingGate && !checkingFit && fitChecked && (
+                // Layout bug fixed 2026-07-20 (Vlad shared a screenshot): this row
+                // used to be a plain `flex items-center justify-between` with no
+                // `min-w-0` on the text and no responsive stacking — on a narrow
+                // viewport neither the paragraph nor the "Transfer to X" button had
+                // room to actually lay out, so both got squeezed into unreadable,
+                // overlapping-looking narrow columns instead of wrapping properly.
+                // Stacking vertically below `sm:` (text on top, button full-width
+                // underneath) and giving the paragraph `min-w-0` so it can wrap
+                // within its own row once side-by-side again at `sm:` and up.
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                  <p className="min-w-0 text-xs text-zinc-600 dark:text-zinc-300">
+                    {fitSuggestion ? (
+                      <>
+                        Stronger fit for <span className="font-semibold text-violet-600 dark:text-violet-400">{fitSuggestion.projectName}</span> — scored {fitSuggestion.score} there
+                      </>
+                    ) : (
+                      "No stronger fit found among your other active roles."
+                    )}
+                  </p>
+                  {fitSuggestion && onTransferToProject && (
+                    <div className="flex items-center gap-2 sm:shrink-0">
+                      {transferError && <span className="text-xs text-rose-500">{transferError}</span>}
+                      <button
+                        type="button"
+                        onClick={handleTransfer}
+                        disabled={transferring}
+                        className="flex w-full shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                      >
+                        {transferring ? (
+                          <>
+                            <ScoringLoader className="h-4 w-14" strokeWidth={9} stroke="currentColor" />
+                            Transferring…
+                          </>
+                        ) : (
+                          `Transfer to ${fitSuggestion.projectName}`
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!fitError && !checkingGate && !checkingFit && !fitChecked && (gateChecked || !onCheckCrossProjectPromise) && (
+                <button
+                  type="button"
+                  onClick={handleFindBetterFit}
+                  className="text-xs font-medium text-violet-500 underline decoration-dotted underline-offset-2 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300"
+                >
+                  Check other active roles
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Archive Fits role-type suggestion, 2026-08-20 (Vlad's ask: connect
+              the open-role fit-suggestion above with the older, JD-independent
+              suggested_role_fits mechanism, on the same card). Genuinely
+              different signal from the box above — that one only ever names a
+              project this recruiter is CURRENTLY hiring for; this one is a bare
+              role/title suggestion based on the candidate's own background,
+              shown even when nothing open matches. */}
+          {suggestedRoleFits && suggestedRoleFits.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="text-zinc-500 dark:text-zinc-400">Might also fit:</span>
+              {suggestedRoleFits.map((roleFit) => (
+                <span
+                  key={roleFit}
+                  className="rounded-full bg-zinc-200 px-2 py-0.5 font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200"
+                >
+                  {roleFit}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Transferred confirmation — replaces the fit-suggestion block once a transfer succeeds */}
+          {transferredTo && (
+            <p className="text-xs text-emerald-700 dark:text-emerald-400">
+              Transferred to{" "}
+              <Link
+                href={`/projects/${transferredTo.projectId}?tab=pipeline`}
+                className="font-semibold underline underline-offset-2 hover:text-emerald-800 dark:hover:text-emerald-300"
+              >
+                {transferredTo.projectName}
+              </Link>
+            </p>
+          )}
         </div>
       )}
 
