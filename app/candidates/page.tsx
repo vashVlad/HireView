@@ -8,7 +8,11 @@ import { CalibrationButtons } from "@/components/CalibrationButtons";
 import { CrossReferenceChecker } from "@/components/CredibilityChecker";
 import { FraudRiskChecker } from "@/components/FraudRiskChecker";
 import { InsightList } from "@/components/InsightList";
-import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
+import { ScreeningStepper } from "@/components/ScreeningStepper";
+import { AttributePills } from "@/components/AttributePills";
+import { ExperienceHighlightsList } from "@/components/ExperienceHighlightsList";
+import { buildScreeningSteps, buildAttributePills } from "@/lib/reasonedSignalPills";
+import { buildExperienceHighlights } from "@/lib/experienceHighlights";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { SiteHeader } from "@/components/SiteHeader";
 import { PageHeader } from "@/components/PageHeader";
@@ -544,6 +548,13 @@ function CandidateCard({
       {expanded && (
         <div className="flex flex-col gap-4 border-t border-zinc-100 px-5 py-4 dark:border-zinc-800">
 
+          {/* Reasoned screening-progress stepper + attribute pills,
+              2026-08-28 (task #98) — same components/functions as
+              ResultCard.tsx and the Pipeline tab card, so this page's own
+              third independent copy of the card markup doesn't drift. */}
+          <ScreeningStepper steps={buildScreeningSteps(s)} />
+          <AttributePills pills={buildAttributePills(s)} />
+
           {/* ── Career story ─────────────────────────────────────────── */}
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -557,7 +568,12 @@ function CandidateCard({
                 );
               })()}
             </div>
-            <TrajectoryRenderer text={s.careerTrajectory ?? s.summary} className="text-sm" />
+            <ExperienceHighlightsList
+              highlights={buildExperienceHighlights(s)}
+              trajectoryText={s.careerTrajectory ?? s.summary}
+              className="text-sm"
+              hideLabel
+            />
             {credibility && (
               <div className="mt-2.5 flex flex-col gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
                 <p className="text-xs text-zinc-400 dark:text-zinc-500">
@@ -625,16 +641,12 @@ function CandidateCard({
           )}
 
           {/* ── Assessment ────────────────────────────────────────────── */}
-          {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
-            <div className="flex items-center gap-1.5">
-              {s.mustHaveScore !== undefined && (
-                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">Must-have {s.mustHaveScore}</span>
-              )}
-              {s.niceToHaveScore !== undefined && (
-                <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400">Nice-to-have {s.niceToHaveScore}</span>
-              )}
-            </div>
-          )}
+          {/* Bare "Must-have X / Nice-to-have Y" badges REMOVED 2026-08-28
+              (task #98) — already covered by the reasoned "Domain fit"
+              attribute pill at the top of this expanded detail, same
+              underlying mustHaveScore. Kept as its own comment block (not
+              deleted silently) since a future reader might otherwise wonder
+              where this section went. */}
 
           <InsightList label="Strengths" items={s.strengths} variant="positive" />
           <InsightList label="Concerns" items={s.concerns} variant="warning" screeningId={s.id} />

@@ -15,10 +15,14 @@ import { InsightList } from "@/components/InsightList";
 import { RejectionCard } from "@/components/RejectionCard";
 import { ResultCard, type FitSuggestion, type AlreadyInProject } from "@/components/ResultCard";
 import { Gate1ChecklistBreakdown } from "@/components/Gate1ChecklistBreakdown";
+import { ScreeningStepper } from "@/components/ScreeningStepper";
+import { AttributePills } from "@/components/AttributePills";
+import { ExperienceHighlightsList } from "@/components/ExperienceHighlightsList";
+import { buildScreeningSteps, buildAttributePills } from "@/lib/reasonedSignalPills";
+import { buildExperienceHighlights } from "@/lib/experienceHighlights";
 import { isGate1OnlyResult } from "@/lib/isGate1OnlyResult";
 import { isTargetCompanyGateResult } from "@/lib/isTargetCompanyGateResult";
 import { DEFAULT_SCORE_THRESHOLD } from "@/lib/scoreThreshold";
-import { TrajectoryRenderer } from "@/components/TrajectoryRenderer";
 import { ResumeUploader } from "@/components/ResumeUploader";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
@@ -2654,7 +2658,7 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                         <div
                           role="tooltip"
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white p-2.5 text-left text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+                          className="absolute left-0 top-full z-20 mt-2 w-56 rounded-lg border border-zinc-200 bg-white p-2.5 text-left text-xs shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
                         >
                           <p className="mb-1.5 font-semibold text-zinc-500 dark:text-zinc-400">Score boosted +5 for matching:</p>
                           <div className="flex flex-wrap gap-1.5">
@@ -2945,6 +2949,16 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                   </div>
                 )}
 
+                {/* Reasoned screening-progress stepper + attribute pills,
+                    2026-08-28 (task #98) — same components/functions
+                    ResultCard.tsx uses, same placement (above Personal
+                    details), so this tab's own hand-rolled card markup
+                    doesn't drift from the main one the way Gate 1/target-
+                    company/Personal-details blocks above already had to be
+                    re-added here once each. */}
+                <ScreeningStepper steps={buildScreeningSteps(s)} />
+                <AttributePills pills={buildAttributePills(s)} />
+
                 {/* ── Personal details ──────────────────────────────────── */}
                 {/* Added 2026-08-26 (Vlad: "LinkedIn doesn't show up anywhere
                     on the result card in the pipeline, GitHub only shows
@@ -2988,7 +3002,17 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       );
                     })()}
                   </div>
-                  <TrajectoryRenderer text={s.careerTrajectory ?? s.summary} className="text-sm" />
+                  {/* Task #98, 2026-08-28 — mirrors ResultCard.tsx's own
+                      swap from a bare TrajectoryRenderer paragraph to
+                      bullets + collapsible full text. hideLabel since the
+                      "Career story" header right above already serves as
+                      this section's label. */}
+                  <ExperienceHighlightsList
+                    highlights={buildExperienceHighlights(s)}
+                    trajectoryText={s.careerTrajectory ?? s.summary}
+                    className="text-sm"
+                    hideLabel
+                  />
                   {credibilityMap[s.id] && (
                     <div className="mt-2.5 flex flex-col gap-1 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
                       <p className="text-xs text-zinc-400 dark:text-zinc-500">
@@ -3059,18 +3083,6 @@ function PipelineTab({ screenings: initialScreenings, projectId, stagesMap, onSt
                       }
                     }}
                   />
-                )}
-
-                {/* ── Assessment ────────────────────────────────────────── */}
-                {(s.mustHaveScore !== undefined || s.niceToHaveScore !== undefined) && (
-                  <div className="flex items-center gap-1.5">
-                    {s.mustHaveScore !== undefined && (
-                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">Must-have {s.mustHaveScore}</span>
-                    )}
-                    {s.niceToHaveScore !== undefined && (
-                      <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-400">Nice-to-have {s.niceToHaveScore}</span>
-                    )}
-                  </div>
                 )}
 
                 <div className="flex flex-col gap-3">
